@@ -10,10 +10,15 @@ if (!window.homeActions) {
       r.readAsDataURL(file); e.target.value = '';
     },
     updateName: (val) => { store.personas[0].name = val || 'Eve'; window.render(); },
-    // 🌟 新增：音乐播放器控制神经
+    // 🌟 新增：音乐播放器控制神经 (带强力错误反馈)
     playMusic: () => {
       if (window.keepAliveAudio) {
-        window.keepAliveAudio.play().then(() => window.render()).catch(e=>console.log(e));
+        window.keepAliveAudio.play().then(() => {
+          window.render(); // 播放成功，刷新UI变成暂停键
+        }).catch(e => {
+          console.log("播放失败拦截:", e);
+          window.actions.showToast('需要先在聊天页面随便点几下，解锁苹果音频权限哦！');
+        });
       }
     },
     pauseMusic: () => {
@@ -165,7 +170,11 @@ export function renderHomeApp(store) {
               </div>
            </div>
         </div>
+      </div>
 
+      <div class="flex justify-center items-center space-x-2 mb-2 ${isDark ? 'text-white' : 'text-gray-800'}">
+         <div id="home-dot-0" class="w-1.5 h-1.5 rounded-full bg-current transition-opacity duration-300" style="opacity: 1;"></div>
+         <div id="home-dot-1" class="w-1.5 h-1.5 rounded-full bg-current transition-opacity duration-300" style="opacity: 0.3;"></div>
       </div>
 
       <div class="mx-4 mb-6 px-3 py-3 ${isDark?'bg-black/10 border-black/10':'bg-white/10 border-white/20'} backdrop-blur-xl rounded-[28px] flex justify-between items-center shadow-sm border shrink-0 z-20">

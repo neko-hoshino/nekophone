@@ -2953,7 +2953,6 @@ const checkAutoMsg = async () => {
     const lastMsg = chat.messages[chat.messages.length - 1];
     if (lastMsg.isHidden) continue; 
     
-    // 🌟 修复：原来写错成了 autoMsgTime，导致默认要等 60 分钟！
     const coldMinutes = char.autoMsgInterval || 5; 
     const lastTime = new Date(lastMsg.id); 
     const now = new Date();
@@ -2961,44 +2960,20 @@ const checkAutoMsg = async () => {
 
     // 当冷落时间达标，且当前没在打字时触发
     if (diffMinutes >= coldMinutes && !wxState.isTyping) {
-       chat.messages.push({
-         id: Date.now(),
-         sender: 'System',
-         text: `(系统自动触发：时间已过去很久，请主动寻找Eve搭话。⚠️警告：1. 必须遵守人设；2. 句子稍微长一点就必须用换行符拆分连发；3. 严禁输出时间标签或动作括号；4. 只能使用已授权词典内的表情包！)`,
-         isMe: true, isHidden: true, msgType: 'system'
-       });
-
-       try {
-         const { callLLM } = await import('../utils/llm.js');
-         const replyText = await callLLM(char.id, chat.messages, false);
-         
-         chat.messages.push({
-           id: Date.now(), sender: char.name, text: replyText, isMe: false, msgType: 'text', time: getNowTime()
-         });
-         
-         // 🌟 精简后的通知逻辑（只保留这一个）
-         const isLookingAtChat = store.currentApp === 'wechat' && wxState.view === 'chatRoom' && wxState.activeChatId === char.id;
-         if (!isLookingAtChat && window.actions.notify) {
-            window.actions.notify(char.name, replyText, char.avatar);
-         }
-         
-         if (wxState.view === 'chatRoom' && wxState.activeChatId === char.id) {
-           window.render();
-           setTimeout(() => window.wxActions.scrollToBottom(), 100);
-         } else { window.render(); }
-       } catch(e) { chat.messages.pop(); }
+       console.log("🐕 巡逻犬出动！调用全局 getReply");
+       // 🌟 核心神级修复：直接调用现成的 getReply！
+       // 这样它就会自动拥有：完美的换行拆分、表情包解析、语音生成、以及真实的系统弹窗！
+       window.wxActions.getReply(true, char.id);
     }
   }
 };
 
-// 1. 常规的后台静默巡逻（只要系统没冻结它，就每分钟执行一次）
+// 1. 常规的后台静默巡逻
 setInterval(checkAutoMsg, 60000);
 
-// 🌟 2. 核心魔法：iOS 唤醒侦测！
-// 当你切到微信/锁屏，过了 2 小时后切回这个网页，页面从“隐藏”变成“可见”的一瞬间，立刻强行执行一次时间检查！
+// 2. 核心魔法：iOS 唤醒侦测！
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    console.log("🌞 页面苏醒！启动时光机检查...");
     checkAutoMsg();
   }
 });
