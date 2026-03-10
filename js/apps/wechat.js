@@ -1517,6 +1517,12 @@ window.wxActions = {
            new Audio(audioUrl).play().catch(()=>{});
          } catch(e) {}
       }
+      // 🌟 修复：这里是漏掉的弹窗通知调用！
+      const isLookingAtChat = store.currentApp === 'wechat' && wxState.view === 'chatRoom' && wxState.activeChatId === char.id;
+      if (!isLookingAtChat && window.actions.notify) {
+        const notifyText = msgsToPush.map(m => m.msgType === 'text' ? m.text : `[${m.msgType}]`).join(' ');
+        window.actions.notify(char.name, notifyText, char.avatar);
+      }
 
       if (delayedActions.includes('accept_transfer')) {
         const lastTransfer = chat.messages.slice().reverse().find(m => m.msgType === 'transfer' && m.isMe && m.transferState === 'pending');
@@ -2946,7 +2952,8 @@ const checkAutoMsg = async () => {
     const lastMsg = chat.messages[chat.messages.length - 1];
     if (lastMsg.isHidden) continue; 
     
-    const coldMinutes = char.autoMsgTime || 60;
+    // 🌟 修复：原来写错成了 autoMsgTime，导致默认要等 60 分钟！
+    const coldMinutes = char.autoMsgInterval || 5; 
     const lastTime = new Date(lastMsg.id); 
     const now = new Date();
     const diffMinutes = (now - lastTime) / 1000 / 60;
@@ -2968,14 +2975,9 @@ const checkAutoMsg = async () => {
            id: Date.now(), sender: char.name, text: replyText, isMe: false, msgType: 'text', time: getNowTime()
          });
          
-         // 如果你没在看这个角色的聊天界面，就弹出顶部通知！
+         // 🌟 精简后的通知逻辑（只保留这一个）
          const isLookingAtChat = store.currentApp === 'wechat' && wxState.view === 'chatRoom' && wxState.activeChatId === char.id;
          if (!isLookingAtChat && window.actions.notify) {
-            window.actions.notify(char.name, replyText, char.avatar);
-         }
-
-         // 🌟 无条件触发通知 (配合 Bark 即可实现 iOS 杀后台真推送)
-         if (window.actions.notify) {
             window.actions.notify(char.name, replyText, char.avatar);
          }
          

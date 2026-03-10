@@ -237,27 +237,25 @@ window.onload = () => {
   setInterval(updateTime, 1000); 
   render(); 
 };
-// ================= 无声音频后台保活引擎 (无限循环版) =================
+// ================= 🌟 终极黑魔法：无声音频后台保活引擎 =================
 const keepAliveAudio = new Audio();
-// 极微小的 0.1秒 空白静音 WAV 音频 Base64
-keepAliveAudio.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+// 🌟 换成了一个真实的线上无声 MP3 链接，苹果绝对承认它是一首歌！
+keepAliveAudio.src = "https://cdn.pixabay.com/download/audio/2022/03/15/audio_787593c662.mp3";
 keepAliveAudio.loop = true;
+keepAliveAudio.setAttribute('playsinline', 'true'); 
+keepAliveAudio.setAttribute('webkit-playsinline', 'true');
 
-// 🌟 核心破解：在用户第一次点击屏幕时，直接让这首无声的歌开始无限循环！绝对不暂停！
-document.body.addEventListener('click', () => {
+document.addEventListener('touchstart', () => {
     if (keepAliveAudio.paused) {
         keepAliveAudio.play().then(() => {
-            console.log("🎶 无声保活音乐已永久启动，iOS 绝不会杀此后台！");
+            console.log("🎶 保活音乐启动！");
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.metadata = new MediaMetadata({
+                    title: '小手机系统运行中',
+                    artist: '请勿关闭，以保持消息后台接收',
+                });
+            }
         }).catch(e => console.log("保活音乐启动被拦截:", e));
     }
 }, { once: true });
-
-// 我们不再需要在切后台时去触发 play() 了，因为它一直在悄悄播放。
-document.addEventListener('visibilitychange', () => {
-    if (document.hidden) {
-        console.log("🌙 页面进入后台，保活音乐正在护航...");
-    } else {
-        console.log("🌞 页面回到前台。");
-    }
-});
 // =======================================================
