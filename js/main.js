@@ -55,10 +55,13 @@ window.actions.notify = (title, text, avatarUrl) => {
   if (text.includes('[图片]')) previewText = '[发来一张照片]';
   else if (text.includes('[语音]')) previewText = '[发来一段语音]';
   
-  const safeAvatar = (avatarUrl && avatarUrl.startsWith('http')) ? avatarUrl : 'https://api.dicebear.com/7.x/bottts/svg';
+  const isImageAvatar = (avatarUrl && (avatarUrl.startsWith('http') || avatarUrl.startsWith('data:')));
+  const avatarImgHtml = isImageAvatar 
+    ? `<img src="${avatarUrl}" class="w-11 h-11 rounded-[14px] mr-3 object-cover shadow-sm border border-gray-100" />`
+    : `<div class="w-11 h-11 rounded-[14px] mr-3 bg-gray-100 flex items-center justify-center text-gray-400 font-bold border border-gray-200 shadow-sm text-[12px]">消息</div>`;
 
   banner.innerHTML = `
-    <img src="${safeAvatar}" class="w-11 h-11 rounded-[14px] mr-3 object-cover shadow-sm border border-gray-100" />
+    ${avatarImgHtml}
     <div class="flex flex-col flex-1 overflow-hidden">
       <span class="text-[14px] font-bold text-gray-900">${title}</span>
       <span class="text-[12px] font-medium text-gray-500 truncate mt-0.5">${previewText}</span>
@@ -241,7 +244,7 @@ window.onload = () => {
 };
 // ================= 🌟 终极黑魔法：无声音频后台保活引擎 =================
 const keepAliveAudio = new Audio();
-// 🌟 换回最标准的超长无声空白音 (Base64 太短可能会被苹果无视)
+window.keepAliveAudio = keepAliveAudio; // 🌟 暴露给小手机桌面使用！
 keepAliveAudio.src = "https://cdn.pixabay.com/download/audio/2022/03/15/audio_787593c662.mp3";
 keepAliveAudio.loop = true;
 keepAliveAudio.setAttribute('playsinline', 'true'); 

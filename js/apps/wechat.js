@@ -1310,7 +1310,7 @@ window.wxActions = {
       hiddenMsgId = Date.now();
       chat.messages.push({ 
         id: hiddenMsgId, sender: store.personas[0].name, 
-        text: customPrompt || "（系统提示：距离上条消息已经过了一段时间，请根据当前时间和你的性格主动找我搭话。直接发你想说的话，不要带任何系统提示的字眼。）", 
+        text: customPrompt || "(系统自动触发：时间已过去很久，请主动找我搭话。⚠️你必须严格遵守：1. 长句必须用换行符拆分；2. 绝不可输出系统时间标签或动作括号；3. 只能使用已授权词典内的表情包名字，绝对禁止瞎编！)", 
         isMe: true, source: 'wechat', isOffline: false, msgType: 'text', isHidden: true 
       });
     }
@@ -1392,7 +1392,8 @@ window.wxActions = {
               hasSystemAction = true;
           }
         }
-        remainingText = remainingText.replace(/\[(?:发送表情|表情包)\][\s\S]*/, '').trim();
+        // 🌟 核心修复：只精准抹除这一行的指令，不再吃掉后面的连发文字！
+        remainingText = remainingText.replace(/\[(?:发送表情|表情包)\][:：]?\s*[^\n\[\]]*/, '').trim();
       }
 
       // 拦截改备注
@@ -2963,7 +2964,7 @@ const checkAutoMsg = async () => {
        chat.messages.push({
          id: Date.now(),
          sender: 'System',
-         text: `(系统时间已过去很久，你发现Eve很久没理你了，请根据你现在的心情，主动发一条消息寻找她。可以直接说你刚刚去干嘛了，或者表达思念。)`,
+         text: `(系统自动触发：时间已过去很久，请主动寻找Eve搭话。⚠️警告：1. 必须遵守人设；2. 句子稍微长一点就必须用换行符拆分连发；3. 严禁输出时间标签或动作括号；4. 只能使用已授权词典内的表情包！)`,
          isMe: true, isHidden: true, msgType: 'system'
        });
 
