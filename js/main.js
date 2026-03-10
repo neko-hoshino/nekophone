@@ -44,9 +44,11 @@ window.actions.notify = (title, text, avatarUrl) => {
   if (!banner) {
     banner = document.createElement('div');
     banner.id = 'mc-ios-banner';
-    banner.className = 'absolute top-6 left-4 right-4 bg-white/95 backdrop-blur-xl rounded-2xl p-4 shadow-[0_10px_40px_rgba(0,0,0,0.15)] z-[99999] flex items-center transform transition-all duration-500 -translate-y-[200%] cursor-pointer border border-gray-100/50';
+    // 🌟 改为 fixed 定位，使其悬浮于屏幕正中央顶端
+    banner.className = 'fixed top-6 left-1/2 -translate-x-1/2 w-[90%] max-w-[340px] bg-white/95 backdrop-blur-xl rounded-2xl p-4 shadow-[0_20px_50px_rgba(0,0,0,0.25)] z-[999999] flex items-center transform transition-all duration-500 -translate-y-[200%] cursor-pointer border border-gray-100/50';
     banner.onclick = () => { window.actions.setCurrentApp('wechat'); banner.classList.add('-translate-y-[200%]'); };
-    document.getElementById('phone-container').appendChild(banner);
+    // 🌟 核心：挂载到最外层的 body 上，绝对不会被 innerHTML 抹杀！
+    document.body.appendChild(banner);
   }
   
   let previewText = text;
@@ -239,23 +241,26 @@ window.onload = () => {
 };
 // ================= 🌟 终极黑魔法：无声音频后台保活引擎 =================
 const keepAliveAudio = new Audio();
-// 🌟 换成了一个真实的线上无声 MP3 链接，苹果绝对承认它是一首歌！
+// 🌟 换回最标准的超长无声空白音 (Base64 太短可能会被苹果无视)
 keepAliveAudio.src = "https://cdn.pixabay.com/download/audio/2022/03/15/audio_787593c662.mp3";
 keepAliveAudio.loop = true;
 keepAliveAudio.setAttribute('playsinline', 'true'); 
 keepAliveAudio.setAttribute('webkit-playsinline', 'true');
 
-document.addEventListener('touchstart', () => {
-    if (keepAliveAudio.paused) {
-        keepAliveAudio.play().then(() => {
-            console.log("🎶 保活音乐启动！");
-            if ('mediaSession' in navigator) {
-                navigator.mediaSession.metadata = new MediaMetadata({
-                    title: '小手机系统运行中',
-                    artist: '请勿关闭，以保持消息后台接收',
-                });
-            }
-        }).catch(e => console.log("保活音乐启动被拦截:", e));
-    }
+// 强制绑定全屏点击，一次性击穿苹果的音频限制
+document.body.addEventListener('click', function unlockAudio() {
+    keepAliveAudio.play().then(() => {
+        console.log("🎶 保活音乐启动！");
+        // 🌟 强行告诉控制中心：“我在放歌！”
+        if ('mediaSession' in navigator) {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: 'Eve的通讯系统',
+                artist: '后台接收引擎运行中',
+                artwork: [{ src: 'icon-192x192.png', sizes: '192x192', type: 'image/png' }]
+            });
+            navigator.mediaSession.playbackState = 'playing';
+        }
+    }).catch(()=>{});
+    document.body.removeEventListener('click', unlockAudio);
 }, { once: true });
 // =======================================================

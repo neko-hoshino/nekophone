@@ -12,6 +12,8 @@ export async function callLLM(charId, history, isOffline = false) {
 
   const wb = char.worldbook ? `\n【附加设定补充】\n${char.worldbook}` : '';
   const emo = char.emojis ? `\n【常用表情包库】\n请在回复中自然地使用以下表情：\n${char.emojis}` : '';
+  // 🌟 只有当表情包库存在时，才告诉它有这个超能力，防止它瞎编！
+  const emojiRule = char.emojis ? `\n   - 发表情包：[表情包] 名字（❗只能使用上方词典内包含的名字！）` : '';
 
   const systemRules = `
 【最高指令：完全拟人化聊天协议】
@@ -28,7 +30,7 @@ export async function callLLM(charId, history, isOffline = false) {
 3. 你的特殊交互超能力（❗必须独占一行触发）：
    - 发语音：[语音]: 你要说的话
    - 发照片：[虚拟照片]: 照片画面描述
-   - 发表情包：[表情包] 名字（❗只能使用词典内包含的名字！）
+   ${emojiRule}
    - 转账：[发起转账]
    - 收款：[点击收款]
    - 换头像：[更换头像]: 最新图片。❗必须用户明确要求才能换，且必须附带文字回复！
@@ -120,17 +122,20 @@ ${systemRules}${frontStr}${middleStr}${fragMemStr}`;
   let messages = [{ role: 'system', content: systemPrompt }];
 
 
-  // ================= 🌟 第五步：推入聊天记录夹心 =================
+  // ================= 🌟 第五步：推入纯净版聊天记录 =================
+  // 告诉 AI 当前所处的绝对场景，防止它搞混
+  const modeStr = isOffline ? "\n【系统最高指令：当前为线下剧情模式！请用小说体裁描写动作和对话，绝不输出时间标签。】" : "\n【系统最高指令：当前为线上微信聊天！纯文本对话，绝不可使用星号或括号写动作！绝不输出时间标签和前缀！】";
+  messages[0].content += modeStr;
+
   recentHistory.forEach(m => {
     let msgContent;
-    const timeTag = m.time ? `[${m.time}] ` : ''; 
-    
     if (m.msgType === 'recall_system') {
-      msgContent = `${timeTag}[系统消息]: ${m.text}`;
+      msgContent = `(系统提示：对方撤回了一条消息)`;
     } else if (m.msgType === 'real_image' && m.imageUrl) {
-      msgContent = [{ type: "text", text: m.isOffline ? `${timeTag}[线下剧情]: ${m.text}` : `${timeTag}[线上聊天]: ${m.text}` }, { type: "image_url", image_url: { url: m.imageUrl } }];
+      msgContent = [{ type: "text", text: m.text }, { type: "image_url", image_url: { url: m.imageUrl } }];
     } else {
-      msgContent = m.isOffline ? `${timeTag}[线下剧情]: ${m.text}` : `${timeTag}[线上聊天]: ${m.text}`;
+      // 🌟 核心净化：只传纯文字！不要再加 [22:20] [线上聊天] 这种前缀了！
+      msgContent = m.text; 
     }
     messages.push({ role: m.isMe ? 'user' : 'assistant', content: msgContent });
   });
