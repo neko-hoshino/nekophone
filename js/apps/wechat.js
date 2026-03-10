@@ -1,0 +1,3001 @@
+// js/apps/wechat.js
+import { store } from '../store.js';
+
+const getNowTime = () => new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+
+// ================= 🌟 1. Minimax 语音请求引擎 (纯净稳定版) =================
+async function fetchMinimaxVoice(text, voiceId) {
+  const config = store.minimaxConfig || {};
+  if (config.enabled === false) return null;
+  if (!config.apiKey || !config.groupId || !voiceId) return null;
+
+  // 终极净化：过滤动作描写和括号，防止标点引发崩溃
+  let cleanText = text.replace(/\[.*?\]|\*.*?\*|（.*?）|\(.*?\)/g, '').trim();
+  if (!cleanText) return null;
+
+  try {
+    const res = await fetch(`https://api.minimax.chat/v1/t2a_v2?GroupId=${config.groupId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
+      body: JSON.stringify({
+        model: "speech-01-turbo", // 🌟 焊死正确的模型
+        text: cleanText, 
+        stream: false,
+        voice_setting: { voice_id: voiceId, speed: 1, vol: 1, pitch: 0 }
+      })
+    });
+    
+    const data = await res.json();
+    
+    if (data.base_resp && data.base_resp.status_code !== 0) {
+       console.error("❌ Minimax 报错:", data.base_resp.status_msg);
+       window.actions.showToast('语音报错: ' + data.base_resp.status_msg);
+       return null;
+    }
+    
+    if (data.data && data.data.audio) {
+      const hexStr = data.data.audio;
+      // 🌟 核心认错：换回你之前证实 100% 好用的 match 解析法！！绝不再用 for 循环！
+      const bytes = new Uint8Array(hexStr.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+      const blob = new Blob([bytes], { type: 'audio/mp3' });
+      return URL.createObjectURL(blob);
+    }
+  } catch (e) { 
+    console.error('语音网络请求崩溃:', e); 
+  }
+  return null;
+}
+
+// ================= 🌟 2. 后台静默自动记忆引擎 =================
+async function triggerAutoMemory(charId, msgs) {
+  if (!store.apiConfig?.apiKey) return;
+  try {
+    const logText = msgs.map(m => `${m.sender}: ${m.msgType==='text' ? m.text : '[' + m.msgType + ']'}`).join('\n');
+    const promptStr = `【后台任务】请将以下近期对话客观简练地总结为一个核心记忆碎片。描述发生了什么事或产生了什么情感。绝不带废话，50字以内。\n\n【对话】\n${logText}`;
+    
+    const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+        body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.3 })
+    });
+    const data = await res.json();
+    const summary = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+    
+    const kwRes = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+        body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: `请从以下总结中提取2个核心名词作为触发关键词，用英文逗号分隔。\n${summary}` }], temperature: 0.3 })
+    });
+    const kwData = await kwRes.json();
+    const kws = kwData.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+    
+    store.memories = store.memories || [];
+    store.memories.push({ id: Date.now(), charId: charId, type: 'fragment', content: summary, keywords: kws, createdAt: Date.now() });
+    console.log('[系统] 自动记忆提取成功:', summary);
+  } catch (e) {}
+}
+
+const wxState = {
+  view: 'main', 
+  activeTab: 'chats', 
+  activeChatId: null,
+  showNewChatModal: false,
+  showPlusMenu: false,
+  isTyping: false,
+  virtualModalType: 'none',
+  activeTransferId: null,
+  callType: null, 
+  callStartTime: null,
+  pendingCallMsg: '',
+  ringtone: new Audio('https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3'),
+  savedScroll: 0, // 🌟 修复 Bug：用来记忆滚动条高度
+  // 👇 新增：长按菜单引擎变量
+  activeMenuMsgId: null, 
+  longPressTimer: null, 
+  quoteMsgId: null, // 🌟 新增：用来记住你正在引用哪条消息
+  isMultiSelecting: false, // 🌟 新增：是否处于多选模式
+  selectedMsgIds: [],  // 🌟 新增：记录被选中的消息 ID 数组
+  // 👇 新增：通讯录状态引擎
+  expandedGroups: {}, // 记录哪些分组是展开的
+  editingContactId: null, // 当前正在编辑的角色ID
+  tempAvatar: null, // 临时存储上传的头像
+  // 👇 新增：“我”页面状态引擎
+  editingPersonaId: null,
+  editingEmojiLibId: null,
+  favManageMode: false,
+  selectedFavIds: [],
+  tempPersonaAvatar: null, // 🌟 新增：用来存正在编辑的身份头像
+  showEmojiMenu: false, // 🌟 新增：表情面板开关
+  activeEmojiTab: 0, // 🌟 新增：表情面板当前停留的 Tab 页
+  showEmojiMountModal: false, // 🌟 新增：聊天设置里的挂载弹窗开关
+  showWbMountModal: false,  // 控制世界书弹窗
+  activeWbGroup: '全部',     // 世界书分组筛选状态
+  // 👇 新增：绑定身份弹窗的开关与临时记忆
+  showPersonaMountModal: false, 
+  tempBoundPersonaId: null,
+  // 👇 新增：朋友圈核心状态
+  tempMomentImage: null,
+  activeMomentMenuId: null, // 当前点开了哪个动态的菜单
+  momentInput: { active: false, momentId: null, replyTo: null }, // 评论输入框状态
+  // 👇 新增：全局人设弹窗与朋友圈虚拟照片状态
+  showGlobalPromptModal: false,
+  tempMomentVirtual: null,
+  // 👇 新增：多选转发状态引擎
+  showForwardModal: false,
+  forwardType: 'single', // 'single' 逐条, 'merge' 合并
+  forwardMsgIds: [],      // 记录要转发的消息ID
+  // 👇 新增：记忆提取引擎状态
+  showExtractMemoryModal: false,
+  extractMemoryStep: 1, // 1=选择轮数和类型，2=编辑保存结果
+  extractMemoryConfig: { msgCount: 20, type: 'fragment', keywords: '' },
+  extractMemoryContent: '', // 存放 AI 总结好的话
+  isExtracting: false // 是否正在请求大模型
+};
+wxState.ringtone.loop = true;
+
+// 独立记忆各个页面的滚动条，互不干扰！
+const saveScroll = () => {
+    const chatEl = document.getElementById('chat-scroll');
+    if (chatEl) wxState.savedChatScroll = chatEl.scrollTop;
+    const setEl = document.getElementById('settings-scroll');
+    if (setEl) wxState.savedSettingsScroll = setEl.scrollTop;
+    const momEl = document.getElementById('moments-scroll');
+    if (momEl) wxState.savedMomentsScroll = momEl.scrollTop;
+};
+const restoreScroll = () => {
+    requestAnimationFrame(() => {
+        const chatEl = document.getElementById('chat-scroll');
+        if (chatEl && wxState.savedChatScroll !== undefined) chatEl.scrollTop = wxState.savedChatScroll;
+        const setEl = document.getElementById('settings-scroll');
+        if (setEl && wxState.savedSettingsScroll !== undefined) setEl.scrollTop = wxState.savedSettingsScroll;
+        const momEl = document.getElementById('moments-scroll');
+        if (momEl && wxState.savedMomentsScroll !== undefined) momEl.scrollTop = wxState.savedMomentsScroll;
+    });
+};
+window.wxActions = {
+  // 🌟 新增：全平台兼容的“300毫秒连击”戳一戳判定器
+  lastAvatarClickTime: 0,
+  handleAvatarClick: (charId) => {
+    const now = Date.now();
+    if (now - window.wxActions.lastAvatarClickTime < 300) { 
+       window.wxActions.sendNudge(charId); // 触发戳一戳
+       window.wxActions.lastAvatarClickTime = 0; // 重置
+    } else {
+       window.wxActions.lastAvatarClickTime = now;
+    }
+  },
+  switchTab: (tab) => { wxState.activeTab = tab; window.render(); },
+  openChat: (charId) => { wxState.activeChatId = charId; wxState.view = 'chatRoom'; wxState.showPlusMenu = false; window.render(); window.wxActions.scrollToBottom(); },
+  closeChat: () => { wxState.view = 'main'; wxState.activeChatId = null; window.render(); },
+  toggleNewChatModal: () => { wxState.showNewChatModal = !wxState.showNewChatModal; window.render(); },
+  togglePlusMenu: () => { 
+    saveScroll(); 
+    wxState.showPlusMenu = !wxState.showPlusMenu; 
+    wxState.showEmojiMenu = false; // 🌟 与表情面板互斥
+    window.render(); 
+    restoreScroll(); 
+  },
+
+  // 戳一戳动作
+  sendNudge: (charId) => {
+    saveScroll();
+    const chat = store.chats.find(c => c.charId === charId);
+    const char = store.contacts.find(c => c.id === charId);
+    if (!chat || !char) return;
+
+    const verb = char.nudgeMeVerb || '拍了拍';
+    const suffix = char.nudgeMeSuffix || '';
+    const nudgeMsg = `我${verb}了${char.name}${suffix}`;
+    chat.messages.push({ id: Date.now(), sender: 'system', text: nudgeMsg, isMe: true, source: 'wechat', msgType: 'system', time: getNowTime() });
+    window.render(); window.wxActions.scrollToBottom();
+    
+    window.wxActions.getReply(true, char.id, `(系统提示：用户刚刚戳了戳你（动作：${nudgeMsg}），请根据你的性格作出反应。可以直接说话或反击，绝不可带系统提示字眼)`);
+    restoreScroll();
+  },
+  
+  // 戳一戳数据更新动作
+  updateNudge: (key, val) => {
+    saveScroll();
+    const char = store.contacts.find(c => c.id === wxState.activeChatId);
+    if (key === 'meVerb') char.nudgeMeVerb = val;
+    if (key === 'meSuffix') char.nudgeMeSuffix = val;
+    if (key === 'aiVerb') char.nudgeAIVerb = val;
+    if (key === 'aiSuffix') char.nudgeAISuffix = val;
+    window.render();
+    restoreScroll();
+  },
+
+  // 彻底修复的美化预设逻辑
+  applyCSSPreset: (event) => {
+    saveScroll();
+    const val = event.target.value;
+    if (!val) { restoreScroll(); return; }
+    const char = store.contacts.find(c => c.id === wxState.activeChatId);
+    const preset = store.cssPresets.find(p => p.id === val);
+    if (preset) {
+        char.customCSS = preset.css;
+        const cssBox = document.getElementById('set-custom-css');
+        if (cssBox) cssBox.value = preset.css; // 实时推入输入框
+    }
+    window.actions.showToast(`已加载预设：${preset.name}`);
+    window.render();
+    restoreScroll();
+  },
+  
+  saveCSSPreset: () => {
+    saveScroll();
+    const name = prompt("请输入新美化预设的名称：", "我的自定义预设");
+    if (!name) { restoreScroll(); return window.actions.showToast("已取消保存"); }
+    // 直接从输入框抓取最新的代码，不再抓空！
+    const cssBox = document.getElementById('set-custom-css');
+    const currentCssStr = cssBox ? cssBox.value : '';
+    
+    if (!store.cssPresets) store.cssPresets = [];
+    store.cssPresets.push({ id: 'css_' + Date.now(), name: name, css: currentCssStr });
+    window.actions.showToast(`已保存美化预设：${name}`);
+    window.render();
+    restoreScroll();
+  },
+  // 🌟 新增：表情面板开关
+  toggleEmojiMenu: () => {
+    saveScroll();
+    wxState.showEmojiMenu = !wxState.showEmojiMenu;
+    wxState.showPlusMenu = false; // 🌟 与+号面板互斥
+    window.render();
+    restoreScroll();
+  },
+  // 🌟 修复：去掉自动获取回复的逻辑，让它像文字一样可以暂存
+  sendEmoji: (url, name = '表情') => {
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    if (chat) {
+      chat.messages.push({ id: Date.now(), sender: store.personas[0].name, text: `[表情包] ${name}`, imageUrl: url, isMe: true, source: 'wechat', isOffline: false, msgType: 'emoji', time: getNowTime() });
+      wxState.showEmojiMenu = false; window.render(); window.wxActions.scrollToBottom();
+    }
+  },
+  // 🌟 新增：表情 Tab 切换与挂载库管理
+  switchEmojiTab: (idx) => { wxState.activeEmojiTab = idx; window.render(); },
+  toggleEmojiMountModal: () => {
+      saveScroll();
+      wxState.showEmojiMountModal = !wxState.showEmojiMountModal;
+      window.render();
+      restoreScroll();
+    },
+    toggleEmojiMount: (libId) => {
+      saveScroll();
+      const char = store.contacts.find(c => c.id === wxState.activeChatId);
+      if (!char.mountedEmojis) char.mountedEmojis = [];
+      if (char.mountedEmojis.includes(libId)) {
+         char.mountedEmojis = char.mountedEmojis.filter(id => id !== libId);
+      } else {
+         char.mountedEmojis.push(libId);
+      }
+      window.render();
+      restoreScroll();
+    },
+  scrollToBottom: () => {
+    requestAnimationFrame(() => {
+      const box = document.getElementById('chat-scroll') || document.getElementById('offline-scroll') || document.getElementById('call-scroll');
+      if(box) {
+        box.style.scrollBehavior = 'auto'; // 强制关闭平滑滚动，瞬间到达
+        box.scrollTop = box.scrollHeight;
+      }
+    });
+  },
+  // 世界书与表情包挂载专属动作 (修复了滚动条回弹)
+    toggleWbMountModal: () => { 
+      saveScroll();
+      wxState.showWbMountModal = !wxState.showWbMountModal; 
+      wxState.activeWbGroup = '全部'; 
+      window.render(); 
+      restoreScroll();
+    },
+    setWbMountGroup: (g) => { 
+      saveScroll();
+      wxState.activeWbGroup = g; 
+      window.render(); 
+      restoreScroll();
+    },
+    toggleWbMount: (wbId) => {
+      saveScroll();
+      const char = store.contacts.find(c => c.id === wxState.activeChatId);
+      if (!char.mountedWorldbooks) char.mountedWorldbooks = [];
+      
+      // 🌟 核心修复：强行把字符串转回数字，防止类型不匹配！
+      const numId = Number(wbId) || wbId; 
+      
+      if (char.mountedWorldbooks.includes(numId)) {
+         char.mountedWorldbooks = char.mountedWorldbooks.filter(id => id !== numId);
+      } else {
+         char.mountedWorldbooks.push(numId);
+      }
+      window.render();
+      restoreScroll();
+    },
+    
+    // 🌟 禁止使用表情包切换动作
+    toggleDisableEmoji: () => {
+      saveScroll();
+      const char = store.contacts.find(c => c.id === wxState.activeChatId);
+      char.disableEmoji = !char.disableEmoji;
+      window.render();
+      restoreScroll();
+    },
+  // 🌟 通讯录核心引擎
+  toggleGroup: (groupId) => {
+    wxState.expandedGroups[groupId] = wxState.expandedGroups[groupId] === false ? true : false;
+    window.render();
+  },
+  openContactEdit: (charId) => {
+    saveScroll();
+    wxState.editingContactId = charId;
+    wxState.tempAvatar = null;
+    wxState.tempBoundPersonaId = null; // 🌟 打开编辑时，清空临时身份记忆
+    wxState.view = 'contactEdit';
+    window.render();
+  },
+  togglePersonaMountModal: () => { wxState.showPersonaMountModal = !wxState.showPersonaMountModal; window.render(); },
+  selectBoundPersona: (id) => { wxState.tempBoundPersonaId = id; wxState.showPersonaMountModal = false; window.render(); },
+  closeSubView: () => {
+    wxState.view = 'main';
+    window.render();
+    restoreScroll();
+  },
+  handleContactAvatarUpload: (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      wxState.tempAvatar = e.target.result;
+      window.render();
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  },
+  saveContact: () => {
+    const name = document.getElementById('edit-char-name').value.trim();
+    if (!name) return window.actions.showToast('名字不能为空哦！');
+    
+    const contactData = {
+      name: name,
+      prompt: document.getElementById('edit-char-prompt').value.trim(),
+      greeting: document.getElementById('edit-char-greeting').value.trim(),
+      minimaxVoiceEnabled: document.getElementById('edit-char-voice-enabled').checked,
+      minimaxVoiceId: document.getElementById('edit-char-voice-id').value.trim(),
+      // 🌟 修复：优先读取临时选中的马甲，没有的话读取旧马甲，再没有就读默认马甲
+      boundPersonaId: wxState.tempBoundPersonaId || (wxState.editingContactId ? store.contacts.find(c => c.id === wxState.editingContactId)?.boundPersonaId : store.personas[0].id) || store.personas[0].id,
+      groupId: document.getElementById('edit-char-group').value
+    };
+
+    if (wxState.editingContactId) {
+      // 存在则是编辑
+      const char = store.contacts.find(c => c.id === wxState.editingContactId);
+      if (char) {
+        Object.assign(char, contactData);
+        if (wxState.tempAvatar) char.avatar = wxState.tempAvatar; // 只有换了才更新
+      }
+    } else {
+      // 不存在则是新建
+      const newId = 'char_' + Date.now();
+      contactData.id = newId;
+      contactData.avatar = wxState.tempAvatar;
+      contactData.videoAvatar = contactData.avatar;
+      contactData.autoMsgEnabled = false;
+      contactData.autoMsgInterval = 5;
+      store.contacts.push(contactData);
+      store.chats.push({ id: 'chat_' + Date.now(), charId: newId, messages: [] });
+      
+      // 如果有开场白，直接作为第一条消息发出来
+      if (contactData.greeting) {
+        const newChat = store.chats.find(c => c.charId === newId);
+        newChat.messages.push({ id: Date.now() + 1, sender: name, text: contactData.greeting, isMe: false, source: 'wechat', isOffline: false, msgType: 'text', time: getNowTime() });
+      }
+    }
+    window.actions.showToast('角色保存成功！');
+    window.wxActions.closeSubView();
+  },
+  deleteContact: () => {
+    if (!wxState.editingContactId) return;
+    if (!confirm('确定要删除这个角色吗？相关的聊天记录也会被彻底清除！')) return;
+    store.contacts = store.contacts.filter(c => c.id !== wxState.editingContactId);
+    store.chats = store.chats.filter(c => c.charId !== wxState.editingContactId);
+    window.actions.showToast('角色已删除');
+    window.wxActions.closeSubView();
+  },
+  openGroupManage: () => { saveScroll(); wxState.view = 'groupManage'; window.render(); },
+  addGroup: () => {
+    store.groups = store.groups || [];
+    store.groups.push({ id: 'group_' + Date.now(), name: '新分组' });
+    window.render();
+  },
+  updateGroupName: (groupId, name) => {
+    const g = store.groups.find(g => g.id === groupId);
+    if (g) g.name = name;
+  },
+  deleteGroup: (groupId) => {
+    if (groupId === 'default') return window.actions.showToast('默认分组不能被删除哦！');
+    if (!confirm('确定删除该分组吗？组内角色将被安全转移至默认分组。')) return;
+    store.groups = store.groups.filter(g => g.id !== groupId);
+    store.contacts.forEach(c => { if (c.groupId === groupId) c.groupId = 'default'; });
+    window.render();
+  },
+  rerollReply: () => {
+    saveScroll();
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    if (!chat || chat.messages.length === 0) return;
+    
+    // 检查最后一条是不是用户发的，如果是，说明 AI 还没回，不需要重 roll
+    if (chat.messages[chat.messages.length - 1].isMe) return window.actions.showToast('只能重roll对方的回复哦');
+
+    // 🌟 核心修复：连删！从最后一条开始检查，只要不是我发的（isMe为false），就一直删！
+    while (chat.messages.length > 0 && !chat.messages[chat.messages.length - 1].isMe) {
+      chat.messages.pop();
+    }
+
+    wxState.showPlusMenu = false; // 顺手把底部的 + 号扩展菜单关掉
+    window.render();
+    restoreScroll();
+    window.wxActions.getReply(); // 重新向 AI 请求最新回复
+  },
+  // 🌟 新增：发起新对话相关的动作
+  toggleNewChatModal: () => { 
+    wxState.showNewChatModal = !wxState.showNewChatModal; 
+    window.render(); 
+  },
+  startNewChat: (charId) => {
+    // 再次防御性检查，如果该角色已有对话，则直接跳转
+    let chat = store.chats.find(c => c.charId === charId);
+    if (!chat) {
+      chat = { id: 'chat_' + Date.now(), charId: charId, messages: [] };
+      store.chats.push(chat);
+      
+      // 如果这个角色在通讯录里设定了“开场白”，直接作为第一条消息发出来
+      const char = store.contacts.find(c => c.id === charId);
+      if (char && char.greeting) {
+        chat.messages.push({ id: Date.now() + 1, sender: char.name, text: char.greeting, isMe: false, source: 'wechat', isOffline: false, msgType: 'text', time: getNowTime() });
+      }
+    }
+    wxState.showNewChatModal = false;
+    window.wxActions.openChat(charId); // 立刻进入聊天室！
+  },
+  // 🌟 全新：长按菜单核心引擎
+  handleTouchStart: (msgId) => {
+    wxState.longPressTimer = setTimeout(() => {
+      saveScroll(); // 🌟 弹出菜单前锁定位置
+      wxState.activeMenuMsgId = msgId;
+      window.render();
+      restoreScroll(); // 🌟 渲染完瞬间原地恢复！
+    }, 500);
+  },
+  handleTouchEnd: () => {
+    if (wxState.longPressTimer) clearTimeout(wxState.longPressTimer);
+  },
+  closeContextMenu: () => {
+    saveScroll();
+    wxState.activeMenuMsgId = null; 
+    window.render();
+    restoreScroll();
+  },
+
+  // 🌟 菜单动作：删除与编辑
+  deleteMessage: (msgId) => {
+    saveScroll();
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    chat.messages = chat.messages.filter(m => m.id !== msgId);
+    wxState.activeMenuMsgId = null; 
+    window.render();
+    restoreScroll();
+  },
+  editMessage: (msgId) => {
+    saveScroll();
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    const msg = chat.messages.find(m => m.id === msgId);
+    if (!msg) return;
+    const newText = prompt("编辑该消息：", msg.text);
+    if (newText !== null && newText.trim() !== '') {
+      msg.text = newText.trim();
+    }
+    wxState.activeMenuMsgId = null; 
+    window.render();
+    restoreScroll();
+  },
+  // 🌟 新增：引用动作
+  quoteMessage: (msgId) => {
+    saveScroll();
+    wxState.quoteMsgId = msgId;
+    wxState.activeMenuMsgId = null; // 关闭黑色菜单
+    window.render();
+    restoreScroll();
+  },
+  cancelQuote: () => {
+    saveScroll();
+    wxState.quoteMsgId = null;
+    window.render();
+    restoreScroll();
+  },
+  // 🌟 新增：用户撤回动作
+  recallMessage: (msgId) => {
+    saveScroll();
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    const msg = chat.messages.find(m => m.id === msgId);
+    if (msg && msg.isMe) {
+      msg.recalledText = msg.text; // 保存作案证据
+      msg.text = '你撤回了一条消息';
+      msg.msgType = 'recall_system';
+      msg.quote = null; // 清空附带的引用
+    }
+    wxState.activeMenuMsgId = null; 
+    window.render();
+    restoreScroll();
+  },
+  // 🌟 新增：收藏与多选系统
+  favoriteMessage: (msgId) => {
+    saveScroll();
+    store.favorites = store.favorites || [];
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    const msg = chat.messages.find(m => m.id === msgId);
+    const charName = store.contacts.find(c => c.id === chat.charId)?.name || '未知';
+    if (msg) {
+      store.favorites.push({ ...msg, savedAt: Date.now(), chatName: charName });
+      window.actions.showToast('已添加至收藏');
+    }
+    wxState.activeMenuMsgId = null; 
+    window.render(); 
+    restoreScroll();
+  },
+  startMultiSelect: (msgId) => {
+    saveScroll();
+    wxState.isMultiSelecting = true;
+    wxState.selectedMsgIds = [msgId];
+    wxState.activeMenuMsgId = null;
+    window.render(); 
+    restoreScroll();
+  },
+  toggleSelectMsg: (msgId) => {
+    saveScroll();
+    if (wxState.selectedMsgIds.includes(msgId)) {
+      wxState.selectedMsgIds = wxState.selectedMsgIds.filter(id => id !== msgId);
+    } else {
+      wxState.selectedMsgIds.push(msgId);
+    }
+    window.render(); 
+    restoreScroll();
+  },
+  cancelMultiSelect: () => {
+    saveScroll();
+    wxState.isMultiSelecting = false;
+    wxState.selectedMsgIds = [];
+    window.render(); 
+    restoreScroll();
+  },
+  deleteSelected: () => {
+    if (wxState.selectedMsgIds.length === 0) return window.actions.showToast('请至少选择一项');
+    saveScroll();
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    chat.messages = chat.messages.filter(m => !wxState.selectedMsgIds.includes(m.id));
+    wxState.isMultiSelecting = false;
+    wxState.selectedMsgIds = [];
+    window.render(); 
+    restoreScroll();
+  },
+  batchAction: (actionName) => {
+    if (wxState.selectedMsgIds.length === 0) return window.actions.showToast('请至少选择一项');
+    // 🌟 实装多选收藏功能
+    if (actionName === '收藏') {
+      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+      const charName = store.contacts.find(c => c.id === chat.charId)?.name || '未知';
+      store.favorites = store.favorites || [];
+      wxState.selectedMsgIds.forEach(id => {
+         const msg = chat.messages.find(m => m.id === id);
+         if (msg) store.favorites.push({ ...msg, savedAt: Date.now(), chatName: charName });
+      });
+      window.actions.showToast(`成功收藏 ${wxState.selectedMsgIds.length} 条消息`);
+    } 
+    // 🌟 新增：实装逐条与合并转发功能
+    else if (actionName === '逐条转发' || actionName === '合并转发') {
+      saveScroll();
+      wxState.forwardType = actionName === '逐条转发' ? 'single' : 'merge';
+      wxState.forwardMsgIds = [...wxState.selectedMsgIds];
+      wxState.showForwardModal = true;
+      wxState.isMultiSelecting = false;
+      wxState.selectedMsgIds = [];
+      window.render();
+      return; // 拦截默认的退出动作
+    } else {
+      window.actions.showToast(`已${actionName} ${wxState.selectedMsgIds.length} 条消息 (开发中)`);
+    }
+    saveScroll();
+    wxState.isMultiSelecting = false;
+    wxState.selectedMsgIds = [];
+    window.render(); 
+    restoreScroll();
+  },
+  // 🌟 专门用于安全关闭转发弹窗的动作
+  closeForwardModal: () => {
+    wxState.showForwardModal = false;
+    wxState.forwardMsgIds = [];
+    window.render();
+  },
+  // 🌟 新增：执行转发的终极确认函数
+  confirmForward: (targetCharId) => {
+    const sourceChat = store.chats.find(c => c.charId === wxState.activeChatId);
+    let targetChat = store.chats.find(c => c.charId === targetCharId);
+    if (!targetChat) {
+      targetChat = { id: 'chat_' + Date.now(), charId: targetCharId, messages: [] };
+      store.chats.push(targetChat);
+    }
+    // 提取并按时间先后排序
+    const msgsToForward = sourceChat.messages.filter(m => wxState.forwardMsgIds.includes(m.id)).sort((a,b) => a.id - b.id);
+    if (wxState.forwardType === 'single') {
+      msgsToForward.forEach((m, idx) => {
+        const newMsg = { ...m, id: Date.now() + idx, isMe: true, time: getNowTime() }; // 转发过去都算是我发出的
+        if (newMsg.msgType === 'transfer') newMsg.transferState = 'pending';
+        targetChat.messages.push(newMsg);
+      });
+    } else {
+      // 🌟 核心升级：生成微信原生的聊天记录卡片数据
+      const sourceCharName = store.contacts.find(c => c.id === sourceChat.charId)?.name || '对方';
+      const title = store.personas[0].name + '与' + sourceCharName + '的聊天记录';
+      
+      // 生成预览文本（最多显示前4条）
+      const previewLines = msgsToForward.slice(0, 4).map(m => {
+        let senderName = m.isMe ? store.personas[0].name : sourceCharName;
+        let content = m.text;
+        if (m.msgType === 'emoji' || m.msgType === 'real_image') content = '[图片]';
+        if (m.msgType === 'voice') content = '[语音]';
+        if (m.msgType === 'virtual_image') content = '[照片]';
+        if (m.msgType === 'transfer') content = '[转账]';
+        if (m.msgType === 'history_record') content = '[聊天记录]';
+        return `${senderName}: ${content}`;
+      }).join('\n');
+
+      // 提取完整内容，暗中喂给大模型读取
+      const fullContent = msgsToForward.map(m => {
+        let senderName = m.isMe ? store.personas[0].name : sourceCharName;
+        return `${senderName}: ${m.text}`;
+      }).join('\n');
+      
+      targetChat.messages.push({
+        id: Date.now(), 
+        sender: store.personas[0].name,
+        text: `[聊天记录详细内容]\n${fullContent}`, // 这行是给大模型看的
+        isMe: true, 
+        source: 'wechat', 
+        isOffline: false, 
+        msgType: 'history_record', // 🌟 全新的消息类型！
+        historyData: { title, preview: previewLines },
+        time: getNowTime()
+      });
+    }
+    wxState.showForwardModal = false;
+    wxState.forwardMsgIds = [];
+    window.actions.showToast('已转发');
+    window.render();
+    // 🌟 实装多选收藏功能
+    if (actionName === '收藏') {
+      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+      const charName = store.contacts.find(c => c.id === chat.charId)?.name || '未知';
+      store.favorites = store.favorites || [];
+      wxState.selectedMsgIds.forEach(id => {
+         const msg = chat.messages.find(m => m.id === id);
+         if (msg) store.favorites.push({ ...msg, savedAt: Date.now(), chatName: charName });
+      });
+      window.actions.showToast(`成功收藏 ${wxState.selectedMsgIds.length} 条消息`);
+    } else {
+      window.actions.showToast(`已${actionName} ${wxState.selectedMsgIds.length} 条消息 (开发中)`);
+    }
+    saveScroll();
+    wxState.isMultiSelecting = false;
+    wxState.selectedMsgIds = [];
+    window.render(); 
+    restoreScroll();
+  },
+  // ================= 🌟 自动提取记忆引擎 =================
+  openExtractMemoryModal: () => {
+    saveScroll();
+    wxState.showPlusMenu = false;
+    wxState.showExtractMemoryModal = true;
+    wxState.extractMemoryStep = 1;
+    wxState.extractMemoryConfig = { msgCount: 20, type: 'fragment', keywords: '' };
+    wxState.extractMemoryContent = '';
+    wxState.isExtracting = false;
+    window.render();
+    restoreScroll();
+  },
+  closeExtractMemoryModal: () => {
+    saveScroll();
+    wxState.showExtractMemoryModal = false;
+    window.render();
+    restoreScroll();
+  },
+  updateExtractConfig: (key, val) => {
+    wxState.extractMemoryConfig[key] = val;
+    window.render();
+  },
+  startExtractMemory: async () => {
+    if (!store.apiConfig || !store.apiConfig.apiKey) return window.actions.showToast('请先配置 API Key');
+    wxState.isExtracting = true;
+    window.render();
+    try {
+      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+      // 过滤掉系统消息，只取真实的对话
+      const validMsgs = chat.messages.filter(m => !m.isHidden && !(m.msgType || '').includes('system'));
+      // 🌟 直接精确截取指定条数的消息
+      const msgCount = wxState.extractMemoryConfig.msgCount;
+      const msgs = validMsgs.slice(-msgCount);
+      const logText = msgs.map(m => `${m.sender}: ${m.msgType==='text' ? m.text : '[' + m.msgType + ']'}`).join('\n');
+      
+      const promptStr = `【任务】请提取并总结以下对话记录。\n要求：${wxState.extractMemoryConfig.type === 'core' ? '总结出这段对话中体现的【核心人物关系】或【不可磨灭的重大背景状态】。' : '客观地总结刚刚这段剧情中【发生了什么事】。'}\n直接输出总结内容，不加引号，不带“总结”、“这段对话”等废话，务必控制在50字以内。\n\n【对话记录】\n${logText}`;
+
+      const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+          body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.3 })
+      });
+      const data = await res.json();
+      wxState.extractMemoryContent = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+      wxState.isExtracting = false;
+      wxState.extractMemoryStep = 2;
+      
+      // 如果是碎片记忆，让 AI 再干点活：自动提炼关键词！
+      if (wxState.extractMemoryConfig.type === 'fragment') {
+         const kwPrompt = `请从以下总结中提取2-3个核心名词作为触发关键词，用英文逗号分隔，绝不输出其他多余废话。\n${wxState.extractMemoryContent}`;
+         const resKw = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+            body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: kwPrompt }], temperature: 0.3 })
+        });
+        const kwData = await resKw.json();
+        wxState.extractMemoryConfig.keywords = kwData.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+      }
+      window.render();
+    } catch (e) {
+      wxState.isExtracting = false;
+      window.actions.showToast('提取失败：' + e.message);
+      window.render();
+    }
+  },
+  saveExtractedMemory: () => {
+     store.memories = store.memories || [];
+     const content = document.getElementById('extract-mem-content').value.trim();
+     const kws = document.getElementById('extract-mem-keywords') ? document.getElementById('extract-mem-keywords').value.trim() : '';
+     if (!content) return window.actions.showToast('总结内容不能为空哦');
+     
+     store.memories.push({
+       id: Date.now(),
+       charId: wxState.activeChatId,
+       type: wxState.extractMemoryConfig.type,
+       content: content,
+       keywords: kws,
+       createdAt: Date.now()
+     });
+     
+     window.actions.showToast('记忆已保存！');
+     window.wxActions.closeExtractMemoryModal();
+  },
+  doNothing: () => {
+    saveScroll();
+    window.actions.showToast('该功能将在下一阶段解锁！');
+    wxState.activeMenuMsgId = null; 
+    window.render();
+    restoreScroll();
+  },
+
+  // ================= 🌟 朋友圈核心引擎 (含 AI 交互) =================
+  handleMomentBgUpload: (event) => {
+    const file = event.target.files[0]; if (!file) return;
+    const r = new FileReader(); r.onload = (e) => { store.momentBg = e.target.result; window.render(); }; r.readAsDataURL(file); event.target.value = '';
+  },
+  // 🌟 朋友圈动作升级 (支持虚拟照片)
+  openPublishMoment: () => { saveScroll(); wxState.tempMomentImage = null; wxState.tempMomentVirtual = null; wxState.view = 'momentPublish'; window.render(); },
+  // 🌟 新增：安全操作虚拟照片与本地图片的开关
+  setTempMomentVirtual: () => { wxState.tempMomentVirtual = ''; window.render(); },
+  clearTempMomentVirtual: () => { wxState.tempMomentVirtual = null; window.render(); },
+  clearTempMomentImage: () => { wxState.tempMomentImage = null; window.render(); },
+  handleMomentImageUpload: (event) => {
+    const file = event.target.files[0]; if (!file) return;
+    const r = new FileReader(); r.onload = (e) => { wxState.tempMomentImage = e.target.result; window.render(); }; r.readAsDataURL(file); event.target.value = '';
+  },
+  submitMoment: async () => {
+    const text = document.getElementById('publish-moment-text').value.trim();
+    const virtualInput = document.getElementById('moment-virtual-input');
+    const virtualText = virtualInput ? virtualInput.value.trim() : null;
+
+    if (!text && !wxState.tempMomentImage && !virtualText) return window.actions.showToast('写点什么或发张图吧');
+    store.moments = store.moments || [];
+    const newId = Date.now();
+    const my = store.personas[0];
+    const newMoment = { id: newId, senderId: my.id, senderName: my.name, avatar: my.avatar, text: text, imageUrl: wxState.tempMomentImage, virtualImageText: virtualText, time: '刚刚', likes: [], comments: [] };
+    store.moments.push(newMoment);
+    wxState.view = 'main'; window.render(); restoreScroll();
+    
+    // 🤖 组合 Prompt，告诉 AI 你的配图是什么
+    let promptText = text;
+    if (virtualText) promptText += ` [配图是一张虚拟照片：${virtualText}]`;
+    else if (wxState.tempMomentImage) promptText += ` [配图是一张照片]`;
+
+    // 呼叫随机 AI 立刻来评论！
+    const chars = store.contacts;
+    if (chars.length > 0) {
+       const char = chars[Math.floor(Math.random() * chars.length)];
+       setTimeout(async () => {
+           try {
+              const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                  method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                  body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n【任务】你在刷朋友圈，看到了用户的动态：“${promptText}”。请给出简短的评论，绝不加引号，不带动作描写，纯口语，20字以内。` }], temperature: 0.8 })
+              });
+              const data = await res.json();
+              newMoment.comments.push({ id: Date.now(), senderId: char.id, senderName: char.name, replyTo: null, text: data.choices[0].message.content.trim().replace(/^["']|["']$/g, '') });
+              window.render();
+           } catch(e) { newMoment.likes.push(char.name); window.render(); }
+       }, 2500);
+    }
+  },
+  // 🤖 让 AI 自己发一条朋友圈！
+  triggerAIMoment: async () => {
+    const chars = store.contacts; if (chars.length === 0) return window.actions.showToast('通讯录还没人哦');
+    const char = chars[Math.floor(Math.random() * chars.length)];
+    window.actions.showToast(`${char.name} 正在编辑动态...`);
+    try {
+        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+            body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: `【角色卡】\\n名字：${char.name}\\n设定：${char.prompt}\\n【任务】请发一条朋友圈动态。符合你的性格，描述一下你现在在做什么或心情。直接输出内容，绝不加引号，40字以内。` }], temperature: 0.9 })
+        });
+        const data = await res.json();
+        store.moments = store.moments || [];
+        store.moments.push({ id: Date.now(), senderId: char.id, senderName: char.name, avatar: char.avatar, text: data.choices[0].message.content.trim().replace(/^["']|["']$/g, ''), imageUrl: null, time: '刚刚', likes: [], comments: [] });
+        window.render();
+    } catch(e) { window.actions.showToast('角色发朋友圈失败，请检查 API'); }
+  },
+  // 朋友圈交互 (🌟 修复了回弹顶部的 Bug)
+  toggleMomentMenu: (id) => { saveScroll(); wxState.activeMomentMenuId = wxState.activeMomentMenuId === id ? null : id; window.render(); restoreScroll(); },
+  likeMoment: (id) => {
+    saveScroll();
+    const m = store.moments.find(x => x.id === id); const myName = store.personas[0].name;
+    if (m.likes.includes(myName)) m.likes = m.likes.filter(n => n !== myName); else m.likes.push(myName);
+    wxState.activeMomentMenuId = null; window.render(); restoreScroll();
+  },
+  openMomentComment: (id, replyTo = null) => { saveScroll(); wxState.momentInput = { active: true, momentId: id, replyTo: replyTo }; wxState.activeMomentMenuId = null; window.render(); restoreScroll(); },
+  closeMomentComment: () => { wxState.momentInput.active = false; window.render(); },
+  submitMomentComment: async () => {
+    saveScroll(); // 锁定滚动
+    const text = document.getElementById('moment-comment-input').value.trim(); if (!text) return;
+    const m = store.moments.find(x => x.id === wxState.momentInput.momentId); const my = store.personas[0];
+    m.comments.push({ id: Date.now(), senderId: my.id, senderName: my.name, replyTo: wxState.momentInput.replyTo, text: text });
+    const replyTarget = wxState.momentInput.replyTo; wxState.momentInput.active = false; window.render(); restoreScroll();
+    
+    // 🤖 呼叫 AI 回复逻辑保持不变
+    if (m.senderId !== my.id || replyTarget) {
+       const charId = replyTarget ? store.contacts.find(c => c.name === replyTarget)?.id : m.senderId;
+       const char = store.contacts.find(c => c.id === charId);
+       if (char) {
+           setTimeout(async () => {
+               try {
+                  const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                      body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n【任务】你在朋友圈收到了用户的评论：“${text}”。请立刻怼回去或回复ta，绝不加引号，纯口语，20字以内。` }], temperature: 0.8 })
+                  });
+                  const data = await res.json();
+                  saveScroll();
+                  m.comments.push({ id: Date.now(), senderId: char.id, senderName: char.name, replyTo: my.name, text: data.choices[0].message.content.trim().replace(/^["']|["']$/g, '') });
+                  window.render(); restoreScroll();
+               } catch(e) {}
+           }, 2500);
+       }
+    }
+  },
+  deleteMoment: (id) => { if(confirm('确定删除这条动态吗？')) { saveScroll(); store.moments = store.moments.filter(x => x.id !== id); window.render(); restoreScroll(); } },
+  handleCommentClick: (mId, cId) => {
+    saveScroll();
+    const m = store.moments.find(x => x.id === mId); const c = m.comments.find(x => x.id === cId);
+    if (c.senderId === store.personas[0].id) { if(confirm('删除这条评论？')) { m.comments = m.comments.filter(x => x.id !== cId); window.render(); restoreScroll(); } } 
+    else { window.wxActions.openMomentComment(mId, c.senderName); restoreScroll(); }
+  },
+  favoriteMoment: (id) => {
+    saveScroll();
+    const m = store.moments.find(x => x.id === id); store.favorites = store.favorites || [];
+    store.favorites.push({ id: Date.now(), savedAt: Date.now(), chatName: m.senderName, text: `[朋友圈动态] ${m.text}` });
+    window.actions.showToast('已收藏'); wxState.activeMomentMenuId = null; window.render(); restoreScroll();
+  },
+
+  // ================= 🌟 “我”页面核心动作库 =================
+  updateMyName: (name) => { store.personas[0].name = name; window.render(); },
+  handleMyAvatarUploadMain: (event) => {
+    const file = event.target.files[0]; if (!file) return;
+    const r = new FileReader(); r.onload = (e) => { store.personas[0].avatar = e.target.result; window.render(); }; r.readAsDataURL(file); event.target.value = '';
+  },
+  // 🌟 全局人设弹窗化动作
+  editGlobalPrompt: () => { wxState.showGlobalPromptModal = true; window.render(); },
+  closeGlobalPrompt: () => { wxState.showGlobalPromptModal = false; window.render(); },
+  saveGlobalPrompt: () => {
+    store.globalPrompt = document.getElementById('global-prompt-input').value.trim();
+    wxState.showGlobalPromptModal = false;
+    window.actions.showToast('全局人设已保存！'); window.render();
+  },
+  openView: (v) => { saveScroll(); wxState.view = v; window.render(); },
+  // 📦 收藏夹动作
+  toggleFavManage: () => { wxState.favManageMode = !wxState.favManageMode; wxState.selectedFavIds = []; window.render(); },
+  toggleSelectFav: (id) => {
+    if (wxState.selectedFavIds.includes(id)) wxState.selectedFavIds = wxState.selectedFavIds.filter(i => i !== id);
+    else wxState.selectedFavIds.push(id); window.render();
+  },
+  deleteSelectedFavs: () => {
+    store.favorites = (store.favorites || []).filter(f => !wxState.selectedFavIds.includes(f.id));
+    wxState.favManageMode = false; wxState.selectedFavIds = []; window.render();
+  },
+  
+  // 🎭 身份与马甲动作
+  openPersonaEdit: (id) => { saveScroll(); wxState.editingPersonaId = id; wxState.tempPersonaAvatar = null; wxState.view = 'personaEdit'; window.render(); },
+  handlePersonaAvatarUpload: (event) => {
+    const file = event.target.files[0]; if (!file) return;
+    const r = new FileReader(); r.onload = (e) => { wxState.tempPersonaAvatar = e.target.result; window.render(); }; r.readAsDataURL(file); event.target.value = '';
+  },
+  savePersona: () => {
+    const name = document.getElementById('edit-persona-name').value.trim() || '新身份';
+    const promptStr = document.getElementById('edit-persona-prompt').value.trim();
+    if (wxState.editingPersonaId) {
+      const p = store.personas.find(p => p.id === wxState.editingPersonaId);
+      if (p) { 
+        p.name = name; p.prompt = promptStr; 
+        if (wxState.tempPersonaAvatar) p.avatar = wxState.tempPersonaAvatar;
+      }
+    } else { 
+      store.personas.push({ id: 'p_' + Date.now(), name, prompt: promptStr, avatar: wxState.tempPersonaAvatar }); 
+    }
+    window.actions.showToast('身份保存成功'); wxState.view = 'personaManage'; window.render(); restoreScroll();
+  },
+  deletePersona: (id) => {
+    if (id === store.personas[0].id) return window.actions.showToast('默认身份不可被删除哦');
+    if (!confirm('确定删除该身份吗？')) return;
+    store.personas = store.personas.filter(p => p.id !== id); 
+    wxState.view = 'personaManage'; window.render();
+  },
+  
+  // 🤩 表情包库动作
+  addEmojiLib: () => { store.emojiLibs = store.emojiLibs || []; store.emojiLibs.push({ id: 'el_' + Date.now(), name: '新表情包库', emojis: [] }); window.render(); },
+  renameEmojiLib: (id, name) => { const lib = store.emojiLibs.find(l => l.id === id); if (lib) lib.name = name; },
+  deleteEmojiLib: (id) => { store.emojiLibs = store.emojiLibs.filter(l => l.id !== id); window.render(); },
+  openEmojiEdit: (id) => { saveScroll(); wxState.editingEmojiLibId = id; wxState.view = 'emojiEdit'; window.render(); },
+  addEmojiUrl: () => {
+    const url = prompt("请输入表情包图片 URL 链接："); if (!url) return;
+    const lib = store.emojiLibs.find(l => l.id === wxState.editingEmojiLibId);
+    if (lib) { lib.emojis.push(url); window.render(); }
+  },
+  deleteEmojiUrl: (index) => {
+    const lib = store.emojiLibs.find(l => l.id === wxState.editingEmojiLibId);
+    if (lib) { lib.emojis.splice(index, 1); window.render(); }
+  },
+  uploadEmojiJson: (event) => {
+    const file = event.target.files[0]; if (!file) return;
+    const r = new FileReader();
+    r.onload = (e) => {
+      try {
+        let data = JSON.parse(e.target.result); store.emojiLibs = store.emojiLibs || [];
+        let emojisToAdd = [];
+        let libName = file.name.replace('.json', '');
+
+        // 🌟 智能解析：兼容你提供的高级带 description 结构！
+        if (data.version && data.emojis && Array.isArray(data.emojis)) {
+           if (data.library && data.library.name) libName = data.library.name;
+           emojisToAdd = data.emojis.map(item => ({ url: item.url, name: item.description || item.name || '表情' }));
+        } else if (Array.isArray(data)) {
+           emojisToAdd = data.map(u => ({ url: u, name: '表情' }));
+        } else if (typeof data === 'object') {
+           for (let key in data) {
+              if (Array.isArray(data[key])) emojisToAdd = emojisToAdd.concat(data[key].map(u => ({url: u, name: '表情'})));
+              else if (typeof data[key] === 'string') emojisToAdd.push({ url: data[key], name: key });
+           }
+        }
+        
+        // 过滤掉不合法的图
+        emojisToAdd = emojisToAdd.filter(u => typeof u.url === 'string' && (u.url.startsWith('http') || u.url.startsWith('data:')));
+
+        if (emojisToAdd.length > 0) {
+           store.emojiLibs.push({ id: 'el_' + Date.now(), name: libName, emojis: emojisToAdd });
+           window.actions.showToast(`成功导入 ${emojisToAdd.length} 个表情！`); window.render();
+        } else { window.actions.showToast('未在文件中找到有效的图片链接！'); }
+      } catch (err) { window.actions.showToast('JSON 格式错误，请检查文件！'); }
+    };
+    r.readAsText(file); event.target.value = '';
+  },
+  batchAddEmojis: () => {
+    const input = document.getElementById('batch-emoji-input').value;
+    if (!input.trim()) return window.actions.showToast('请输入内容！');
+    const lines = input.split('\n');
+    const lib = store.emojiLibs.find(l => l.id === wxState.editingEmojiLibId);
+    if (!lib) return;
+    let added = 0;
+    lines.forEach(line => {
+      let text = line.trim(); if (!text) return;
+      let url = text, name = '表情';
+      // 智能提取名字和链接
+      if (text.includes('http')) {
+        url = text.substring(text.indexOf('http')).trim();
+        let prefix = text.substring(0, text.indexOf('http')).trim();
+        if(prefix.endsWith(':') || prefix.endsWith('：')) prefix = prefix.slice(0, -1);
+        if(prefix) name = prefix;
+      } else {
+        const parts = text.split(/[:：]/);
+        if (parts.length > 1) { name = parts[0].trim(); url = parts[1].trim(); }
+      }
+      if (url && (url.startsWith('http') || url.startsWith('data:'))) {
+        lib.emojis.push({ url: url, name: name }); added++;
+      }
+    });
+    window.actions.showToast(`成功导入 ${added} 个表情！`); window.render();
+  },
+
+  // ⚙️ 全新：设置页面控制与图片上传逻辑
+  openSettings: () => { saveScroll(); wxState.view = 'chatSettings'; window.render(); },
+  closeSettings: () => { wxState.view = 'chatRoom'; window.render(); restoreScroll(); },
+  
+  // 触发隐藏的图片上传框
+  triggerAvatarUpload: (targetId) => { document.getElementById(targetId).click(); },
+  
+  // 🌟 找回丢失的头像和通话形象上传处理函数
+  handleSettingImageUpload: (event, targetType) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const char = store.contacts.find(c => c.id === wxState.activeChatId);
+      if (targetType === 'myAvatar') store.personas[0].avatar = e.target.result;
+      if (targetType === 'charAvatar') char.avatar = e.target.result;
+      if (targetType === 'myVideo') store.personas[0].videoAvatar = e.target.result;
+      if (targetType === 'charVideo') char.videoAvatar = e.target.result;
+      window.actions.showToast('图片已加载！');
+      window.render();
+    };
+    reader.readAsDataURL(file);
+    event.target.value = ''; // 清空选择
+  },
+
+  clearSettingBg: () => {
+      saveScroll();
+      const char = store.contacts.find(c => c.id === wxState.activeChatId);
+      char.bgImage = null; // 🌟 存到角色个人数据里
+      window.actions.showToast('该角色的专属背景已清除！');
+      window.render();
+      restoreScroll();
+    },
+    handleSettingBgUpload: (event) => {
+      saveScroll();
+      const file = event.target.files[0]; if (!file) { restoreScroll(); return; }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let w = img.width, h = img.height;
+          const maxSize = 1080; 
+          if (w > h && w > maxSize) { h *= maxSize / w; w = maxSize; }
+          else if (h > maxSize) { w *= maxSize / h; h = maxSize; }
+          canvas.width = w; canvas.height = h;
+          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+          
+          const char = store.contacts.find(c => c.id === wxState.activeChatId);
+          char.bgImage = canvas.toDataURL('image/jpeg', 0.7); // 🌟 存到角色个人数据里
+          
+          window.actions.showToast('专属背景图已加载！记得点保存~');
+          window.render();
+          restoreScroll();
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+      event.target.value = '';
+    },
+
+  // 🎨 CSS 皮肤预设逻辑
+    updateCustomCSS: (val) => {
+      saveScroll();
+      const char = store.contacts.find(c => c.id === wxState.activeChatId);
+      char.customCSS = val;
+      window.render();
+      restoreScroll();
+    },
+
+  saveSettings: () => {
+    const char = store.contacts.find(c => c.id === wxState.activeChatId);
+    store.personas[0].name = document.getElementById('set-my-name').value.trim() || store.personas[0].name;
+    char.name = document.getElementById('set-char-name').value.trim() || char.name;
+    // 🌟 删除了那行导致崩溃的 set-worldbook 代码！
+    char.contextLimit = parseInt(document.getElementById('set-context-limit').value) || 25;
+    
+    char.autoMsgEnabled = document.getElementById('set-auto-msg').checked;
+    const intervalVal = parseFloat(document.getElementById('set-auto-interval').value);
+    char.autoMsgInterval = isNaN(intervalVal) ? 5 : intervalVal;
+    
+    // 🌟 修复：直接读取 char.disableEmoji 和 char.mountedEmojis
+    if (char.disableEmoji) {
+      char.emojis = "【系统最高指令】：你被禁止使用任何表情包。绝对不可输出任何带 [表情包] 字样的指令。";
+    } else {
+      const allowedNames = [];
+      (char.mountedEmojis || []).forEach(libId => { // 修复了这里的变量名
+         const lib = (store.emojiLibs || []).find(l => l.id === libId);
+         if (lib) allowedNames.push(...lib.emojis.map(e => typeof e === 'object' ? e.name : '表情'));
+      });
+      if (allowedNames.length > 0) {
+         const uniqueNames = [...new Set(allowedNames)];
+         char.emojis = `【你的特权指令】：你可以通过发送指令 \`[表情包] 名字\` 来发送表情。你当前唯一允许使用的表情名字词典如下：\n${uniqueNames.join(', ')}\n注意：只能且必须使用词典内包含的名字！`;
+      } else {
+         char.emojis = "";
+      }
+    }
+    char.emojis += `\n【朋友圈特权】：当你在对话中情绪波动较大（如开心、悲伤、感动、生气等）时，可以在回复的最末尾另起一行，加上指令 \`[发朋友圈: 你的动态内容]\`，系统会自动为你发布。`;    
+    
+    char.customCSS = document.getElementById('set-custom-css').value; // 🌟 修复：把 CSS 存进角色个人数据！
+    
+    window.actions.showToast('设置已生效！');
+    wxState.view = 'chatRoom'; window.render(); restoreScroll();
+  },
+
+  sendMessage: () => {
+    const isOffline = wxState.view === 'offlineStory';
+    const isCall = wxState.view === 'call';
+    const input = document.getElementById(isOffline ? 'offline-input' : 'wx-input');
+    const text = input?.value.trim();
+    if (!text) return;
+
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    if (chat) {
+      // 🌟 核心：如果当前在引用状态，就把引用内容打包进这根消息里
+      let quoteData = null;
+      if (wxState.quoteMsgId) {
+        const qMsg = chat.messages.find(m => m.id === wxState.quoteMsgId);
+        if (qMsg) {
+          // 限制引用字数，防止太长撑爆气泡
+          let shortText = qMsg.text.length > 30 ? qMsg.text.substring(0, 30) + '...' : qMsg.text;
+          quoteData = { sender: qMsg.sender, text: shortText };
+        }
+      }
+
+      chat.messages.push({
+        id: Date.now(), sender: store.personas[0].name, text: text,
+        isMe: true, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: 'text', time: getNowTime(),
+        quote: quoteData // 🌟 把打包好的引用数据塞进气泡
+      });
+      
+      input.value = ''; 
+      wxState.quoteMsgId = null; // 发送完立刻清空引用状态
+      window.render();
+      window.wxActions.scrollToBottom();
+      if (isOffline || isCall) setTimeout(() => window.wxActions.getReply(), 500);
+    }
+  },
+
+  // 🌟 修复 Bug：加入了 saveScroll() 和 restoreScroll()
+  openVirtualModal: (type) => { saveScroll(); wxState.showPlusMenu = false; wxState.virtualModalType = type; window.render(); restoreScroll(); },
+  closeVirtualModal: () => { saveScroll(); wxState.virtualModalType = 'none'; window.render(); restoreScroll(); },
+  openTransferModal: (msgId) => { saveScroll(); wxState.activeTransferId = msgId; window.render(); restoreScroll(); },
+  closeTransferModal: () => { saveScroll(); wxState.activeTransferId = null; window.render(); restoreScroll(); },
+
+  handleImageUpload: (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+      if (chat) {
+        chat.messages.push({ id: Date.now(), sender: store.personas[0].name, text: '发送了一张真实照片', imageUrl: e.target.result, isMe: true, source: 'wechat', isOffline: false, msgType: 'real_image', time: getNowTime() });
+        wxState.showPlusMenu = false; window.render(); window.wxActions.scrollToBottom();
+      }
+    };
+    reader.readAsDataURL(file);
+    event.target.value = '';
+  },
+
+  handleTransferAction: (action) => {
+    saveScroll(); // 修复弹窗操作导致的滚动跳跃
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    const msg = chat.messages.find(m => m.id === wxState.activeTransferId);
+    if (!msg) return;
+
+    msg.transferState = action === 'accept' ? 'accepted' : 'returned';
+    const amount = parseFloat(msg.transferData.amount);
+
+    if (action === 'accept') {
+      if (msg.isMe) { store.wallet.balance -= amount; store.wallet.transactions.push({ type: 'out', amount, title: `转账给对方`, date: new Date().toISOString() });
+      } else { store.wallet.balance += amount; store.wallet.transactions.push({ type: 'in', amount, title: `收到转账`, date: new Date().toISOString() }); }
+    }
+    const sysText = action === 'accept' ? `${msg.isMe ? '对方' : store.personas[0].name} 已收款` : `${msg.isMe ? '对方' : store.personas[0].name} 已退还了转账`;
+    chat.messages.push({ id: Date.now(), sender: 'system', text: sysText, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
+    wxState.activeTransferId = null; window.render(); restoreScroll();
+  },
+
+  sendVirtualMedia: () => {
+    // 发送消息不需要记忆位置，直接滚到底部
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    if (!chat) return;
+    if (wxState.virtualModalType === 'transfer') {
+      const amount = document.getElementById('transfer-amount').value.trim();
+      const note = document.getElementById('transfer-note').value.trim() || '转账';
+      if (!amount || isNaN(amount) || Number(amount) <= 0) return window.actions.showToast('请输入有效的金额！');
+      chat.messages.push({ id: Date.now(), sender: store.personas[0].name, text: `[发起转账] 金额：${amount}元，备注：${note}`, transferData: { amount, note }, transferState: 'pending', isMe: true, source: 'wechat', isOffline: false, msgType: 'transfer', time: getNowTime() });
+    } else {
+      const input = document.getElementById('virtual-input');
+      const desc = input.value.trim();
+      if (!desc) return window.actions.showToast('描述不能为空哦！');
+      chat.messages.push({ id: Date.now(), sender: store.personas[0].name, text: desc, isMe: true, source: 'wechat', isOffline: false, msgType: wxState.virtualModalType === 'image' ? 'virtual_image' : 'voice', time: getNowTime() });
+    }
+    wxState.virtualModalType = 'none'; 
+    window.render(); 
+    window.wxActions.scrollToBottom(); // 🌟 修复：渲染完立刻滚到底部看新消息！
+  },
+
+  startCall: (type) => { 
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    chat.messages.push({ id: Date.now(), sender: 'system', text: `你发起了${type === 'video' ? '视频' : '语音'}通话`, isMe: true, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
+    wxState.view = 'call'; wxState.callType = type; wxState.callStartTime = Date.now(); wxState.showPlusMenu = false; 
+
+    // 🌟 修复：你主动打电话也装上秒表
+    wxState.callDurationSeconds = 0;
+    if(wxState.callTimerId) clearInterval(wxState.callTimerId);
+    wxState.callTimerId = setInterval(() => {
+      wxState.callDurationSeconds++;
+      const el = document.getElementById('call-duration-display');
+      if(el) {
+        const m = String(Math.floor(wxState.callDurationSeconds / 60)).padStart(2, '0');
+        const s = String(wxState.callDurationSeconds % 60).padStart(2, '0');
+        el.innerText = `${m}:${s}`;
+      }
+    }, 1000);
+
+    window.render(); window.wxActions.scrollToBottom();
+  },
+  
+  acceptCall: () => {
+    try { wxState.ringtone.pause(); wxState.ringtone.currentTime = 0; } catch(e){} 
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    chat.messages.push({ id: Date.now(), sender: 'system', text: `已接通${wxState.callType === 'video' ? '视频' : '语音'}通话`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
+    wxState.view = 'call'; wxState.callStartTime = Date.now(); 
+    
+    // 🌟 新增：开启独立秒表
+    wxState.callDurationSeconds = 0;
+    if(wxState.callTimerId) clearInterval(wxState.callTimerId);
+    wxState.callTimerId = setInterval(() => {
+      wxState.callDurationSeconds++;
+      const el = document.getElementById('call-duration-display');
+      if(el) {
+        const m = String(Math.floor(wxState.callDurationSeconds / 60)).padStart(2, '0');
+        const s = String(wxState.callDurationSeconds % 60).padStart(2, '0');
+        el.innerText = `${m}:${s}`;
+      }
+    }, 1000);
+
+    window.render();
+    
+    if (wxState.pendingCallMsg) {
+      setTimeout(() => {
+        chat.messages.push({ id: Date.now() + 1, sender: store.contacts.find(c=>c.id===wxState.activeChatId).name, text: wxState.pendingCallMsg, isMe: false, source: 'wechat', isOffline: false, isCallMsg: true, msgType: 'text', time: getNowTime() });
+        wxState.pendingCallMsg = ''; window.render(); window.wxActions.scrollToBottom();
+      }, 600); 
+    }
+  },
+  declineCall: () => {
+    try { wxState.ringtone.pause(); wxState.ringtone.currentTime = 0; } catch(e){}
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    chat.messages.push({ id: Date.now(), sender: 'system', text: `已拒绝通话`, isMe: true, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
+    // 🌟 新增：销毁秒表
+    if(wxState.callTimerId) { clearInterval(wxState.callTimerId); wxState.callTimerId = null; }
+    wxState.view = 'chatRoom'; wxState.callType = null; window.render(); window.wxActions.scrollToBottom();
+  },
+  endCall: () => {
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    chat.messages.push({ id: Date.now(), sender: 'system', text: `通话已挂断`, isMe: true, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
+    // 🌟 新增：销毁秒表
+    if(wxState.callTimerId) { clearInterval(wxState.callTimerId); wxState.callTimerId = null; }
+    wxState.view = 'chatRoom'; wxState.callType = null; wxState.callStartTime = null; window.render(); window.wxActions.scrollToBottom();
+  },
+  
+  enterOffline: () => { wxState.view = 'offlineStory'; wxState.showPlusMenu = false; window.render(); window.wxActions.scrollToBottom(); },
+  exitOffline: () => { wxState.view = 'chatRoom'; window.render(); window.wxActions.scrollToBottom(); },
+
+  // 🧠 大脑中枢解析器 (支持被动回复、主动出击、自动记忆、通话自动播放)
+  getReply: async (isAuto = false, targetCharId = null, customPrompt = null) => {
+    const charId = targetCharId || wxState.activeChatId;
+    const chat = store.chats.find(c => c.charId === charId);
+    const char = store.contacts.find(c => c.id === charId);
+    if (!chat || !char) return;
+
+    const isActive = wxState.activeChatId === charId;
+    if (isActive && !isAuto) { wxState.isTyping = true; window.render(); window.wxActions.scrollToBottom(); }
+
+    // 🌟 核心：自动记忆触发器 (满20条自动总结)
+    const validMsgs = chat.messages.filter(m => !m.isHidden && !(m.msgType || '').includes('system'));
+    const lastSumIndex = chat.lastSummarizedIndex || 0;
+    if (validMsgs.length - lastSumIndex >= 20) {
+       chat.lastSummarizedIndex = validMsgs.length;
+       const msgsToSum = validMsgs.slice(lastSumIndex, validMsgs.length);
+       triggerAutoMemory(charId, msgsToSum);
+    }
+
+    let hiddenMsgId = null;
+    if (isAuto || customPrompt) {
+      hiddenMsgId = Date.now();
+      chat.messages.push({ 
+        id: hiddenMsgId, sender: store.personas[0].name, 
+        text: customPrompt || "（系统提示：距离上条消息已经过了一段时间，请根据当前时间和你的性格主动找我搭话。直接发你想说的话，不要带任何系统提示的字眼。）", 
+        isMe: true, source: 'wechat', isOffline: false, msgType: 'text', isHidden: true 
+      });
+    }
+
+    try {
+      const { callLLM } = await import('../utils/llm.js');
+      const replyText = await callLLM(charId, chat.messages, isActive ? wxState.view === 'offlineStory' : false);
+      if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
+
+      let remainingText = replyText.replace(/\[\d{1,2}:\d{2}\][:：]?\s*/g, '').replace(/\[(线上聊天|线下剧情)\][:：]?\s*/g, '').trim();
+      let msgsToPush = [];
+      let delayedActions = [];
+      let hasSystemAction = false;
+
+      // 拦截电话指令
+      if (/\[发起(语音|视频)?通话\]/.test(remainingText)) {
+        if (wxState.view === 'call') {
+          remainingText = remainingText.replace(/\[发起(语音|视频)?通话\][:：]?\s*/g, '').trim();
+        } else {
+          const match = remainingText.match(/\[发起(语音|视频)?通话\]/);
+          let parts = remainingText.split(/\[发起(语音|视频)?通话\][:：]?\s*/);
+          if (parts[0].trim()) { chat.messages.push({ id: Date.now(), sender: char.name, text: parts[0].trim(), isMe: false, source: 'wechat', isOffline: false, msgType: 'text', time: getNowTime() }); }
+          wxState.pendingCallMsg = parts[2] ? parts[2].trim() : '';
+          wxState.view = 'incomingCall'; wxState.callType = match[1] === '视频' ? 'video' : 'voice'; wxState.isTyping = false; 
+          try { 
+            const ap = store.appearance || {};
+            wxState.ringtone.src = ap.callSound || 'https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3';
+            wxState.ringtone.play(); 
+          } catch(e){}
+          return window.render(); 
+        }
+      }
+      
+      if (/\[(语音|视频)?通话(已)?结束\]/.test(remainingText)) { delayedActions.push('end_call'); remainingText = remainingText.replace(/\[(语音|视频)?通话(已)?结束\][:：]?\s*/g, '').trim(); }
+      if (/\[(点击收款|接收转账)\]/.test(remainingText)) { delayedActions.push('accept_transfer'); remainingText = remainingText.replace(/\[(点击收款|接收转账)\][:：]?\s*/g, '').trim(); }
+      
+      // 拦截朋友圈
+      if (/\[(?:发朋友圈|发布朋友圈)\]/.test(remainingText)) {
+        const match = remainingText.match(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*([^\n\[\]]+)/);
+        if (match) {
+          store.moments = store.moments || [];
+          store.moments.push({ id: Date.now(), senderId: char.id, senderName: char.name, avatar: char.avatar, text: match[1].trim(), imageUrl: null, time: '刚刚', likes: [], comments: [] });
+          hasSystemAction = true;
+        }
+        remainingText = remainingText.replace(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*[^\n\[\]]+/, '').trim();
+      }
+      
+      // 拦截换头像
+      if (/\[更换头像\]/.test(remainingText)) {
+        const match = remainingText.match(/\[更换头像\][:：]?\s*([^\n\[\]]+)/);
+        if (match) {
+          let newAvatar = match[1].trim();
+          if (newAvatar.includes('最新图片')) {
+            const lastImgMsg = chat.messages.slice().reverse().find(m => m.msgType === 'real_image');
+            newAvatar = (lastImgMsg && lastImgMsg.imageUrl) ? lastImgMsg.imageUrl : '❓';
+          }
+          char.avatar = newAvatar;
+          chat.messages.push({ id: Date.now() + 150, sender: 'system', text: `${char.name} 更改了TA的头像`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
+          hasSystemAction = true;
+        }
+        remainingText = remainingText.replace(/\[更换头像\][:：]?\s*[^\n\[\]]+/, '').trim();
+      }
+
+      // 拦截表情包
+      if (/\[(?:发送表情|表情包)\]/.test(remainingText)) {
+        const match = remainingText.match(/\[(?:发送表情|表情包)\][:：]?\s*([^\n\[\]]+)/);
+        if (match) {
+          const emojiName = match[1].trim();
+          let foundUrl = '';
+          for (let libId of (char.mountedEmojis || [])) {
+             const lib = (store.emojiLibs || []).find(l => l.id === libId);
+             if (lib) {
+                 const ep = lib.emojis.find(e => (typeof e === 'object' ? e.name : '') === emojiName);
+                 if (ep) { foundUrl = ep.url; break; }
+             }
+          }
+          if (foundUrl) {
+              chat.messages.push({ id: Date.now() + 150, sender: char.name, text: `[表情包] ${emojiName}`, imageUrl: foundUrl, isMe: false, source: 'wechat', isOffline: false, msgType: 'emoji', time: getNowTime() });
+              hasSystemAction = true;
+          }
+        }
+        remainingText = remainingText.replace(/\[(?:发送表情|表情包)\][\s\S]*/, '').trim();
+      }
+
+      // 拦截改备注
+      if (/\[修改备注\]/.test(remainingText)) {
+        const match = remainingText.match(/\[修改备注\][:：]?\s*([^\n\[\]]+)/);
+        if (match) {
+          store.personas[0].name = match[1].trim().substring(0, 15);
+          chat.messages.push({ id: Date.now() + 160, sender: 'system', text: `${char.name} 将你的备注修改为“${store.personas[0].name}”`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
+          hasSystemAction = true;
+        }
+        remainingText = remainingText.replace(/\[修改备注\][:：]?\s*[^\n\[\]]+/, '').trim();
+      }
+
+      // 拦截撤回
+      if (/\[撤回上一条消息\]/.test(remainingText)) {
+        const aiMsgs = chat.messages.filter(m => !m.isMe && m.msgType !== 'system' && m.msgType !== 'recall_system');
+        if (aiMsgs.length > 0) {
+          const lastAiMsg = aiMsgs[aiMsgs.length - 1];
+          lastAiMsg.recalledText = lastAiMsg.text; 
+          lastAiMsg.text = `${char.name} 撤回了一条消息`;
+          lastAiMsg.msgType = 'recall_system'; 
+          lastAiMsg.quote = null;
+        }
+        remainingText = remainingText.replace(/\[撤回上一条消息\][:：]?\s*/, '').trim();
+        hasSystemAction = true;
+      }
+
+      // 拦截对方反击的戳一戳
+      if (/\[戳一戳\]/.test(remainingText)) {
+        const verb = char.nudgeAIVerb || '拍了拍';
+        const suffix = char.nudgeAISuffix || '';
+        chat.messages.push({ id: Date.now() + 50, sender: 'system', text: `${char.name}${verb}了我${suffix}`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
+        remainingText = remainingText.replace(/\[戳一戳\][:：]?\s*/g, '').trim();
+        hasSystemAction = true;
+      }
+
+      if (wxState.view === 'chatRoom') remainingText = remainingText.replace(/\*[^*]*\*/g, '').replace(/[(（][^)）]*[)）]/g, '').trim();
+
+      if (/\[发起转账\]/.test(remainingText)) {
+        let parts = remainingText.split(/\[发起转账\][:：]?\s*/);
+        if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+        const tStr = parts[1] || '';
+        const amount = (tStr.match(/金额[:：]?\s*(\d+(\.\d+)?)/) || [])[1] || '520.00';
+        const note = (tStr.match(/备注[:：]?\s*([^，,。\]\n]+)/) || [])[1] || '转账给你';
+        msgsToPush.push({ msgType: 'transfer', text: `[收到转账] 金额：${amount}元，备注：${note}`, transferData: { amount, note }, transferState: 'pending' });
+      } else if (/\[语音\]/.test(remainingText)) {
+        let parts = remainingText.split(/\[语音\][:：]?\s*/);
+        if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+        if (parts[1].trim()) msgsToPush.push({ msgType: 'voice', text: parts[1].trim() });
+      } else if (/\[虚拟照片\]/.test(remainingText)) {
+        let parts = remainingText.split(/\[虚拟照片\][:：]?\s*/);
+        if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+        if (parts[1].trim()) msgsToPush.push({ msgType: 'virtual_image', text: parts[1].trim() });
+      } else {
+        if (remainingText.trim()) {
+          if (wxState.view === 'offlineStory') { 
+            msgsToPush.push({ msgType: 'text', text: remainingText.trim() });
+          } else {
+            const lines = remainingText.split('\n');
+            lines.forEach(line => {
+              const fragments = line.split(/(\*[^*]+\*)/); 
+              fragments.forEach(frag => {
+                const t = frag.trim();
+                if (!t) return;
+                // 只有 * 包裹的才是动作，其他的都是文本
+                if (t.startsWith('*') && t.endsWith('*') && wxState.view === 'call') msgsToPush.push({ msgType: 'action', text: t.slice(1, -1) });
+                else msgsToPush.push({ msgType: 'text', text: t });
+              });
+            });
+          }
+        }
+      }
+
+      const isCall = wxState.view === 'call';
+      const finalMsgs = [];
+      msgsToPush.forEach((m, index) => {
+        const newMsg = { 
+          id: Date.now() + index, sender: m.msgType === 'system' ? 'system' : char.name, text: m.text, isMe: false, source: 'wechat', 
+          isOffline: wxState.view === 'offlineStory', isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime()
+        };
+        chat.messages.push(newMsg);
+        finalMsgs.push(newMsg);
+      });
+
+      // Minimax 语音排队生成链条 (放宽权限，只要有音色ID就默认发声)
+      if (char.minimaxVoiceId) { 
+         if (store.minimaxConfig?.enabled === false) {
+             // 全局开关已关，保持静默
+         } else if (!store.minimaxConfig?.apiKey || !store.minimaxConfig?.groupId) {
+             if (isCall) window.actions.showToast('⚠️ 全局语音配置未填，无法发声');
+         } else {
+             // 进入排队
+             (async () => {
+                for (const m of finalMsgs) {
+                   if (m.msgType === 'voice' || (isCall && m.msgType === 'text')) {
+                      const url = await fetchMinimaxVoice(m.text, char.minimaxVoiceId);
+                      if (url) { 
+                         m.audioUrl = url; 
+                         window.render(); 
+                         
+                         // 打电话时自动排队播放
+                         if (isCall && m.msgType === 'text') {
+                             await new Promise(resolve => {
+                                 const audio = new Audio(url);
+                                 audio.onended = resolve; 
+                                 audio.onerror = resolve; 
+                                 audio.play().catch(e => resolve());
+                             });
+                         }
+                      }
+                   }
+                }
+             })();
+         }
+      }
+
+      // 普通文字消息的提示音
+      if (msgsToPush.length > 0 && !isCall) {
+         try {
+           const ap = store.appearance || {};
+           const audioUrl = ap.newMsgSound || 'https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3';
+           new Audio(audioUrl).play().catch(()=>{});
+         } catch(e) {}
+      }
+
+      if (delayedActions.includes('accept_transfer')) {
+        const lastTransfer = chat.messages.slice().reverse().find(m => m.msgType === 'transfer' && m.isMe && m.transferState === 'pending');
+        if (lastTransfer) {
+          lastTransfer.transferState = 'accepted'; 
+          const amt = parseFloat(lastTransfer.transferData.amount);
+          store.wallet.balance -= amt; 
+          store.wallet.transactions.push({ type: 'out', amount: amt, title: `转账给 ${char.name}`, date: new Date().toISOString() });
+          chat.messages.push({ id: Date.now() + 100, sender: 'system', text: '对方已收款', isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
+        }
+      }
+      if (delayedActions.includes('end_call')) {
+        chat.messages.push({ id: Date.now() + 200, sender: 'system', text: '对方已挂断通话', isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
+        wxState.view = 'chatRoom'; wxState.callType = null; wxState.callStartTime = null;
+      }
+      if (msgsToPush.length === 0 && delayedActions.length === 0 && !hasSystemAction && wxState.view !== 'incomingCall') {
+        chat.messages.push({ 
+          id: Date.now() + 100, sender: char.name, text: `[系统] API返回了空消息或被规则拦截，请重roll`, 
+          isMe: false, source: 'wechat', isOffline: false, msgType: 'text', time: getNowTime() 
+        });
+      }
+
+    } catch (error) { 
+      // 🌟 核心：检测是不是因为切到后台导致请求被系统掐断了
+      if (document.hidden) {
+         chat.messages.push({ 
+           id: Date.now(), sender: 'system', text: `你刚刚切出了页面，导致与大模型的连接被系统中断。请点击重roll重新发送。`, 
+           isMe: true, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() 
+         });
+      } else {
+         chat.messages.push({ 
+           id: Date.now(), sender: char.name, text: `[系统] 请求失败: ${error.message} (点击重roll)`, 
+           isMe: false, source: 'wechat', isOffline: false, msgType: 'text', time: getNowTime() 
+         });
+      }
+    } finally {
+      if (isActive) { wxState.isTyping = false; window.render(); window.wxActions.scrollToBottom(); }
+      else { window.render(); }
+    }
+  },
+};
+
+// --- 渲染 UI ---
+export function renderWeChatApp(store) {
+  // 🌟 初始化旧数据的分组字段
+  if (!store.groups || store.groups.length === 0) store.groups = [{ id: 'default', name: '默认分组' }];
+  store.contacts.forEach(c => { if (!c.groupId) c.groupId = 'default'; });
+
+  const char = store.contacts.find(c => c.id === wxState.activeChatId);
+  const chatData = store.chats.find(c => c.charId === wxState.activeChatId) || { messages: [] };
+  const myAvatar = store.personas[0].avatar;
+
+  // 📷 头像渲染辅助函数：修复了强制圆形导致视频也变圆的问题
+  const getVidHtml = (val, defaultVal, isBg) => {
+    let v = val || defaultVal || '';
+    if (v.length > 100 && !v.startsWith('http') && !v.startsWith('data:')) v = 'data:image/jpeg;base64,' + v;
+    if (v.includes('http') || v.startsWith('data:')) {
+      // 🌟 移除了这里的 rounded-full，让外层的 div 来决定它是圆的还是方的
+      return `<img src="${v}" class="w-full h-full object-cover ${isBg ? 'opacity-40' : ''}" />`;
+    }
+    
+    // 如果是真实的图片（带链接或 Base64）
+    if (v.includes('http') || v.startsWith('data:')) {
+      return `<img src="${v}" class="w-full h-full object-cover ${isBg ? '' : 'rounded-full'}" />`;
+    }
+    
+    // 如果是 Emoji 或普通文字（加入 overflow-hidden 防止任何意外溢出）
+    return `<div class="w-full h-full flex items-center justify-center overflow-hidden ${isBg ? 'opacity-30 text-[150px]' : 'text-5xl'}">${v}</div>`;
+  };
+
+  // ⚙️ 场景 0.5：究极进化版聊天设置页面 (强迫症对齐版)
+  if (wxState.view === 'chatSettings') {
+    return `
+      <style>
+        .ios-switch { position: relative; width: 44px; height: 24px; appearance: none; background: #e5e5ea; border-radius: 24px; outline: none; cursor: pointer; transition: background 0.3s ease; }
+        .ios-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: transform 0.3s ease; }
+        .ios-switch:checked { background: #34c759; }
+        .ios-switch:checked::after { transform: translateX(20px); }
+      </style>
+      
+      <div class="w-full h-full bg-[#f3f3f3] flex flex-col relative animate-in slide-in-from-right-4 duration-200 z-50">
+         <div class="bg-white/90 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 sticky top-0 z-10">
+           <div class="w-1/4 cursor-pointer text-gray-800" onclick="window.wxActions.closeSettings()"><i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i></div>
+           <span class="flex-1 text-center font-bold text-gray-800">聊天设置</span>
+           <div class="w-1/4"></div>
+         </div>
+         
+         <div id="settings-scroll" class="flex-1 overflow-y-auto p-4 space-y-4 hide-scrollbar pb-20">
+            <input type="file" id="upload-my-avatar" accept="image/*" class="hidden" onchange="window.wxActions.handleSettingImageUpload(event, 'myAvatar')" />
+            <input type="file" id="upload-char-avatar" accept="image/*" class="hidden" onchange="window.wxActions.handleSettingImageUpload(event, 'charAvatar')" />
+            <input type="file" id="upload-my-video" accept="image/*" class="hidden" onchange="window.wxActions.handleSettingImageUpload(event, 'myVideo')" />
+            <input type="file" id="upload-char-video" accept="image/*" class="hidden" onchange="window.wxActions.handleSettingImageUpload(event, 'charVideo')" />
+            <input type="file" id="upload-bg-image" accept="image/*" class="hidden" onchange="window.wxActions.handleSettingBgUpload(event)" />
+
+            <div class="bg-white rounded-[16px] p-4 space-y-4 shadow-sm border border-gray-100">
+               <div class="flex justify-between items-center mb-2">
+                 <span class="text-[15px] font-medium text-gray-800 w-1/3">我的头像</span>
+                 <div class="flex-1 flex justify-end">
+                   <div class="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden" onclick="window.wxActions.triggerAvatarUpload('upload-my-avatar')">${getVidHtml(myAvatar, false)}</div>
+                 </div>
+               </div>
+               <div class="flex justify-between items-center">
+                 <span class="text-[15px] font-medium text-gray-800 w-1/3">我的备注</span>
+                 <input id="set-my-name" value="${store.personas[0].name}" class="flex-1 text-right outline-none bg-transparent py-1 text-[15px] text-black font-medium" placeholder="输入备注" />
+               </div>
+
+               <div class="flex justify-between items-center border-t border-gray-100 pt-4 mb-2">
+                 <span class="text-[15px] font-medium text-gray-800 w-1/3">对方头像</span>
+                 <div class="flex-1 flex justify-end">
+                   <div class="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden" onclick="window.wxActions.triggerAvatarUpload('upload-char-avatar')">${getVidHtml(char.avatar, false)}</div>
+                 </div>
+               </div>
+               <div class="flex justify-between items-center">
+                 <span class="text-[15px] font-medium text-gray-800 w-1/3">对方备注</span>
+                 <input id="set-char-name" value="${char.name}" class="flex-1 text-right outline-none bg-transparent py-1 text-[15px] text-black font-medium" placeholder="输入备注" />
+               </div>
+            </div>
+
+            <div class="bg-white rounded-[16px] p-4 space-y-4 shadow-sm border border-gray-100">
+               <div class="flex justify-between items-center">
+                 <div class="flex flex-col w-2/3"><span class="text-[15px] font-medium text-gray-800">我的视频画面</span><span class="text-xs text-gray-500">默认使用头像</span></div>
+                 <div class="w-12 h-16 bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden" onclick="window.wxActions.triggerAvatarUpload('upload-my-video')">${getVidHtml(store.personas[0].videoAvatar, myAvatar, false)}</div>
+               </div>
+               <div class="flex justify-between items-center border-t border-gray-100 pt-4">
+                 <div class="flex flex-col w-2/3"><span class="text-[15px] font-medium text-gray-800">对方视频画面</span><span class="text-xs text-gray-500">默认使用头像</span></div>
+                 <div class="w-12 h-16 bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden" onclick="window.wxActions.triggerAvatarUpload('upload-char-video')">${getVidHtml(char.videoAvatar, char.avatar, false)}</div>
+               </div>
+            </div>
+
+            <div class="bg-white rounded-[16px] p-4 mb-4 shadow-sm border border-gray-100 flex flex-col space-y-3">
+             <span class="text-[15px] font-medium text-gray-800 block">设置戳一戳</span>
+             <div class="flex flex-col space-y-2">
+               <span class="text-[12px] font-medium text-gray-500">双击头像触发</span>
+               <div class="flex items-center space-x-2">
+                  <span class="text-[13px] text-gray-600">我</span>
+                  <input type="text" value="${char.nudgeMeVerb || '拍了拍'}" onchange="window.wxActions.updateNudge('meVerb', this.value)" class="w-20 bg-gray-50 border border-gray-100 rounded-lg p-2 outline-none text-[13px] text-center" placeholder="拍了拍" />
+                  <span class="text-[13px] text-gray-600">TA</span>
+                  <input type="text" value="${char.nudgeMeSuffix || ''}" onchange="window.wxActions.updateNudge('meSuffix', this.value)" class="flex-1 bg-gray-50 border border-gray-100 rounded-lg p-2 outline-none text-[13px]" placeholder="如：的小脑袋" />
+               </div>
+             </div>
+               <div class="flex items-center space-x-2">
+                  <span class="text-[13px] text-gray-600">TA</span>
+                  <input type="text" value="${char.nudgeAIVerb || '拍了拍'}" onchange="window.wxActions.updateNudge('aiVerb', this.value)" class="w-20 bg-gray-50 border border-gray-100 rounded-lg p-2 outline-none text-[13px] text-center" placeholder="拍了拍" />
+                  <span class="text-[13px] text-gray-600">我</span>
+                  <input type="text" value="${char.nudgeAISuffix || ''}" onchange="window.wxActions.updateNudge('aiSuffix', this.value)" class="flex-1 bg-gray-50 border border-gray-100 rounded-lg p-2 outline-none text-[13px]" placeholder="如：的肩膀" />
+               </div>
+          </div>
+
+            <div class="bg-white rounded-[16px] p-4 mb-4 shadow-sm border border-gray-100 flex justify-between items-center">
+                 <div class="flex items-center cursor-pointer active:opacity-50 transition-opacity flex-1" onclick="document.getElementById('upload-bg-image').click()">
+                    <i data-lucide="image" class="w-5 h-5 mr-3 text-blue-500"></i>
+                    <span class="text-[15px] font-medium text-gray-800">设置聊天背景图</span>
+                 </div>
+                 <div class="flex items-center">
+                   ${char.bgImage ? `<div class="p-1.5 bg-red-50 hover:bg-red-100 rounded-lg mr-3 cursor-pointer active:scale-90 transition-colors" onclick="window.wxActions.clearSettingBg()"><i data-lucide="trash-2" class="w-4 h-4 text-red-500"></i></div>` : ''}
+                   <span class="text-[12px] font-medium text-gray-500 mr-1 cursor-pointer" onclick="document.getElementById('upload-bg-image').click()">${char.bgImage ? '已设置' : '未设置'}</span>
+                   <i data-lucide="chevron-right" class="text-gray-600 w-4 h-4 cursor-pointer" onclick="document.getElementById('upload-bg-image').click()"></i>
+                 </div>
+            </div>
+
+          <div class="bg-white rounded-[16px] mb-4 shadow-sm border border-gray-100 flex flex-col overflow-hidden">
+             
+             <div class="p-4 flex justify-between items-center cursor-pointer active:bg-gray-50 transition-colors border-b border-gray-50" onclick="window.wxActions.toggleWbMountModal()">
+               <span class="text-[15px] font-medium text-gray-800">挂载世界书</span>
+               <div class="flex items-center">
+                 <span class="text-[14px] text-gray-400 mr-1">${char.mountedWorldbooks && char.mountedWorldbooks.length > 0 ? `已挂载 ${char.mountedWorldbooks.length} 个` : '未挂载'}</span>
+                 <i data-lucide="chevron-right" class="text-gray-300 w-4 h-4"></i>
+               </div>
+             </div>
+             
+             <div class="p-4 flex justify-between items-center cursor-pointer active:bg-gray-50 transition-colors border-b border-gray-50" onclick="window.wxActions.toggleEmojiMountModal()">
+               <span class="text-[15px] font-medium text-gray-800">挂载表情包</span>
+               <div class="flex items-center">
+                 <span class="text-[14px] text-gray-400 mr-1">${char.mountedEmojis && char.mountedEmojis.length > 0 ? `已挂载 ${char.mountedEmojis.length} 个` : '未挂载'}</span>
+                 <i data-lucide="chevron-right" class="text-gray-300 w-4 h-4"></i>
+               </div>
+             </div>
+
+             <div class="p-4 flex justify-between items-center cursor-pointer active:bg-gray-50 transition-colors" onclick="window.wxActions.toggleDisableEmoji()">
+               <span class="text-[15px] font-medium text-gray-800">禁止该角色使用表情包</span>
+               <div class="relative w-[42px] h-[24px] rounded-full transition-colors duration-300 ${char.disableEmoji ? 'bg-[#34c759]' : 'bg-[#e5e5ea]'}">
+                 <div class="absolute top-[2px] left-[2px] w-[20px] h-[20px] bg-white rounded-full transition-transform duration-300 shadow-sm ${char.disableEmoji ? 'translate-x-[18px]' : ''}"></div>
+               </div>
+             </div>
+
+          </div>
+
+            <div class="bg-white rounded-[16px] p-4 space-y-4 shadow-sm border border-gray-100">
+               <div class="flex justify-between items-center">
+                 <span class="text-[15px] font-medium text-gray-800">允许角色主动聊天</span>
+                 <input type="checkbox" id="set-auto-msg" ${char.autoMsgEnabled ? 'checked' : ''} class="ios-switch" />
+               </div>
+               <div class="flex justify-between items-center border-t border-gray-100 pt-4">
+                 <span class="text-[15px] font-medium text-gray-800">未读冷落触发时长</span>
+                 <div class="flex items-center"><input type="number" id="set-auto-interval" value="${char.autoMsgInterval || 5}" class="w-12 text-center outline-none bg-gray-50 p-1.5 rounded-lg text-[15px] font-medium text-black" /><span class="ml-2 text-[13px] text-gray-500">分钟</span></div>
+               </div>
+               <div class="flex justify-between items-center border-t border-gray-100 pt-4">
+                 <div class="flex flex-col"><span class="text-[15px] font-medium text-gray-800">附带历史记忆条数</span><span class="text-[10px] text-gray-500">1-100，越大越耗Token</span></div>
+                 <div class="flex items-center"><input type="number" id="set-context-limit" value="${char.contextLimit || 25}" class="w-12 text-center outline-none bg-gray-50 p-1.5 rounded-lg text-[15px] font-medium text-black" /><span class="ml-2 text-[13px] text-gray-500">回合</span></div>
+               </div>
+            </div>
+
+            <div class="bg-white rounded-[16px] p-4 space-y-3 shadow-sm border border-gray-100 flex flex-col">
+               <div class="flex justify-between items-center">
+                 <span class="text-[15px] font-medium text-gray-800">CSS界面美化设置</span>
+                 <select onchange="window.wxActions.applyCSSPreset(event)" class="bg-gray-50 outline-none text-xs p-1.5 rounded-md text-gray-600 border border-gray-200">
+                   <option value="">-- 选择预设 --</option>
+                   ${(store.cssPresets || []).map(p => `<option value="${p.id}">${p.name}</option>`).join('')}
+                 </select>
+               </div>
+               <textarea id="set-custom-css" rows="6" class="w-full bg-white text-black border border-gray-200 rounded-xl p-3 outline-none text-[11px] font-mono resize-none hide-scrollbar shadow-inner leading-relaxed" placeholder="编写或加载 CSS 代码...">${char.customCSS || ''}</textarea>
+               <div class="flex justify-end pt-1">
+                 <button onclick="window.wxActions.saveCSSPreset()" class="text-xs text-[#07c160] font-bold bg-green-50 px-3 py-1.5 rounded-full active:scale-95 transition-transform"><i data-lucide="save" class="inline-block w-3 h-3 mr-1"></i>保存为新预设</button>
+               </div>
+            </div>
+            
+            <button onclick="window.wxActions.saveSettings()" class="w-full py-3.5 mt-2 bg-[#07c160] text-white font-bold rounded-xl active:scale-95 transition-transform shadow-md">保存并应用</button>
+         </div>
+         ${wxState.showEmojiMountModal ? `
+          <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in backdrop-blur-sm p-4" onclick="window.wxActions.toggleEmojiMountModal()">
+            <div class="bg-[#f6f6f6] w-[90%] max-h-[70vh] rounded-[24px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+              <div class="bg-white px-5 py-4 flex justify-between items-center border-b border-gray-100 shadow-sm shrink-0">
+                <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="smile" class="text-[#07c160] mr-2 w-5 h-5"></i>管理挂载的表情包</span>
+                <i data-lucide="x" class="text-gray-400 cursor-pointer active:scale-90 transition-transform bg-gray-50 p-1 rounded-full w-6 h-6" onclick="window.wxActions.toggleEmojiMountModal()"></i>
+              </div>
+              <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar">
+                ${(store.emojiLibs || []).map(lib => `
+                  <div class="bg-white rounded-xl p-3 flex items-center justify-between shadow-sm border ${char.mountedEmojis && char.mountedEmojis.includes(lib.id) ? 'border-[#07c160]' : 'border-gray-100'} cursor-pointer active:scale-[0.98] transition-all" onclick="window.wxActions.toggleEmojiMount('${lib.id}')">
+                     <div class="flex flex-col flex-1 overflow-hidden mr-3">
+                        <span class="text-[14px] font-bold ${char.mountedEmojis && char.mountedEmojis.includes(lib.id) ? 'text-[#07c160]' : 'text-gray-800'} truncate">${lib.name}</span>
+                        <span class="text-[10px] text-gray-400 mt-0.5">包含 ${lib.emojis.length} 个表情</span>
+                     </div>
+                     <div class="w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${char.mountedEmojis && char.mountedEmojis.includes(lib.id) ? 'bg-[#07c160] border-[#07c160]' : 'border-gray-300'}">
+                        ${char.mountedEmojis && char.mountedEmojis.includes(lib.id) ? '<i data-lucide="check" class="text-white w-4 h-4"></i>' : ''}
+                     </div>
+                  </div>
+                `).join('')}
+                ${(store.emojiLibs || []).length === 0 ? '<div class="text-center text-gray-400 mt-10 text-[12px] font-bold">还没有导入过表情包哦</div>' : ''}
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${wxState.showWbMountModal ? `
+          <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in backdrop-blur-sm p-4" onclick="window.wxActions.toggleWbMountModal()">
+            <div class="bg-[#f6f6f6] w-[90%] max-h-[75vh] rounded-[24px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+              <div class="bg-white px-5 py-4 flex justify-between items-center border-b border-gray-100 shadow-sm shrink-0">
+                 <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="book-open" class="text-purple-500 mr-2 w-5 h-5"></i>挂载局部世界书</span>
+                 <i data-lucide="x" class="text-gray-400 cursor-pointer active:scale-90 transition-transform bg-gray-50 p-1 rounded-full w-6 h-6" onclick="window.wxActions.toggleWbMountModal()"></i>
+              </div>
+              
+              <div class="bg-white px-4 py-3 border-b border-gray-100 shrink-0">
+                 <select class="w-full bg-gray-50 border border-gray-100 rounded-xl p-2.5 outline-none text-[13px] font-bold text-gray-700 cursor-pointer" onchange="window.wxActions.setWbMountGroup(this.value)">
+                    <option value="全部" ${wxState.activeWbGroup === '全部' ? 'selected' : ''}>全部分组</option>
+                    ${(store.wbGroups['local'] || []).map(g => `<option value="${g}" ${wxState.activeWbGroup === g ? 'selected' : ''}>${g}</option>`).join('')}
+                 </select>
+              </div>
+
+              <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar">
+                 ${(() => {
+                    const char = store.contacts.find(c => c.id === wxState.activeChatId);
+                    const mounted = char.mountedWorldbooks || [];
+                    const localWbs = (store.worldbooks || []).filter(w => w.type === 'local' && (wxState.activeWbGroup === '全部' || w.group === wxState.activeWbGroup));
+                    if(localWbs.length === 0) return '<div class="text-center text-gray-400 mt-10 text-[12px] font-bold">该分组下没有局部世界书哦</div>';
+                    
+                    return localWbs.map(w => `
+                      <div class="bg-white rounded-xl p-3 flex items-center justify-between shadow-sm border ${mounted.includes(w.id) ? 'border-purple-300' : 'border-gray-100'} cursor-pointer active:scale-[0.98] transition-all" onclick="window.wxActions.toggleWbMount('${w.id}')">
+                         <div class="flex flex-col flex-1 overflow-hidden mr-3">
+                            <span class="text-[14px] font-bold ${mounted.includes(w.id) ? 'text-purple-600' : 'text-gray-800'} truncate">${w.title}</span>
+                            <span class="text-[10px] text-gray-400 mt-0.5">${w.group}</span>
+                         </div>
+                         <div class="w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${mounted.includes(w.id) ? 'bg-purple-500 border-purple-500' : 'border-gray-300'}">
+                            ${mounted.includes(w.id) ? '<i data-lucide="check" class="text-white w-4 h-4"></i>' : ''}
+                         </div>
+                      </div>
+                    `).join('');
+                 })()}
+              </div>
+            </div>
+          </div>
+        ` : ''}
+      </div>
+    `;
+  }
+
+  // 📝 场景 0.6：通讯录 - 角色编辑/创建界面
+  if (wxState.view === 'contactEdit') {
+    const isNew = !wxState.editingContactId;
+    const charData = isNew ? {} : store.contacts.find(c => c.id === wxState.editingContactId);
+    const displayAvatar = wxState.tempAvatar || charData.avatar;
+    
+    return `
+      <style>
+        .ios-switch { position: relative; width: 44px; height: 24px; appearance: none; background: #e5e5ea; border-radius: 24px; outline: none; cursor: pointer; transition: background 0.3s ease; }
+        .ios-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: transform 0.3s ease; }
+        .ios-switch:checked { background: #34c759; }
+        .ios-switch:checked::after { transform: translateX(20px); }
+      </style>
+      <div class="w-full h-full bg-[#f3f3f3] flex flex-col relative animate-in slide-in-from-bottom-4 duration-200 z-50">
+         <div class="bg-white/90 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 sticky top-0 z-10">
+           <div class="w-1/4 cursor-pointer text-gray-800" onclick="window.wxActions.closeSubView()"><i data-lucide="chevron-down" style="width: 28px; height: 28px;"></i></div>
+           <span class="flex-1 text-center font-bold text-gray-800">${isNew ? '创建新角色' : '编辑角色'}</span>
+           <div class="w-1/4"></div> </div>
+         
+         <div class="flex-1 overflow-y-auto p-4 space-y-4 hide-scrollbar pb-10">
+            <input type="file" id="upload-edit-avatar" accept="image/*" class="hidden" onchange="window.wxActions.handleContactAvatarUpload(event)" />
+            
+            <div class="bg-white rounded-[12px] p-6 shadow-sm border border-gray-100 flex flex-col items-center justify-center">
+               <div class="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden shadow-sm mb-3" onclick="document.getElementById('upload-edit-avatar').click()">${getVidHtml(displayAvatar, false)}</div>
+               <span class="text-xs text-gray-500 font-medium tracking-widest">点击更换头像</span>
+            </div>
+
+            <div class="bg-white rounded-[12px] px-4 shadow-sm border border-gray-100">
+               <div class="flex items-center py-3.5 border-b border-gray-100">
+                 <span class="w-24 text-[15px] font-medium text-gray-800">名字</span>
+                 <input id="edit-char-name" value="${charData.name || ''}" class="flex-1 outline-none bg-transparent text-[15px] text-black font-bold"/>
+               </div>
+               <div class="flex items-center py-3.5 border-b border-gray-100">
+                 <span class="w-24 text-[15px] font-medium text-gray-800">所属分组</span>
+                 <select id="edit-char-group" class="flex-1 outline-none text-[15px] text-gray-800 font-medium bg-transparent appearance-none">
+                   ${store.groups.map(g => `<option value="${g.id}" ${(charData.groupId || 'default') === g.id ? 'selected' : ''}>${g.name}</option>`).join('')}
+                 </select>
+               </div>
+               <div class="flex items-center py-3.5 cursor-pointer active:opacity-50" onclick="window.wxActions.togglePersonaMountModal()">
+                 <span class="w-24 text-[15px] font-medium text-gray-800">绑定身份</span>
+                 <div class="flex-1 flex justify-end items-center">
+                   ${(() => {
+                     const pId = wxState.tempBoundPersonaId || charData.boundPersonaId || store.personas[0].id;
+                     const p = store.personas.find(x => x.id === pId) || store.personas[0];
+                     return `<div class="flex items-center"><div class="w-6 h-6 bg-gray-100 rounded-full flex items-center justify-center mr-2 text-xs border border-gray-200 overflow-hidden shadow-sm">${getVidHtml(p.avatar, '', false)}</div><span class="text-[15px] text-gray-600 font-medium">${p.name || store.personas[0].name}</span></div>`;
+                   })()}
+                   <i data-lucide="chevron-right" class="text-gray-300 w-4 h-4 ml-2"></i>
+                 </div>
+               </div>
+            </div>
+
+            <div class="bg-white rounded-[12px] p-4 shadow-sm border border-gray-100 space-y-3">
+               <span class="text-[15px] font-medium text-gray-800 block">人设</span>
+               <textarea id="edit-char-prompt" rows="4" class="w-full bg-gray-50 rounded-lg p-3 outline-none text-[14px] resize-none text-gray-700 leading-relaxed hide-scrollbar" placeholder="输入角色的性格、背景等详细设定...">${charData.prompt || ''}</textarea>
+            </div>
+
+            <div class="bg-white rounded-[12px] p-4 shadow-sm border border-gray-100 space-y-3">
+               <span class="text-[15px] font-medium text-gray-800 block">开场白</span>
+               <textarea id="edit-char-greeting" rows="2" class="w-full bg-gray-50 rounded-lg p-3 outline-none text-[14px] resize-none text-gray-700 leading-relaxed hide-scrollbar" placeholder="新建角色后，TA对你说的第一句话...">${charData.greeting || ''}</textarea>
+            </div>
+
+            <div class="bg-white rounded-[12px] px-4 py-1 shadow-sm border border-gray-100">
+               <div class="flex justify-between items-center py-3.5 border-b border-gray-100">
+                 <span class="text-[15px] font-medium text-gray-800">MiniMax 语音系统</span>
+                 <input type="checkbox" id="edit-char-voice-enabled" ${charData.minimaxVoiceEnabled ? 'checked' : ''} class="ios-switch" />
+               </div>
+               <div class="flex items-center py-3.5">
+                 <span class="w-24 text-[15px] text-gray-600">音色 ID</span>
+                 <input id="edit-char-voice-id" value="${charData.minimaxVoiceId || ''}" class="flex-1 outline-none bg-transparent text-[14px] text-gray-800 font-mono bg-gray-50 px-2 py-1 rounded" placeholder="例：male-qn-qingse" />
+               </div>
+            </div>
+            
+            <button onclick="window.wxActions.saveContact()" class="w-full py-3.5 mt-4 bg-[#07c160] text-white font-bold rounded-[12px] active:scale-95 transition-transform shadow-sm">保存角色</button>
+            ${!isNew ? `<button onclick="window.wxActions.deleteContact()" class="w-full py-3.5 mt-2 bg-white text-red-500 font-bold rounded-[12px] active:bg-gray-50 transition-colors border border-red-100 shadow-sm">删除角色</button>` : ''}
+         </div>
+         ${wxState.showPersonaMountModal ? `
+              <div class="absolute inset-0 bg-black/40 z-[60] flex items-end justify-center animate-in fade-in backdrop-blur-sm" onclick="window.wxActions.togglePersonaMountModal()">
+                <div class="bg-[#f3f3f3] w-full rounded-t-[24px] overflow-hidden shadow-2xl animate-in slide-in-from-bottom-4 duration-300 flex flex-col max-h-[70vh]" onclick="event.stopPropagation()">
+                  <div class="bg-white px-4 py-4 flex justify-between items-center border-b border-gray-100">
+                    <div class="cursor-pointer active:opacity-50" onclick="window.wxActions.togglePersonaMountModal()"><i data-lucide="chevron-left" class="w-6 h-6 text-gray-600"></i></div>
+                    <span class="font-medium text-gray-800 text-[16px]">选择与之聊天的身份</span>
+                    <div class="w-8"></div>
+                  </div>
+                  <div class="flex-1 overflow-y-auto p-4 space-y-3 bg-[#f3f3f3] hide-scrollbar">
+                    ${store.personas.map(p => {
+                      const currentPId = wxState.tempBoundPersonaId || charData.boundPersonaId || store.personas[0].id;
+                      const isSel = p.id === currentPId;
+                      return `
+                      <div class="bg-white rounded-xl p-4 flex justify-between items-center shadow-sm cursor-pointer active:scale-95 transition-transform border ${isSel ? 'border-[#07c160]' : 'border-transparent'}" onclick="window.wxActions.selectBoundPersona('${p.id}')">
+                        <div class="flex items-center space-x-3">
+                          <div class="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-xl overflow-hidden shadow-sm border border-gray-100">${getVidHtml(p.avatar, '', false)}</div>
+                          <div class="flex flex-col">
+                            <span class="font-medium text-gray-800 text-[15px]">${p.name || store.personas[0].name}</span>
+                            <span class="text-[11px] text-gray-400 mt-0.5 w-48 truncate">${p.prompt || '暂无设定内容'}</span>
+                          </div>
+                        </div>
+                        <div class="w-6 h-6 rounded-full border-2 flex items-center justify-center ${isSel ? 'bg-[#07c160] border-[#07c160]' : 'border-gray-300'}"><i data-lucide="check" class="text-white w-4 h-4 ${isSel ? 'opacity-100' : 'opacity-0'}"></i></div>
+                      </div>
+                      `;
+                    }).join('')}
+                  </div>
+                </div>
+              </div>
+            ` : ''}
+      </div>
+    `;
+  }
+
+  // 📂 场景 0.7：通讯录 - 分组管理界面
+  if (wxState.view === 'groupManage') {
+    return `
+      <div class="w-full h-full bg-[#f3f3f3] flex flex-col relative animate-in slide-in-from-right-4 duration-200 z-50">
+         <div class="bg-white/90 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 sticky top-0 z-10">
+           <div class="w-1/4 cursor-pointer text-gray-800" onclick="window.wxActions.closeSubView()"><i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i></div>
+           <span class="flex-1 text-center font-bold text-gray-800">管理分组</span>
+           <div class="w-1/4 flex justify-end"><i data-lucide="plus" class="cursor-pointer active:scale-90 transition-transform text-[#07c160]" style="width: 28px; height: 28px;" onclick="window.wxActions.addGroup()"></i></div>
+         </div>
+         
+         <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-10">
+            <p class="text-[11px] text-gray-400 font-bold mb-3 px-1 tracking-widest uppercase">修改名称后实时自动保存</p>
+            ${store.groups.map(g => `
+              <div class="bg-white rounded-[12px] p-3.5 shadow-sm border border-gray-100 flex items-center justify-between">
+                <i data-lucide="menu" class="w-5 h-5 text-gray-300 mr-3 cursor-grab"></i>
+                <input value="${g.name}" onchange="window.wxActions.updateGroupName('${g.id}', this.value)" class="flex-1 outline-none text-[15px] text-black bg-transparent font-medium" />
+                ${g.id !== 'default' ? `<div class="w-8 h-8 flex items-center justify-center cursor-pointer active:scale-90 opacity-60 hover:opacity-100 hover:text-red-500 transition-all ml-2" onclick="window.wxActions.deleteGroup('${g.id}')"><i data-lucide="minus-circle" class="w-5 h-5 text-red-400"></i></div>` : `<div class="w-8 h-8 flex items-center justify-center"><i data-lucide="lock" class="w-4 h-4 text-gray-300"></i></div>`}
+              </div>
+            `).join('')}
+         </div>
+      </div>
+    `;
+  }
+
+  // 💳 场景 0.8: 钱包页面
+  if (wxState.view === 'wallet') {
+    store.wallet = store.wallet || { balance: 0, transactions: [] };
+    // 🌟 修复：只取最后20条，节省DOM内存
+    const visibleTx = store.wallet.transactions.filter(t => !t.title.includes('初始资金')).slice(-20);
+    return `
+      <div class="w-full h-full flex flex-col relative animate-in slide-in-from-right-4 duration-200 z-50" style="background-color: #ffffff !important; background-image: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important;">
+          <div class="px-4 pt-12 pb-3 flex justify-between items-center shrink-0 z-10 relative" style="background-color: #07c160 !important; background-image: none !important; border: none !important; backdrop-filter: none !important;">
+            <div class="w-1/4 cursor-pointer" onclick="window.wxActions.closeSubView()"><i data-lucide="chevron-left" style="width: 28px; height: 28px; text-white;"></i></div>
+            <span class="absolute left-1/2 -translate-x-1/2 font-bold text-white text-[17px] tracking-wide">服务</span>
+            <div class="w-6"></div>
+          </div>
+         <div class="bg-[#07c160] flex flex-col items-center justify-center pb-10 pt-4 text-white shadow-sm">
+            <i data-lucide="shield-check" class="mb-2 opacity-90" style="width:40px; height:40px;"></i>
+            <span class="text-[14px] mb-2 opacity-90 font-bold">我的零钱</span>
+            <span class="text-[44px] font-bold font-mono tracking-tight">¥${store.wallet.balance.toFixed(2)}</span>
+         </div>
+         <div class="flex-1 overflow-y-auto p-4 bg-white mt-2">
+            <p class="text-[12px] text-gray-400 font-bold mb-4 tracking-widest border-b border-gray-100 pb-2">近期账单明细</p>
+            ${[...visibleTx].reverse().map(t => `
+              <div class="flex justify-between items-center py-3.5 border-b border-gray-50">
+                <div class="flex flex-col"><span class="text-[15px] text-gray-800 font-medium mb-1">${t.title}</span><span class="text-[11px] text-gray-400">${new Date(t.date).toLocaleString()}</span></div>
+                <span class="text-[16px] font-medium ${t.type==='in'?'text-[#07c160]':'text-gray-800'} font-mono">${t.type==='in'?'+':'-'}${t.amount.toFixed(2)}</span>
+              </div>
+            `).join('')}
+            ${visibleTx.length === 0 ? '<div class="text-center text-gray-400 mt-10 text-[13px]">暂无账单记录</div>' : ''}
+         </div>
+      </div>
+    `;
+  }
+
+  // 🌟 场景 0.9: 收藏夹
+  if (wxState.view === 'favorites') {
+    store.favorites = store.favorites || [];
+    const isManage = wxState.favManageMode;
+    return `
+      <div class="w-full h-full bg-[#f3f3f3] flex flex-col relative animate-in slide-in-from-right-4 duration-200 z-50">
+         <div class="bg-white/90 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 sticky top-0 z-10">
+           <div class="w-1/4 cursor-pointer text-gray-800" onclick="window.wxActions.closeSubView()"><i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i></div>
+           <span class="flex-1 text-center font-bold text-gray-800">收藏</span>
+           <div class="w-1/4 flex justify-end cursor-pointer" onclick="window.wxActions.toggleFavManage()">
+           ${isManage ? '<div class="p-1 active:scale-90 transition-transform"><i data-lucide="check" class="w-6 h-6 text-[#07c160]"></i></div>' : '<div class="p-1 active:scale-90 transition-transform"><i data-lucide="settings" class="w-6 h-6 text-gray-800"></i></div>'}
+           </div>
+         </div>
+         <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar ${isManage ? 'pb-24' : 'pb-10'}">
+            ${store.favorites.map(f => `
+              <div class="bg-white p-4 rounded-[12px] shadow-sm flex items-start ${isManage ? 'cursor-pointer active:bg-gray-50' : ''} transition-colors" ${isManage ? `onclick="window.wxActions.toggleSelectFav(${f.id})"` : ''}>
+                ${isManage ? `<div class="mr-3 mt-1 w-[22px] h-[22px] rounded-full border flex-shrink-0 ${wxState.selectedFavIds?.includes(f.id) ? 'bg-[#07c160] border-[#07c160]' : 'border-gray-300'} flex items-center justify-center transition-colors shadow-sm">${wxState.selectedFavIds?.includes(f.id) ? '<i data-lucide="check" class="text-white" style="width:14px; height:14px;"></i>' : ''}</div>` : ''}
+                <div class="flex-1 overflow-hidden">
+                  <div class="flex items-center mb-2"><span class="text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded mr-2 font-bold">${f.chatName}</span><span class="text-[10px] text-gray-400">${new Date(f.savedAt).toLocaleDateString()}</span></div>
+                  <div class="text-[14px] text-gray-800 leading-relaxed overflow-wrap break-words">${f.text.replace(/<[^>]*>?/gm, '')}</div>
+                </div>
+              </div>
+            `).join('')}
+            ${store.favorites.length === 0 ? '<div class="text-center text-gray-400 mt-10 text-[13px] font-bold tracking-widest">暂无收藏内容</div>' : ''}
+         </div>
+         ${isManage && wxState.selectedFavIds?.length > 0 ? `
+           <div class="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 flex justify-center animate-in slide-in-from-bottom-2 z-20 pb-8">
+             <button onclick="window.wxActions.deleteSelectedFavs()" class="w-full bg-red-500 text-white font-bold py-3.5 rounded-[12px] active:bg-red-600 shadow-sm flex items-center justify-center transition-colors"><i data-lucide="trash-2" class="mr-2" style="width:18px;height:18px;"></i>删除选中的 ${wxState.selectedFavIds.length} 项</button>
+           </div>
+         ` : ''}
+      </div>
+    `;
+  }
+
+  // 🎭 场景 0.10: 身份管理 & 编辑
+  if (wxState.view === 'personaManage') {
+    return `
+      <div class="w-full h-full bg-[#f3f3f3] flex flex-col relative animate-in slide-in-from-right-4 duration-200 z-50">
+         <div class="bg-white/90 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 sticky top-0 z-10">
+           <div class="w-1/4 cursor-pointer text-gray-800" onclick="window.wxActions.closeSubView()"><i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i></div>
+           <span class="flex-1 text-center font-bold text-gray-800">我的身份列表</span>
+           <div class="w-1/4 flex justify-end"><i data-lucide="plus" class="cursor-pointer active:scale-90 transition-transform text-[#07c160]" style="width: 26px; height: 26px;" onclick="window.wxActions.openPersonaEdit(null)"></i></div>
+         </div>
+         <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-10">
+            <p class="text-[11px] text-gray-400 font-bold mb-3 px-1 tracking-widest">可绑定至不同角色的聊天中</p>
+            ${store.personas.map(p => `
+              <div class="bg-white rounded-[12px] p-4 shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer active:bg-gray-50 transition-colors" onclick="window.wxActions.openPersonaEdit('${p.id}')">
+                <div class="flex items-center">
+                  <div class="w-10 h-10 bg-gray-100 rounded-full overflow-hidden flex-shrink-0 flex items-center justify-center mr-3 text-lg border border-gray-200">${getVidHtml(p.avatar, '', false)}
+                  </div>
+                  <div class="flex flex-col"><span class="text-[15px] font-medium text-gray-800">${p.name}</span><span class="text-[11px] text-gray-400 truncate w-32">${p.prompt || '暂无设定内容'}</span>
+                  </div>
+                </div>
+                ${p.id !== store.personas[0].id ? `<div class="w-8 h-8 flex items-center justify-center cursor-pointer active:scale-90 opacity-60 hover:text-red-500 transition-all" onclick="event.stopPropagation(); window.wxActions.deletePersona('${p.id}')"><i data-lucide="trash-2" class="w-5 h-5 text-red-400"></i></div>` : `<span class="text-[10px] bg-gray-100 text-gray-500 px-2 py-1 rounded font-medium">默认身份</span>`}
+              </div>
+            `).join('')}
+         </div>
+      </div>
+    `;
+  }
+  if (wxState.view === 'personaEdit') {
+    const isNew = !wxState.editingPersonaId;
+    const pData = isNew ? {} : store.personas.find(p => p.id === wxState.editingPersonaId);
+    const displayAvatar = wxState.tempPersonaAvatar || pData.avatar ;
+    return `
+      <div class="w-full h-full bg-[#f3f3f3] flex flex-col relative animate-in slide-in-from-bottom-4 duration-200 z-50">
+         <div class="bg-white/90 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 sticky top-0 z-10">
+           <div class="w-1/4 cursor-pointer text-gray-800" onclick="window.wxActions.openView('personaManage')"><i data-lucide="chevron-down" style="width: 28px; height: 28px;"></i></div>
+           <span class="flex-1 text-center font-bold text-gray-800">${isNew ? '创建新马甲' : '编辑身份设定'}</span>
+           <div class="w-1/4"></div> </div>
+         <div class="flex-1 overflow-y-auto p-4 space-y-4 hide-scrollbar pb-10">
+            <input type="file" id="upload-persona-avatar" accept="image/*" class="hidden" onchange="window.wxActions.handlePersonaAvatarUpload(event)" />
+            
+            <div class="bg-white rounded-[12px] p-6 shadow-sm border border-gray-100 flex flex-col items-center justify-center">
+               <div class="w-24 h-24 bg-gray-100 rounded-[16px] flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden shadow-sm mb-3" onclick="document.getElementById('upload-persona-avatar').click()">${getVidHtml(displayAvatar, '', false)}</div>
+               <span class="text-xs text-gray-500 font-medium tracking-widest">点击更换形象</span>
+            </div>
+
+            <div class="bg-white rounded-[12px] px-4 shadow-sm border border-gray-100">
+               <div class="flex items-center py-3.5">
+                 <span class="w-20 text-[15px] font-medium text-gray-800">化名</span>
+                 <input id="edit-persona-name" value="${pData.name || ''}" class="flex-1 outline-none bg-transparent text-[15px] text-black font-medium" placeholder="留空则默认使用你的主名字" />
+               </div>
+            </div>
+            
+            <div class="bg-white rounded-[12px] p-4 shadow-sm border border-gray-100 space-y-3">
+               <span class="text-[15px] font-medium text-gray-800 block">详细设定 (Prompt)</span>
+               <textarea id="edit-persona-prompt" rows="6" class="w-full bg-gray-50 rounded-lg p-3 outline-none text-[14px] resize-none text-gray-700 leading-relaxed hide-scrollbar" placeholder="输入该身份的背景、特殊习惯、当前状态等。AI 会根据此设定对待你...">${pData.prompt || ''}</textarea>
+            </div>
+
+            <button onclick="window.wxActions.savePersona()" class="w-full py-3.5 mt-4 bg-[#07c160] text-white font-bold rounded-[12px] active:scale-95 transition-transform shadow-sm">保存身份配置</button>
+            ${!isNew && pData.id !== store.personas[0].id ? `<button onclick="window.wxActions.deletePersona('${pData.id}')" class="w-full py-3.5 mt-2 bg-white text-red-500 font-bold rounded-[12px] active:bg-gray-50 transition-colors border border-red-100 shadow-sm">删除该身份</button>` : ''}
+         </div>
+      </div>
+    `;
+  }
+
+  // 🤩 场景 0.11: 表情包管理 & 编辑
+  if (wxState.view === 'emojiManage') {
+    store.emojiLibs = store.emojiLibs || [];
+    return `
+      <div class="w-full h-full bg-[#f3f3f3] flex flex-col relative animate-in slide-in-from-right-4 duration-200 z-50">
+         <div class="bg-white/90 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 sticky top-0 z-10">
+           <div class="w-1/4 cursor-pointer text-gray-800" onclick="window.wxActions.closeSubView()"><i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i></div>
+           <span class="flex-1 text-center font-bold text-gray-800">表情包库管理</span>
+           <div class="w-1/4 flex justify-end space-x-4 items-center text-[#07c160]">
+             <input type="file" id="upload-emoji-json" accept=".json" class="hidden" onchange="window.wxActions.uploadEmojiJson(event)" />
+             <i data-lucide="upload-cloud" class="cursor-pointer active:scale-90 transition-transform" style="width: 22px; height: 22px;" onclick="document.getElementById('upload-emoji-json').click()"></i>
+             <i data-lucide="plus" class="cursor-pointer active:scale-90 transition-transform" style="width: 26px; height: 26px;" onclick="window.wxActions.addEmojiLib()"></i>
+           </div>
+         </div>
+         <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-10">
+            <p class="text-[11px] text-gray-400 font-bold mb-3 px-1 tracking-widest">点击名称修改，点击卡片编辑内部图片</p>
+            ${store.emojiLibs.map(lib => `
+              <div class="bg-white rounded-[12px] p-3.5 shadow-sm border border-gray-100 flex items-center justify-between">
+                <div class="flex-1 flex items-center cursor-pointer" onclick="window.wxActions.openEmojiEdit('${lib.id}')">
+                  <i data-lucide="smile" class="w-5 h-5 text-yellow-500 mr-3"></i>
+                  <input value="${lib.name}" onclick="event.stopPropagation()" onchange="window.wxActions.renameEmojiLib('${lib.id}', this.value)" class="flex-1 outline-none text-[15px] text-black bg-transparent font-medium" />
+                </div>
+                <div class="text-[12px] text-gray-400 font-medium mr-3 w-8 text-center">${lib.emojis?.length || 0} 图</div>
+                <div class="w-8 h-8 flex items-center justify-center cursor-pointer active:scale-90 opacity-60 hover:text-red-500 transition-all" onclick="window.wxActions.deleteEmojiLib('${lib.id}')"><i data-lucide="minus-circle" class="w-5 h-5 text-red-400"></i></div>
+              </div>
+            `).join('')}
+         </div>
+      </div>
+    `;
+  }
+  if (wxState.view === 'emojiEdit') {
+    const lib = store.emojiLibs.find(l => l.id === wxState.editingEmojiLibId) || { emojis: [] };
+    return `
+      <div class="w-full h-full bg-[#f3f3f3] flex flex-col relative animate-in slide-in-from-right-4 duration-200 z-50">
+         <div class="bg-white/90 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 sticky top-0 z-10">
+           <div class="w-1/4 cursor-pointer text-gray-800" onclick="window.wxActions.openView('emojiManage')"><i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i></div>
+           <span class="flex-1 text-center font-medium text-gray-800 truncate">${lib.name}</span>
+           <div class="w-1/4"></div>
+         </div>
+         <div class="flex-1 overflow-y-auto p-4 hide-scrollbar pb-10">
+            <div class="bg-white rounded-[12px] p-4 shadow-sm border border-gray-100 mb-4 space-y-3">
+              <span class="text-[14px] font-medium text-gray-800 flex items-center"><i data-lucide="zap" class="text-blue-500 mr-2 w-4 h-4"></i>极速批量导入</span>
+              <textarea id="batch-emoji-input" rows="3" class="w-full bg-gray-50 rounded-lg p-3 outline-none text-[12px] resize-none text-gray-700 leading-relaxed" placeholder="支持格式：\n名称1: http://图片链接\n直接粘贴 http://图片链接"></textarea>
+              <button onclick="window.wxActions.batchAddEmojis()" class="w-full py-2.5 bg-gray-800 text-white text-[13px] font-bold rounded-lg active:scale-95 transition-transform shadow-sm">解析并导入</button>
+            </div>
+            
+            <p class="text-[11px] text-gray-400 font-bold mb-3 px-1 tracking-widest uppercase">已添加的表情包 (${lib.emojis.length})</p>
+            <div class="grid grid-cols-4 gap-x-3 gap-y-4">
+              ${lib.emojis.map((e, idx) => {
+                // 兼容老数据
+                const ep = typeof e === 'string' ? {url: e, name: '表情'} : e;
+                const shortName = ep.name.length > 5 ? ep.name.substring(0,5) + '...' : ep.name;
+                return `
+                <div class="flex flex-col items-center">
+                  <div class="relative aspect-square w-full bg-gray-100 rounded-[12px] border border-gray-200 flex items-center justify-center overflow-hidden shadow-sm group">
+                    <img src="${ep.url}" class="w-full h-full object-cover" />
+                    <div class="absolute top-1 right-1 bg-black/60 rounded-full p-1 cursor-pointer active:scale-90 shadow-md transition-transform hover:bg-red-500" onclick="window.wxActions.deleteEmojiUrl(${idx})"><i data-lucide="x" class="text-white w-3 h-3"></i></div>
+                  </div>
+                  <span class="text-[10px] text-gray-500 mt-1.5 truncate w-full text-center font-medium">${shortName}</span>
+                </div>
+              `}).join('')}
+              ${lib.emojis.length === 0 ? '<div class="col-span-4 text-center text-gray-300 mt-6 text-[12px] font-bold tracking-widest">点击右上角添加图片 URL</div>' : ''}
+            </div>
+         </div>
+      </div>
+    `;
+  }
+  // 📸 场景 0.12: 发布朋友圈动态
+  if (wxState.view === 'momentPublish') {
+    return `
+      <div class="w-full h-full bg-[#f3f3f3] flex flex-col relative animate-in slide-in-from-bottom-4 duration-200 z-50">
+         <div class="bg-[#f3f3f3] pt-8 pb-3 px-4 flex items-center justify-between sticky top-0 relative z-10">
+           <div class="cursor-pointer active:opacity-50" onclick="window.wxActions.closeSubView()"><i data-lucide="chevron-left" class="w-6 h-6 text-gray-600"></i></div>
+           <span class="text-white bg-[#07c160] px-3 py-1.5 rounded-[6px] cursor-pointer font-bold text-[14px] active:scale-95 transition-transform" onclick="window.wxActions.submitMoment()">发表</span>
+         </div>
+         <div class="flex-1 overflow-y-auto p-5 bg-white">
+            <div class="w-full bg-gray-50 border border-gray-200 rounded-[8px] p-3 relative z-10 shadow-sm ">
+              <textarea id="publish-moment-text" rows="5" class="w-full bg-transparent outline-none text-[15px] text-gray-800 resize-none placeholder-gray-400 hide-scrollbar" placeholder="这一刻的想法..."></textarea>
+            </div>
+            <div class="mt-4 flex flex-wrap gap-3">
+               ${wxState.tempMomentImage ? `
+                 <div class="w-24 h-24 bg-gray-100 rounded-[8px] overflow-hidden relative shadow-sm">
+                   <img src="${wxState.tempMomentImage}" class="w-full h-full object-cover" />
+                   <div class="absolute top-1 right-1 bg-black/50 rounded-full p-1 cursor-pointer active:scale-90" onclick="window.wxActions.clearTempMomentImage()"><i data-lucide="x" class="text-white w-3 h-3"></i></div>
+                 </div>
+               ` : wxState.tempMomentVirtual !== null && wxState.tempMomentVirtual !== undefined ? `
+                 <div class="w-full bg-gray-50 border border-gray-200 rounded-[8px] p-3 relative shadow-sm animate-in fade-in">
+                    <span class="text-[12px] font-bold text-gray-400 flex items-center mb-2"><i data-lucide="camera" class="w-3 h-3 mr-1"></i>虚拟照片画面描述</span>
+                    <textarea id="moment-virtual-input" rows="3" class="w-full bg-transparent outline-none text-[13px] text-gray-700 resize-none hide-scrollbar" placeholder="详细描述照片中的人物、动作或环境...">${wxState.tempMomentVirtual}</textarea>
+                    <div class="absolute top-2 right-2 bg-black/20 rounded-full p-1 cursor-pointer hover:bg-black/40 active:scale-90" onclick="window.wxActions.clearTempMomentVirtual()"><i data-lucide="x" class="text-white w-3 h-3"></i></div>
+                 </div>
+               ` : `
+                 <div class="w-24 h-24 bg-gray-50 rounded-[8px] flex flex-col items-center justify-center cursor-pointer active:bg-gray-100 border border-gray-200 shadow-sm transition-colors" onclick="document.getElementById('upload-moment-img').click()">
+                   <i data-lucide="image" class="text-gray-400 w-7 h-7 mb-1"></i>
+                   <span class="text-[10px] text-gray-400 font-bold">本地图片</span>
+                 </div>
+                 <div class="w-24 h-24 bg-gray-50 rounded-[8px] flex flex-col items-center justify-center cursor-pointer active:bg-gray-100 border border-gray-200 shadow-sm transition-colors" onclick="window.wxActions.setTempMomentVirtual()">
+                   <i data-lucide="camera" class="text-gray-400 w-7 h-7 mb-1"></i>
+                   <span class="text-[10px] text-gray-400 font-bold">虚拟照片</span>
+                 </div>
+               `}
+               <input type="file" id="upload-moment-img" accept="image/*" class="hidden" onchange="window.wxActions.handleMomentImageUpload(event)" />
+            </div>
+         </div>
+      </div>
+    `;
+  }
+
+  // 🔔 场景 1：来电显示界面
+  if (wxState.view === 'incomingCall') {
+    const isVideo = wxState.callType === 'video';
+    return `
+      <div class="w-full h-full bg-[#111] flex flex-col relative animate-in zoom-in-95 duration-300 z-50" style="background: #111 !important;">
+        <div class="flex-1 flex flex-col items-center pt-24 space-y-4">
+          <div class="w-28 h-28 rounded-full overflow-hidden shadow-[0_0_60px_rgba(74,222,128,0.3)] animate-pulse border-2 border-green-500 flex items-center justify-center bg-gray-800">${getVidHtml(char.videoAvatar, char.avatar, false)}</div>
+          <h2 class="text-white text-2xl font-medium mt-4">${char.name}</h2>
+          <p class="text-white/60 text-sm animate-pulse">邀请你进行${isVideo ? '视频' : '语音'}通话...</p>
+        </div>
+        <div class="pb-16 px-10 flex justify-between w-full z-20">
+          <div onclick="window.wxActions.declineCall()" class="flex flex-col items-center space-y-2 cursor-pointer active:scale-90 transition-transform"><div class="w-16 h-16 bg-red-500 rounded-full flex items-center justify-center text-white shadow-lg"><i data-lucide="phone-off" style="width:28px;"></i></div><span class="text-white/80 text-sm">拒绝</span></div>
+          <div onclick="window.wxActions.acceptCall()" class="flex flex-col items-center space-y-2 cursor-pointer active:scale-90 transition-transform"><div class="w-16 h-16 bg-green-500 rounded-full flex items-center justify-center text-white shadow-lg animate-bounce"><i data-lucide="${isVideo ? 'video' : 'phone'}" style="width:28px;"></i></div><span class="text-white/80 text-sm">接听</span></div>
+        </div>
+      </div>
+    `;
+  }
+
+  // 🍺 场景 2：线下酒馆模式 
+  if (wxState.view === 'offlineStory') {
+    const offlineMsgs = chatData.messages.filter(m => m.isOffline && !m.isHidden);
+    return `
+      <div class="w-full h-full bg-[#1e1e2e] text-[#cdd6f4] flex flex-col font-serif relative z-50 animate-in slide-in-from-bottom-4 duration-300">
+        <div class="bg-[#181825]/90 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-[#313244] z-10 sticky top-0">
+          <div class="flex items-center cursor-pointer text-[#89b4fa] w-1/4" onclick="window.wxActions.exitOffline()"><i data-lucide="chevron-left" style="width:24px; height:24px;"></i><span class="text-xs">回线上</span></div>
+          <span class="flex-1 text-center font-medium transition-colors ${wxState.isTyping ? 'text-[#a6adc8] animate-pulse' : 'text-[#cdd6f4]'}">${wxState.isTyping ? '对方正在说话...' : `线下: ${char?.name}`}</span>
+          <div class="w-1/4"></div>
+        </div>
+        <div id="offline-scroll" class="flex-1 p-5 overflow-y-auto hide-scrollbar space-y-6 pb-6">
+          <div class="text-center text-xs text-[#6c7086] italic mb-6">—— 你们转为了线下碰面 ——</div>
+          ${offlineMsgs.map(msg => `
+            <div class="text-[15px] text-[#bac2de] animate-in fade-in flex flex-col">
+              <div class="flex items-baseline mb-1.5"><span class="font-medium text-sm mr-2 ${msg.isMe ? 'text-[#a6e3a1]' : 'text-[#89b4fa]'}">${msg.sender}</span><span class="text-[10px] text-[#6c7086]">${msg.time || ''}</span></div>
+              <div class="space-y-2 opacity-90">${msg.text.split('\n').filter(l=>l.trim()).map(l => `<p class="leading-relaxed">${l}</p>`).join('')}</div>
+            </div>
+          `).join('')}
+        </div>
+        <div class="bg-[#181825] px-4 py-3 pb-8 border-t border-[#313244] flex flex-col space-y-3 z-20">
+          <textarea id="offline-input" placeholder="描写动作或对话，按发送自动获取回应..." class="w-full h-24 bg-[#313244] text-[#cdd6f4] rounded-xl p-3 outline-none text-[15px] resize-none placeholder-[#6c7086]"></textarea>
+          <button onclick="window.wxActions.sendMessage()" class="w-full bg-[#89b4fa] text-[#11111b] py-3 rounded-xl text-[15px] font-bold active:opacity-80 transition-opacity shadow-lg">发送</button>
+        </div>
+      </div>
+    `;
+  }
+
+  // 📞 场景 3：沉浸式音视频通话模式
+  if (wxState.view === 'call') {
+    const isVideo = wxState.callType === 'video';
+    const visibleMsgs = chatData.messages.filter(m => wxState.callStartTime && m.id >= wxState.callStartTime && m.msgType !== 'system' && !m.isHidden);
+    
+    return `
+      <div class="w-full h-full bg-[#111] flex flex-col relative animate-in zoom-in-95 duration-300 z-50" style="background: #111 !important;">
+        
+        <div class="absolute top-0 left-0 right-0 pt-8 pb-4 px-6 flex justify-center text-white z-30 drop-shadow-md pointer-events-none">
+          <span class="font-medium text-sm opacity-90 flex items-center shadow-black drop-shadow-lg">
+            ${wxState.isTyping ? `<div class="w-2 h-2 bg-green-500 rounded-full animate-pulse mr-2"></div>对方正在说话...` : ''}
+          </span>
+        </div>
+
+        ${isVideo ? `
+          <div class="absolute top-16 left-6 z-30 flex flex-col drop-shadow-md">
+            <span class="text-white text-xl font-medium tracking-wide">${char.name}</span>
+            <span id="call-duration-display" class="text-white/80 font-mono text-[14px] mt-1">00:00</span>
+          </div>
+
+          <div class="absolute inset-0 z-0 bg-gray-900 flex items-center justify-center">${getVidHtml(char.videoAvatar, char.avatar, true)}</div>
+          
+          <div class="absolute top-16 right-5 w-24 h-36 bg-gray-800 rounded-xl border border-white/20 shadow-2xl overflow-hidden z-20">${getVidHtml(store.personas[0].videoAvatar, myAvatar, false)}</div>
+          <div class="absolute bottom-0 left-0 right-0 h-[45%] pt-5 pb-8 px-5 z-20 flex flex-col justify-between">
+            <div id="call-scroll" class="flex-1 overflow-y-auto hide-scrollbar flex flex-col space-y-3 mask-image-top mb-4">
+              <div class="mt-auto"></div>
+              ${visibleMsgs.map(msg => `
+                <div class="flex ${msg.isMe ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2">
+                  <span class="inline-block px-3 py-1.5 rounded-xl text-[15px] ${msg.msgType === 'action' ? 'bg-transparent text-white/70 italic font-serif' : 'bg-white/20 text-white'} backdrop-blur-md shadow-sm">${msg.text}</span>
+                </div>
+              `).join('')}
+            </div>
+            <div class="flex flex-col space-y-4">
+              <div class="flex space-x-3 items-center bg-white/10 p-1.5 rounded-full backdrop-blur-xl border border-white/10">
+                <input type="text" id="wx-input" onkeydown="if(event.key==='Enter') window.wxActions.sendMessage()" class="flex-1 bg-transparent text-white placeholder-white/50 px-4 py-2 outline-none text-[15px]" placeholder="正在通话中说话..." />
+                <button onclick="window.wxActions.sendMessage()" class="w-10 h-10 flex items-center justify-center text-white active:scale-90 transition-transform"><i data-lucide="send" style="width:24px; margin-left:2px;"></i></button>
+              </div>
+              <div class="flex justify-center"><button onclick="window.wxActions.endCall()" class="w-14 h-14 bg-red-500 rounded-full flex items-center justify-center text-white shadow-2xl active:bg-red-600 transition-colors"><i data-lucide="phone-off" style="width:24px;"></i></button></div>
+            </div>
+          </div>
+        ` : `
+          <div class="flex-1 flex flex-col items-center justify-start relative z-10 pt-[12vh]">
+            <div class="text-white text-xl font-medium mb-1 tracking-wide drop-shadow-md">${char.name}</div>
+            <div id="call-duration-display" class="text-white/80 text-[13px] font-mono mb-5 drop-shadow-md">00:00</div>
+
+            <div class="w-24 h-24 rounded-full overflow-hidden shadow-[0_0_40px_rgba(74,222,128,0.25)] animate-pulse ring-[3px] ring-green-500/30 flex items-center justify-center bg-gray-800 border border-gray-700">${getVidHtml(char.avatar, false)}</div>
+            <div class="mt-5 flex items-center space-x-1 text-green-500 opacity-80">
+              <div class="w-1 h-2 bg-current rounded-full animate-pulse"></div>
+              <div class="w-1 h-5 bg-current rounded-full animate-pulse" style="animation-delay: 200ms"></div>
+              <div class="w-1 h-3 bg-current rounded-full animate-pulse" style="animation-delay: 400ms"></div>
+              <div class="w-1 h-6 bg-current rounded-full animate-pulse" style="animation-delay: 600ms"></div>
+            </div>
+          </div>
+          <div class="absolute bottom-0 left-0 right-0 pb-8 px-5 z-20 flex flex-col justify-end">
+            <div id="call-scroll" class="h-56 overflow-y-auto hide-scrollbar flex flex-col space-y-3 mask-image-top mb-5">
+              <div class="mt-auto"></div>
+              ${visibleMsgs.map(msg => `
+                <div class="flex ${msg.isMe ? 'justify-end' : 'justify-start'} animate-in fade-in slide-in-from-bottom-2">
+                  <span class="inline-block px-3 py-1.5 rounded-xl text-[15px] ${msg.msgType === 'action' ? 'bg-transparent text-white/70 italic font-serif' : 'bg-white/20 text-white'} backdrop-blur-md shadow-sm">${msg.text}</span>
+                </div>
+              `).join('')}
+            </div>
+            <div class="flex flex-col space-y-5">
+              <div class="flex space-x-3 items-center bg-white/10 p-1.5 rounded-full backdrop-blur-xl border border-white/10">
+                <input type="text" id="wx-input" onkeydown="if(event.key==='Enter') window.wxActions.sendMessage()" class="flex-1 bg-transparent text-white placeholder-white/50 px-4 py-2 outline-none text-[15px]" placeholder="正在通话中说话..." />
+                <button onclick="window.wxActions.sendMessage()" class="w-10 h-10 flex items-center justify-center text-white active:scale-90 transition-transform"><i data-lucide="send" style="width:24px; margin-left:2px;"></i></button>
+              </div>
+              <div class="flex justify-center"><button onclick="window.wxActions.endCall()" class="w-14 h-14 bg-red-500 rounded-full flex items-center justify-center text-white shadow-2xl active:bg-red-600 transition-colors"><i data-lucide="phone-off" style="width:24px;"></i></button></div>
+            </div>
+          </div>
+        `}
+      </div>
+    `;
+  }
+
+  // 💬 场景 4：正常的微信聊天室
+  if (wxState.view === 'chatRoom') {
+    let lastRenderedTime = ''; 
+    const messagesHtml = chatData.messages.filter(m => !m.isOffline && !m.isHidden).map(msg => {
+      let timeHtml = '';
+      if (msg.time && msg.time !== lastRenderedTime) {
+        timeHtml = `<div class="flex justify-center my-3 animate-in fade-in"><span class="mc-time-tag text-[11px] text-gray-400 font-medium">${msg.time}</span></div>`;
+        lastRenderedTime = msg.time;
+      }
+      
+      const isSelected = wxState.selectedMsgIds?.includes(msg.id);
+      const checkboxHtml = wxState.isMultiSelecting ? `<div class="mr-3 flex-shrink-0"><div class="w-[22px] h-[22px] rounded-full border ${isSelected ? 'bg-[#07c160] border-[#07c160]' : 'border-gray-300 bg-white'} flex items-center justify-center transition-colors shadow-sm">${isSelected ? `<i data-lucide="check" class="text-white" style="width:14px; height:14px;"></i>` : ''}</div></div>` : '';
+
+      if (msg.msgType === 'system' || msg.msgType === 'recall_system') {
+        let clickStr = '', hintStr = '';
+        if (msg.msgType === 'recall_system' && !msg.isMe && msg.recalledText) {
+          clickStr = `onclick="alert('被撤回的原文：\\n\\n' + decodeURIComponent('${encodeURIComponent(msg.recalledText)}'))"`;
+          hintStr = `<i data-lucide="eye" class="inline-block w-[12px] h-[12px] ml-1 opacity-60"></i>`;
+        }
+        const cursorCls = clickStr ? 'cursor-pointer hover:bg-gray-300/80 active:scale-95 transition-all shadow-sm' : '';
+        return `${timeHtml}<div class="mc-msg-sys flex items-center w-full my-1.5 animate-in fade-in duration-300 ${wxState.isMultiSelecting ? 'pl-2 cursor-pointer' : ''}" ${wxState.isMultiSelecting ? `onclick="window.wxActions.toggleSelectMsg(${msg.id})"` : ''}>${checkboxHtml}<div class="flex-1 flex justify-center pointer-events-${wxState.isMultiSelecting ? 'none' : 'auto'}"><span ${clickStr} class="flex items-center bg-gray-200/60 text-gray-500 text-[11px] px-3 py-1 rounded-full font-medium backdrop-blur-sm ${cursorCls}">${msg.text.replace(/\[|\]/g, '')}${hintStr}</span></div></div>`;
+      }
+      
+      let contentHtml = '', bubbleClass = '', bubbleStyle = '', maxWidthClass = 'max-w-[75%]';
+      
+      if (msg.msgType === 'action') {
+        bubbleClass = 'mc-bubble-action px-4 py-1.5 text-[14px]'; 
+        bubbleStyle = `font-family: var(--chat-font); background-color: transparent; color: #9ca3af; font-style: italic;`; 
+        contentHtml = msg.text;
+      } else if (msg.msgType === 'virtual_image') {
+        maxWidthClass = 'max-w-[70%]';
+        bubbleClass = 'mc-bubble-vimg rounded-xl shadow-sm overflow-hidden border border-gray-200'; 
+        bubbleStyle = ''; 
+        contentHtml = `<div class="relative w-48 min-h-[12rem] bg-white cursor-pointer select-none" onclick="const overlay = this.querySelector('.img-overlay'); overlay.classList.toggle('opacity-0'); overlay.classList.toggle('pointer-events-none');"><div class="absolute inset-0 p-4 overflow-y-auto text-[13px] text-gray-700 leading-relaxed text-left bg-white"><span class="font-bold text-gray-400 block mb-1 flex items-center"><i data-lucide="image" class="mr-1" style="width:14px; height:14px;"></i>照片内容：</span>${msg.text}</div><div class="img-overlay absolute inset-0 bg-gray-100 flex flex-col items-center justify-center text-gray-400 transition-opacity duration-300 z-10"><i data-lucide="image" class="mb-2 text-gray-300" style="width: 36px; height: 36px;"></i><span class="text-[11px] font-bold tracking-widest animate-pulse">图片加载中...</span></div></div>`;
+      } else if (msg.msgType === 'voice') {
+        bubbleClass = 'mc-bubble-voice px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-hidden'; 
+        bubbleStyle = `font-family: var(--chat-font); font-size: var(--chat-font-size); background-color: var(${msg.isMe ? '--bubble-me-bg' : '--bubble-char-bg'}); background-image: var(${msg.isMe ? '--bubble-me-img' : '--bubble-char-img'}); background-size: cover; color: var(${msg.isMe ? '--bubble-me-text' : '--bubble-char-text'}); opacity: var(${msg.isMe ? '--bubble-me-opacity' : '--bubble-char-opacity'}); border-top-${msg.isMe ? 'right' : 'left'}-radius: 2px;`;
+        const duration = Math.min(Math.max(Math.round(msg.text.length / 4), 2), 60); const numBars = Math.min(8 + Math.floor(duration * 1.8), 45); 
+        let barsHtml = ''; for (let i = 0; i < numBars; i++) barsHtml += `<div class="w-[2px] ${['h-2', 'h-4', 'h-3', 'h-5', 'h-2', 'h-6', 'h-3', 'h-4'][i % 8]} bg-current rounded-full animate-pulse opacity-80" style="animation-delay: ${(i * 100) % 1000}ms"></div>`;        
+        // 🌟 点击展开文字时，带上播放音频的代码！
+        const playScript = msg.audioUrl ? `new Audio('${msg.audioUrl}').play().catch(e=>console.log(e));` : `window.actions.showToast('正在生成语音或未开启配置');`;        
+        contentHtml = `<div class="flex flex-col cursor-pointer" onclick="this.querySelector('.mc-voice-text').classList.toggle('hidden'); window.wxActions.scrollToBottom(); ${playScript}"><div class="flex items-center space-x-3 ${msg.isMe ? 'flex-row-reverse space-x-reverse' : ''}"><div class="flex items-center gap-[2px] ${msg.isMe ? 'text-green-800' : 'text-gray-800'}">${barsHtml}</div><span class="text-[13px] opacity-80">${duration}"</span></div><div class="mc-voice-text hidden mt-2 pt-2 border-t ${msg.isMe ? 'border-green-600/30' : 'border-gray-200'} text-[14px] opacity-90 leading-relaxed text-left">${msg.text}</div></div>`;      } else if (msg.msgType === 'emoji') {
+        maxWidthClass = 'max-w-[25%]';
+        bubbleClass = 'mc-bubble-emoji bg-transparent'; 
+        bubbleStyle = ''; 
+        contentHtml = `<img src="${msg.imageUrl}" class="w-32 h-32 object-contain cursor-pointer drop-shadow-sm" alt="表情包" />`;
+      } else if (msg.msgType === 'real_image') {
+        maxWidthClass = 'max-w-[70%]';
+        bubbleClass = 'mc-bubble-img bg-white p-1 rounded-xl shadow-sm border border-gray-100'; 
+        bubbleStyle = ''; 
+        contentHtml = `<img src="${msg.imageUrl}" class="w-full h-auto rounded-lg object-cover max-h-[300px] cursor-pointer" onclick="window.actions.showToast('查看大图')" alt="照片" />`;
+      } else if (msg.msgType === 'transfer') {
+        maxWidthClass = 'max-w-[85%]';
+        bubbleClass = 'mc-bubble-transfer rounded-xl shadow-sm overflow-hidden flex flex-col cursor-pointer active:scale-95 transition-transform'; 
+        bubbleStyle = `width: var(--transfer-width); height: var(--transfer-height); opacity: var(--transfer-opacity);`; 
+        const isPending = (msg.transferState || 'pending') === 'pending'; 
+        const stateText = isPending ? msg.transferData.note : (msg.transferState === 'accepted' ? '已收款' : '已退还');
+        const tBg = isPending ? 'var(--transfer-pending-bg)' : 'var(--transfer-accepted-bg)';
+        const tImg = isPending ? 'var(--transfer-pending-img)' : 'var(--transfer-accepted-img)';
+        const tIcon = isPending ? 'var(--transfer-pending-icon)' : 'transparent';
+        contentHtml = `
+          <div class="mc-transfer-top flex items-center p-3.5 text-white space-x-3 transition-colors" style="background-color: ${tBg}; background-image: ${tImg}; background-size: cover; background-position: center;" onclick="window.wxActions.openTransferModal(${msg.id})">
+            <div class="mc-transfer-icon w-10 h-10 rounded-full flex items-center justify-center border ${isPending ? 'border-[#fbab66]' : 'border-transparent'} flex-shrink-0 transition-colors" style="background-color: ${tIcon};">
+              <i data-lucide="${isPending ? 'arrow-right-left' : (msg.transferState === 'accepted' ? 'check' : 'corner-up-left')}" style="width:20px; height:20px; color: ${isPending ? 'white' : 'rgba(255,255,255,0.8)'};"></i>
+            </div>
+            <div class="mc-transfer-info flex flex-col overflow-hidden">
+              <span class="mc-transfer-amt text-[15px] font-bold">¥${msg.transferData.amount}</span>
+              <span class="mc-transfer-note text-[11px] opacity-90 truncate">${stateText}</span>
+            </div>
+          </div>
+          <div class="mc-transfer-bot bg-white px-3 py-1.5 text-[10px] text-gray-400 font-bold border-t border-gray-100 flex items-center justify-between">
+            <span>转账</span>
+            ${!isPending ? `<i data-lucide="check-circle" style="width:12px; height:12px;" class="opacity-50"></i>` : ''}
+          </div>
+        `;
+      } else if (msg.msgType === 'history_record') {
+        maxWidthClass = 'max-w-[75%]';
+        bubbleClass = 'mc-bubble-record bg-white rounded-[12px] shadow-sm border border-gray-100 flex flex-col overflow-hidden cursor-pointer active:bg-gray-50 transition-colors'; 
+        bubbleStyle = ''; 
+        contentHtml = `
+          <div class="p-3 pb-2 flex flex-col text-left">
+            <span class="text-[14px] font-medium text-gray-800 mb-1.5 truncate w-[13rem]">${msg.historyData.title}</span>
+            <div class="text-[11px] text-gray-500 leading-snug space-y-0.5 line-clamp-4">
+               ${msg.historyData.preview.split('\n').map(l => `<div class="truncate">${l}</div>`).join('')}
+            </div>
+          </div>
+          <div class="border-t border-gray-100 mx-3 py-1.5 flex justify-between items-center text-[10px] text-gray-400"><span>聊天记录</span></div>
+        `;
+      } else {
+        bubbleClass = 'mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-wrap break-words';
+        bubbleStyle = `font-family: var(--chat-font); font-size: var(--chat-font-size); background-color: var(${msg.isMe ? '--bubble-me-bg' : '--bubble-char-bg'}); background-image: var(${msg.isMe ? '--bubble-me-img' : '--bubble-char-img'}); background-size: cover; color: var(${msg.isMe ? '--bubble-me-text' : '--bubble-char-text'}); opacity: var(${msg.isMe ? '--bubble-me-opacity' : '--bubble-char-opacity'}); border-top-${msg.isMe ? 'right' : 'left'}-radius: 2px;`;
+        const quoteHtml = msg.quote ? `<div class="text-[11px] bg-black/5 rounded-md px-2 py-1.5 mb-1.5 border-l-2 border-black/20 break-words whitespace-pre-wrap leading-relaxed" style="color: inherit; opacity: 0.75;">${msg.quote.sender}：${msg.quote.text}</div>` : '';
+        contentHtml = quoteHtml + msg.text;
+      }
+
+      let menuHtml = '';
+      if (wxState.activeMenuMsgId === msg.id) {
+        menuHtml = `
+          <div class="absolute z-[100] bottom-[105%] ${msg.isMe ? 'right-0 origin-bottom-right' : 'left-0 origin-bottom-left'} bg-[#2c2c2c] text-white rounded-[12px] px-1 py-0.5 flex items-center shadow-2xl animate-in zoom-in-95 duration-150 whitespace-nowrap border border-white/10" onclick="event.stopPropagation()">
+            <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.quoteMessage(${msg.id})"><i data-lucide="quote" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">引用</span></div>
+            <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.favoriteMessage(${msg.id})"><i data-lucide="star" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">收藏</span></div>
+            <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.startMultiSelect(${msg.id})"><i data-lucide="check-square" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">多选</span></div>
+            ${msg.isMe ? `<div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.recallMessage(${msg.id})"><i data-lucide="undo-2" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">撤回</span></div>` : ''}
+            <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.editMessage(${msg.id})"><i data-lucide="edit" class="w-[18px] h-[18px] mb-1 text-blue-400"></i><span class="text-[10px] text-blue-400 scale-90">编辑</span></div>
+            <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.deleteMessage(${msg.id})"><i data-lucide="trash-2" class="w-[18px] h-[18px] mb-1 text-red-400"></i><span class="text-[10px] text-red-400 scale-90">删除</span></div>
+          </div>
+        `;
+      }
+
+      // 🌟气泡组装
+      return `${timeHtml}
+      <div class="mc-msg-row ${msg.isMe ? 'mc-is-me' : 'mc-is-ai'} flex items-start w-full animate-in fade-in duration-300 mb-3 ${wxState.isMultiSelecting ? 'pl-2 cursor-pointer' : ''}" ${wxState.isMultiSelecting ? `onclick="window.wxActions.toggleSelectMsg(${msg.id})"` : ''}>
+        
+        ${checkboxHtml}
+        
+        <div class="flex-1 flex items-start ${msg.isMe ? 'justify-end' : 'justify-start'} pointer-events-${wxState.isMultiSelecting ? 'none' : 'auto'}">
+          ${!msg.isMe ? `<div class="mc-avatar w-10 h-10 bg-[var(--bubble-char-bg)] rounded-full overflow-hidden flex items-center justify-center text-xl mr-2 shadow-sm flex-shrink-0 cursor-pointer" onclick="window.wxActions.handleAvatarClick('${char.id}')" style="font-family: var(--system-font)">${getVidHtml(char.avatar, char.avatar, false)}</div>` : ''}
+          
+          <div class="relative inline-flex flex-col ${msg.isMe ? 'items-end' : 'items-start'} ${maxWidthClass}"
+               onmousedown="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchStart(${msg.id})`}" 
+               onmouseup="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}" 
+               onmouseleave="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}" 
+               ontouchstart="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchStart(${msg.id})`}" 
+               ontouchend="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}">
+               
+            <div class="mc-bubble ${bubbleClass}" style="${bubbleStyle}">${contentHtml}</div>
+            ${menuHtml}
+          </div>
+
+          ${msg.isMe ? `<div class="mc-avatar w-10 h-10 bg-white border border-gray-100 overflow-hidden rounded-full flex items-center justify-center text-xl ml-2 shadow-sm flex-shrink-0" style="font-family: var(--system-font)">${getVidHtml(myAvatar, myAvatar, false)}</div>` : ''}
+        </div>
+      </div>`;
+    }).join('');
+
+    const plusMenuHtml = [
+      { id: 'mc-tool-reroll', icon: 'refresh-cw', label: '重roll回复', action: 'window.wxActions.rerollReply()' },
+      { id: 'mc-tool-extract', icon: 'brain-circuit', label: '提取记忆', action: "window.wxActions.openExtractMemoryModal()" },
+      { id: 'mc-tool-image', icon: 'image', label: '发送图片', action: "document.getElementById('real-image-input').click()" },
+      { id: 'mc-tool-camera', icon: 'camera', label: '虚拟拍照', action: "window.wxActions.openVirtualModal('image')" },
+      { id: 'mc-tool-transfer', icon: 'credit-card', label: '转账', action: "window.wxActions.openVirtualModal('transfer')" },
+      { id: 'mc-tool-mic', icon: 'mic', label: '发送语音', action: "window.wxActions.openVirtualModal('voice')" },
+      { id: 'mc-tool-voicecall', icon: 'phone', label: '语音通话', action: "window.wxActions.startCall('voice')" },
+      { id: 'mc-tool-videocall', icon: 'video', label: '视频通话', action: "window.wxActions.startCall('video')" },
+      { id: 'mc-tool-offline', icon: 'coffee', label: '线下剧情', action: "window.wxActions.enterOffline()" }
+    ].map(item => `
+      <div class="mc-tools-item flex flex-col items-center justify-center space-y-1.5 cursor-pointer active:scale-95 transition-transform" onclick="${item.action}">
+        <div class="${item.id} w-14 h-14 flex items-center justify-center">
+          <i data-lucide="${item.icon}" class="text-gray-800" style="width: 28px; height: 28px;"></i>
+        </div>
+        <span class="text-[11px] font-bold text-gray-500">${item.label}</span>
+      </div>
+    `).join('');
+
+    // ... （弹窗类HTML保持原样，因为不涉及主界面美化）
+    const virtualModalHtml = wxState.virtualModalType !== 'none' ? `<div class="absolute inset-0 bg-black/40 z-50 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm"><div class="bg-white w-full rounded-[24px] p-5 shadow-2xl animate-in zoom-in-95 duration-200">${wxState.virtualModalType === 'transfer' ? `<h3 class="font-bold text-gray-800 mb-4 flex items-center justify-center"><i data-lucide="credit-card" class="mr-2 text-orange-500" style="width:20px; height:20px;"></i>发起转账</h3><div class="flex items-center text-4xl font-bold border-b border-gray-200 pb-2 mb-4 text-gray-800"><span class="mr-2 text-2xl">¥</span><input type="number" id="transfer-amount" class="flex-1 outline-none bg-transparent" placeholder="0.00" /></div><input type="text" id="transfer-note" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 outline-none text-sm mb-6 font-bold" placeholder="转账说明（选填，默认：转账）" />` : `<h3 class="font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="${wxState.virtualModalType === 'image' ? 'camera' : 'mic'}" class="mr-2 text-blue-500" style="width:20px; height:20px;"></i>${wxState.virtualModalType === 'image' ? '拍摄虚拟照片' : '录制语音消息'}</h3><p class="text-[10px] text-gray-500 mb-4">${wxState.virtualModalType === 'image' ? '详细描写照片画面，AI会视为真实照片。' : '输入你想要用语音发送的文字内容。'}</p><textarea id="virtual-input" rows="4" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 outline-none text-sm mb-4 resize-none focus:border-blue-500 transition-colors" placeholder="请输入描述内容..."></textarea>`}<div class="flex space-x-3"><button onclick="window.wxActions.closeVirtualModal()" class="flex-1 py-2.5 bg-gray-100 text-gray-600 font-bold rounded-xl active:bg-gray-200">取消</button><button onclick="window.wxActions.sendVirtualMedia()" class="flex-1 py-2.5 ${wxState.virtualModalType === 'transfer' ? 'bg-[#f98a2e] active:bg-orange-600' : 'bg-blue-500 active:bg-blue-600'} text-white font-bold rounded-xl shadow-md">发送</button></div></div></div>` : '';
+
+    let transferDetailHtml = '';
+    if (wxState.activeTransferId) {
+      const tMsg = chatData.messages.find(m => m.id === wxState.activeTransferId);
+      if (tMsg) {
+        const isMe = tMsg.isMe, state = tMsg.transferState || 'pending';
+        transferDetailHtml = `<div class="absolute inset-0 bg-black/40 z-50 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm"><div class="bg-[#f6f6f6] w-full max-w-[300px] rounded-[20px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200"><div class="bg-[#f98a2e] flex flex-col items-center pt-8 pb-6 px-4 text-white relative"><div class="absolute top-3 left-3 cursor-pointer p-1 active:opacity-50" onclick="window.wxActions.closeTransferModal()"><i data-lucide="x" style="width:22px; height:22px;"></i></div><div class="w-12 h-12 bg-[#fca253] rounded-full flex items-center justify-center mb-3 shadow-inner"><i data-lucide="arrow-right-left" style="width:24px; height:24px;"></i></div><span class="text-[13px] font-bold opacity-90 mb-1">${isMe ? '你发起的转账' : `来自 ${char.name} 的转账`}</span><span class="text-3xl font-bold font-mono">¥${tMsg.transferData.amount}</span></div><div class="bg-white p-5 flex flex-col items-center justify-center min-h-[120px]">${state === 'pending' ? ( !isMe ? `<button onclick="window.wxActions.handleTransferAction('accept')" class="w-full py-3 bg-[#07c160] text-white font-bold rounded-xl active:bg-green-600 mb-4 flex justify-center items-center shadow-sm transition-colors"><i data-lucide="check-circle" class="mr-1" style="width:18px;"></i> 确认接收</button><span onclick="window.wxActions.handleTransferAction('return')" class="text-[11px] text-gray-400 font-bold cursor-pointer hover:text-gray-600 active:opacity-70 transition-colors">退还给对方</span>` : `<span class="text-sm font-bold text-gray-400 flex flex-col items-center"><i data-lucide="clock" class="mb-2 opacity-50"></i>等待对方收款...</span>` ) : `<span class="text-sm font-bold text-gray-500 flex flex-col items-center"><i data-lucide="${state === 'accepted' ? 'check-circle' : 'corner-up-left'}" class="mb-2 text-gray-400"></i>${state === 'accepted' ? '转账已完成' : '转账已退回'}</span>`}</div></div></div>`;
+      }
+    }
+
+    return `
+      <div id="mc-chat-screen" class="w-full h-full flex flex-col animate-in slide-in-from-right-4 duration-200 relative z-0" style="background-color: var(--chat-bg-color); background-image: var(--chat-bg-image); background-size: cover; background-position: center;">
+        
+        <style>
+          ${char.customCSS || ''}
+          ${char.bgImage ? `:root { --chat-bg-image: url('${char.bgImage}'); }` : (store.bgImage ? `:root { --chat-bg-image: url('${store.bgImage}'); }` : '')}
+        </style>
+
+        <div class="absolute inset-0 z-[-1]" style="background: var(--chat-bg-overlay); pointer-events: none;"></div>
+        ${wxState.activeMenuMsgId ? `<div class="absolute inset-0 z-[90]" onclick="window.wxActions.closeContextMenu()" ontouchstart="window.wxActions.closeContextMenu()"></div>` : ''}
+        
+        <div class="mc-topbar backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200/50 z-10 sticky top-0 transition-colors" style="background-color: ${wxState.isMultiSelecting ? '#f3f3f3' : 'var(--top-bar-bg)'}; background-image: ${wxState.isMultiSelecting ? 'none' : 'var(--top-bar-img)'}; background-size: cover; height: var(--top-bar-height);">
+          ${wxState.isMultiSelecting ? `
+            <div class="cursor-pointer text-gray-800 w-1/4 text-[15px]" onclick="window.wxActions.cancelMultiSelect()">取消</div>
+            <span class="flex-1 text-center font-bold text-gray-800 text-[16px]">已选择 ${wxState.selectedMsgIds.length} 项</span>
+            <div class="w-1/4"></div>
+          ` : `
+            <div class="mc-btn-back flex items-center cursor-pointer text-gray-800 w-1/4" onclick="window.wxActions.closeChat()"><i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i></div>
+            <span class="mc-title flex-1 font-bold transition-all duration-300 ${wxState.isTyping ? 'opacity-60 animate-pulse' : ''}" style="color: var(--name-color); font-family: var(--name-font); font-size: var(--name-size); text-align: var(--name-align);">${wxState.isTyping ? '对方正在输入...' : char?.name}</span>
+            <div class="mc-btn-more w-1/4 flex justify-end"><i data-lucide="more-horizontal" class="text-gray-800 cursor-pointer active:scale-90" style="width: 24px; height: 24px;" onclick="window.wxActions.openSettings()"></i></div>
+          `}
+        </div>
+        
+        <div id="chat-scroll" class="mc-msg-list flex-1 p-4 overflow-y-auto hide-scrollbar space-y-4 flex flex-col pb-6">
+          ${messagesHtml}
+        </div>
+
+        ${wxState.isMultiSelecting ? `
+          <div class="px-6 py-3 pb-8 border-t border-gray-200/50 z-20 relative bg-[#f3f3f3] flex justify-between items-center text-gray-600 shadow-[0_-10px_20px_rgba(0,0,0,0.05)] animate-in slide-in-from-bottom-2">
+            <div class="flex flex-col items-center cursor-pointer hover:text-[#07c160] transition-colors active:scale-90" onclick="window.wxActions.batchAction('逐条转发')"><i data-lucide="share" class="w-[22px] h-[22px] mb-1"></i><span class="text-[10px]">逐条转发</span></div>
+            <div class="flex flex-col items-center cursor-pointer hover:text-[#07c160] transition-colors active:scale-90" onclick="window.wxActions.batchAction('合并转发')"><i data-lucide="message-square-plus" class="w-[22px] h-[22px] mb-1"></i><span class="text-[10px]">合并转发</span></div>
+            <div class="flex flex-col items-center cursor-pointer hover:text-yellow-500 transition-colors active:scale-90" onclick="window.wxActions.batchAction('收藏')"><i data-lucide="star" class="w-[22px] h-[22px] mb-1"></i><span class="text-[10px]">收藏</span></div>
+            <div class="flex flex-col items-center cursor-pointer hover:text-red-500 transition-colors active:scale-90" onclick="window.wxActions.deleteSelected()"><i data-lucide="trash-2" class="w-[22px] h-[22px] mb-1"></i><span class="text-[10px]">删除</span></div>
+          </div>
+        ` : `
+          <div class="mc-bottombar px-3 py-2 pb-6 border-t border-gray-200/50 z-20 relative transition-all duration-200" style="background-color: var(--bottom-bar-bg); background-image: var(--bottom-bar-img); background-size: cover; min-height: var(--bottom-bar-height);">
+            
+            ` + (() => {
+              if (!wxState.quoteMsgId) return '';
+              const qm = chatData.messages.find(m => m.id === wxState.quoteMsgId);
+              if (!qm) return '';
+              const shortT = qm.text.length > 20 ? qm.text.substring(0, 20) + '...' : qm.text;
+              return '<div class="mc-quote-box mb-2 bg-black/5 rounded-lg px-3 py-2 flex items-center justify-between border border-black/10 shadow-sm animate-in fade-in slide-in-from-bottom-2">' +
+                '<span class="text-[12px] text-gray-500 truncate flex-1 opacity-80">引用 ' + qm.sender + '：' + shortT + '</span>' +
+                '<div class="cursor-pointer ml-3 p-1 active:scale-90 opacity-60 hover:opacity-100" onclick="window.wxActions.cancelQuote()"><i data-lucide="x-circle" style="width:16px; height:16px;"></i></div>' +
+              '</div>';
+            })() + `
+
+            <div class="flex items-end space-x-2">
+              <div class="flex items-center space-x-2.5 mb-1.5 px-1">
+                <i data-lucide="smile" class="mc-btn-emoji cursor-pointer transition-colors ${wxState.showEmojiMenu ? 'text-[#07c160]' : 'text-gray-800'}" style="width: 28px; height: 28px;" onclick="window.wxActions.toggleEmojiMenu()"></i>
+                <i data-lucide="plus-circle" class="mc-btn-plus cursor-pointer transition-transform duration-200 ${wxState.showPlusMenu ? 'rotate-45' : ''}" style="width: 28px; height: 28px;" onclick="window.wxActions.togglePlusMenu()"></i>
+              </div>
+              <div class="flex-1 bg-white/90 backdrop-blur-sm rounded-xl flex items-center pr-1 min-h-[38px] shadow-sm border border-gray-100">
+                <input type="text" id="wx-input" onkeydown="if(event.key==='Enter') window.wxActions.sendMessage()" class="mc-input flex-1 h-full py-2 px-3 outline-none text-[15px] bg-transparent" />
+                <div class="flex items-center space-x-1 pl-1 pr-1">
+                  <button class="mc-btn-ai w-8 h-8 flex items-center justify-center text-gray-800 active:scale-90 transition-transform" title="获取AI回复" onclick="window.wxActions.getReply()"><i data-lucide="sparkles" style="width: 22px; height: 22px;"></i></button>
+                  <button class="mc-btn-send w-8 h-8 flex items-center justify-center text-gray-800 active:scale-90 transition-transform" title="发送" onclick="window.wxActions.sendMessage()"><i data-lucide="send" style="width: 20px; height: 20px; margin-left: 2px;"></i></button>
+                </div>
+              </div>
+            </div>
+            <div class="mc-tools-panel ${wxState.showPlusMenu ? 'grid' : 'hidden'} pt-4 grid-cols-4 gap-4 animate-in slide-in-from-bottom-2 fade-in">
+              ${plusMenuHtml}
+            </div>
+            
+            ` + (() => {
+              if (!wxState.showEmojiMenu) return '';
+              let groupedEmojis = [];
+
+              (store.emojiLibs || []).forEach(lib => {
+                  if (lib.emojis && lib.emojis.length > 0) {
+                      groupedEmojis.push({
+                          name: lib.name,
+                          emojis: lib.emojis.map(e => typeof e === 'string' ? {url: e, name: '表情'} : e)
+                      });
+                  }
+              });
+
+              let eHtml = '<div class="mc-emoji-panel flex flex-col h-72 bg-[#f3f3f3] mx-[-12px] px-0 pt-0 pb-6 animate-in slide-in-from-bottom-2 fade-in border-t border-gray-200 mt-2">';
+              
+              if (groupedEmojis.length === 0) {
+                 return eHtml + '<div class="text-center text-gray-400 mt-10 text-[12px] font-bold tracking-widest">请在“我”页面导入 JSON 或添加表情哦</div></div>';
+              }
+
+              eHtml += '<div class="flex overflow-x-auto hide-scrollbar bg-[#f6f6f6] border-b border-gray-200 px-3 py-2 space-x-3 items-center shadow-sm z-10">';
+              groupedEmojis.forEach((group, idx) => {
+                 const isActive = wxState.activeEmojiTab === idx;
+                 eHtml += '<div class="whitespace-nowrap px-3 py-1.5 rounded-full text-[13px] font-bold cursor-pointer transition-all ' + (isActive ? 'bg-white text-gray-800 shadow-sm border border-gray-100' : 'bg-transparent text-gray-400 border border-transparent hover:bg-gray-200/50') + '" onclick="window.wxActions.switchEmojiTab(' + idx + ')">' + group.name + '</div>';
+              });
+              eHtml += '</div>';
+
+              const activeGroup = groupedEmojis[wxState.activeEmojiTab] || groupedEmojis[0];
+              eHtml += '<div class="flex-1 overflow-y-auto hide-scrollbar p-4">';
+              eHtml += '<div class="grid grid-cols-4 gap-x-3 gap-y-4">'; 
+              activeGroup.emojis.forEach(ep => {
+                 const shortName = ep.name.length > 5 ? ep.name.substring(0,5) + '...' : ep.name;
+                 eHtml += '<div class="flex flex-col items-center cursor-pointer active:scale-95 transition-transform" onclick="window.wxActions.sendEmoji(\'' + ep.url + '\', \'' + ep.name + '\')">';
+                 eHtml += '<div class="w-[3.5rem] h-[3.5rem] rounded-[12px] overflow-hidden flex items-center justify-center p-1"><img src="' + ep.url + '" class="w-full h-full object-contain drop-shadow-sm" /></div>';
+                 eHtml += '<span class="text-[10px] text-gray-500 mt-1.5 truncate w-full text-center">' + shortName + '</span>';
+                 eHtml += '</div>';
+              });
+              eHtml += '</div></div></div>';
+              return eHtml;
+            })() + `
+            
+          </div>
+        `}
+        
+        ${virtualModalHtml}${transferDetailHtml}
+        <input type="file" id="real-image-input" accept="image/*" class="hidden" onchange="window.wxActions.handleImageUpload(event)" />
+        
+        ${wxState.showForwardModal ? `
+          <div class="absolute inset-0 z-[80] bg-black/40 flex items-end justify-center animate-in fade-in backdrop-blur-sm" onclick="window.wxActions.closeForwardModal()">
+            <div class="bg-[#f3f3f3] w-full max-h-[75vh] rounded-t-[24px] overflow-hidden shadow-2xl animate-in slide-in-from-bottom-4 flex flex-col" onclick="event.stopPropagation()">
+              <div class="bg-white px-4 py-4 flex justify-between items-center border-b border-gray-100">
+                <div class="cursor-pointer active:opacity-50 p-1" onclick="window.wxActions.closeForwardModal()"><i data-lucide="chevron-left" class="w-6 h-6 text-gray-600"></i></div>
+                <span class="absolute left-1/2 -translate-x-1/2 font-bold text-gray-800 text-[16px]">选择发送给谁</span>
+                <div class="w-8"></div>
+              </div>
+              <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-10">
+                <p class="text-[11px] text-gray-400 font-bold mb-2 px-1 tracking-widest text-center">${wxState.forwardType === 'single' ? '逐条转发' : '合并为一条聊天记录转发'}</p>
+                ${store.contacts.map(c => `
+                  <div class="bg-white rounded-[16px] p-3 flex items-center shadow-sm cursor-pointer active:scale-95 border border-transparent hover:border-[#07c160]/30 transition-all" onclick="window.wxActions.confirmForward('${c.id}')">
+                    <div class="w-12 h-12 rounded-[12px] overflow-hidden bg-gray-100 flex items-center justify-center mr-3 flex-shrink-0 shadow-sm border border-gray-100">${getVidHtml(c.avatar, '', false)}</div>
+                    <div class="flex-1 flex flex-col overflow-hidden">
+                      <span class="text-[15px] font-bold text-gray-800 truncate">${c.name}</span>
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${wxState.showExtractMemoryModal ? `
+          <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeExtractMemoryModal()">
+            <div class="bg-[#f6f6f6] w-full rounded-[24px] overflow-hidden shadow-2xl flex flex-col" onclick="event.stopPropagation()">
+               <div class="bg-white px-5 py-4 flex justify-between items-center border-b border-gray-100 shadow-sm">
+                 <span class="font-black text-gray-800 text-[16px] flex items-center tracking-wide"><i data-lucide="brain-circuit" class="text-purple-500 mr-2 w-5 h-5"></i>提取记忆片段</span>
+                 <i data-lucide="x" class="text-gray-400 cursor-pointer active:scale-90 transition-transform bg-gray-50 p-1 rounded-full w-6 h-6" onclick="window.wxActions.closeExtractMemoryModal()"></i>
+               </div>
+               <div class="p-5">
+               ${wxState.extractMemoryStep === 1 ? `
+                 <div class="space-y-5 animate-in slide-in-from-left-4">
+                    <div>
+                       <span class="text-[12px] font-black text-gray-400 uppercase tracking-widest block mb-2 pl-1">保存至何处？</span>
+                       <div class="flex space-x-3">
+                          <label class="flex-1 flex flex-col items-center justify-center bg-white border-2 ${wxState.extractMemoryConfig.type === 'core' ? 'border-red-400 text-red-500 shadow-[0_4px_12px_rgba(248,113,113,0.15)]' : 'border-transparent text-gray-400 shadow-sm'} rounded-xl py-3 cursor-pointer transition-all" onclick="window.wxActions.updateExtractConfig('type', 'core')"><i data-lucide="brain-circuit" class="w-6 h-6 mb-1"></i><span class="text-[11px] font-bold">核心记忆 (钢印)</span></label>
+                          <label class="flex-1 flex flex-col items-center justify-center bg-white border-2 ${wxState.extractMemoryConfig.type === 'fragment' ? 'border-yellow-400 text-yellow-500 shadow-[0_4px_12px_rgba(250,204,21,0.15)]' : 'border-transparent text-gray-400 shadow-sm'} rounded-xl py-3 cursor-pointer transition-all" onclick="window.wxActions.updateExtractConfig('type', 'fragment')"><i data-lucide="puzzle" class="w-6 h-6 mb-1"></i><span class="text-[11px] font-bold">碎片记忆 (触发)</span></label>
+                       </div>
+                    </div>
+                    <div>
+                       <div class="flex justify-between items-end mb-2 pl-1">
+                         <span class="text-[12px] font-black text-gray-400 uppercase tracking-widest">让 AI 总结过去多少条聊天？</span>
+                         <span class="text-[16px] font-black text-[#07c160] font-mono">${wxState.extractMemoryConfig.msgCount} 条</span>
+                       </div>
+                       <input type="range" min="2" max="100" value="${wxState.extractMemoryConfig.msgCount}" class="w-full accent-[#07c160] h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer" oninput="window.wxActions.updateExtractConfig('msgCount', this.value)" />
+                    </div>
+                    <button class="w-full bg-[#07c160] text-white font-bold py-3.5 rounded-[14px] flex items-center justify-center active:scale-95 transition-transform shadow-[0_4px_15px_rgba(7,193,96,0.3)] mt-2" onclick="window.wxActions.startExtractMemory()">
+                      ${wxState.isExtracting ? '<i data-lucide="loader-2" class="animate-spin mr-2 w-5 h-5"></i>大模型飞速阅读中...' : '<i data-lucide="sparkles" class="mr-2 w-5 h-5"></i>开始 AI 一键提炼'}
+                    </button>
+                 </div>
+               ` : `
+                 <div class="space-y-4 animate-in slide-in-from-right-4">
+                    <div class="space-y-2">
+                      <span class="text-[12px] font-black text-gray-400 uppercase tracking-widest block pl-1">提炼结果 (你可手动润色)</span>
+                      <textarea id="extract-mem-content" rows="4" class="w-full bg-white border border-gray-100 rounded-xl p-3 outline-none text-[14px] text-gray-800 font-medium leading-relaxed shadow-sm resize-none hide-scrollbar">${wxState.extractMemoryContent}</textarea>
+                    </div>
+                    ${wxState.extractMemoryConfig.type === 'fragment' ? `
+                      <div class="space-y-2 animate-in fade-in">
+                        <span class="text-[12px] font-black text-blue-400 uppercase tracking-widest block pl-1">AI自动生成的触发词</span>
+                        <input id="extract-mem-keywords" value="${wxState.extractMemoryConfig.keywords}" class="w-full bg-blue-50/50 border border-blue-100 rounded-xl p-3 outline-none text-[14px] text-blue-600 font-bold placeholder-blue-300" />
+                      </div>
+                    ` : ''}
+                    <div class="flex space-x-3 pt-2">
+                      <button class="flex-1 bg-white border border-gray-200 text-gray-600 font-bold py-3 rounded-xl active:bg-gray-50 transition-colors shadow-sm" onclick="window.wxActions.updateExtractConfig('extractMemoryStep', 1); window.wxActions.openExtractMemoryModal()">重新提取</button>
+                      <button class="flex-1 bg-[#07c160] text-white font-bold py-3 rounded-xl active:bg-green-600 transition-colors shadow-md" onclick="window.wxActions.saveExtractedMemory()">无误，存入大脑</button>
+                    </div>
+                 </div>
+               `}
+               </div>
+            </div>
+          </div>
+        ` : ''}
+        
+      </div>
+    `;
+  }
+  // ================= 2. 渲染主界面 (四大标签页) =================
+  const chatsHtml = store.chats.map(chat => {
+    const char = store.contacts.find(c => c.id === chat.charId); // 🌟 修复：叫 char，不叫 chatChar
+    if (!char) return '';
+    // 🌟 修复：在外部消息预览中，也把 isHidden 的隐藏提示词给过滤掉！
+    const validMsgs = chat.messages.filter(m => !m.isOffline && !m.isHidden);
+    const preview = validMsgs.length > 0 ? validMsgs[validMsgs.length - 1].text : '暂无消息';
+    return `
+      <div onclick="window.wxActions.openChat('${char.id}')" class="flex items-center px-4 py-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 active:bg-gray-100">
+        <div class="w-12 h-12 bg-gray-100 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-2xl mr-3">
+          ${getVidHtml(char.avatar, false)}
+        </div>
+        <div class="flex-1 overflow-hidden">
+          <div class="flex justify-between items-center mb-1"><span class="font-bold text-gray-800">${char.name}</span><span class="text-xs text-gray-500">最新</span></div>
+          <p class="text-sm text-gray-500 truncate">${preview}</p>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  // 顶部标题
+  let headerTitle = '消息';
+  if(wxState.activeTab === 'contacts') headerTitle = '通讯录';
+  if(wxState.activeTab === 'moments') headerTitle = '朋友圈';
+  if(wxState.activeTab === 'me') headerTitle = '我';
+
+  // 内容区
+  let contentHtml = '';
+  if (wxState.activeTab === 'chats') {
+    contentHtml = `<div class="flex-1 overflow-y-auto hide-scrollbar">${chatsHtml}</div>`;
+  } else if (wxState.activeTab === 'contacts') {
+    // 🌟 生成手风琴式分组列表
+    const groupsHtml = store.groups.map(group => {
+      const members = store.contacts.filter(c => c.groupId === group.id);
+      const isExpanded = wxState.expandedGroups[group.id] !== false; // 默认展开
+      return `
+        <div class="border-b border-gray-100/60">
+          <div class="px-4 py-3.5 bg-white flex justify-between items-center cursor-pointer hover:bg-gray-50 transition-colors" onclick="window.wxActions.toggleGroup('${group.id}')">
+            <span class="font-bold text-[15px] text-gray-800">${group.name} <span class="text-gray-400 font-normal text-sm ml-1">${members.length}</span></span>
+            <i data-lucide="${isExpanded ? 'chevron-down' : 'chevron-right'}" class="w-5 h-5 text-gray-300 transition-transform"></i>
+          </div>
+          <div class="${isExpanded ? 'block' : 'hidden'} bg-white animate-in slide-in-from-top-2 duration-150">
+            ${members.length === 0 ? `<div class="py-4 text-center text-xs text-gray-300 font-bold tracking-widest">空空如也</div>` : members.map(c => `
+              <div class="flex items-center px-4 py-2 cursor-pointer active:bg-gray-100 transition-colors" onclick="window.wxActions.openContactEdit('${c.id}')">
+                <div class="w-10 h-10 rounded-lg overflow-hidden mr-3 bg-gray-100 flex items-center justify-center text-xl flex-shrink-0 shadow-sm border border-black/5">${getVidHtml(c.avatar, '', false)}</div>
+                <div class="flex-1 border-b border-gray-50 py-3"><span class="font-bold text-[15px] text-gray-800">${c.name}</span></div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }).join('');
+    contentHtml = `<div class="flex-1 overflow-y-auto hide-scrollbar bg-[#f3f3f3] pt-2">${groupsHtml}</div>`;
+  } else if (wxState.activeTab === 'moments') {
+    const my = store.personas[0];
+    store.moments = store.moments || [];
+    store.momentBg = store.momentBg;
+    
+    // 🌟 核心升级：仅筛选出最近 3 天（72小时）内的动态
+    const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    const validMoments = store.moments.filter(m => m.id >= threeDaysAgo);
+    
+    // 生成朋友圈流列表
+    const feedHtml = validMoments.slice().reverse().map(m => {
+    // 生成点赞和评论区
+    const hasLikes = m.likes && m.likes.length > 0;
+    const hasComments = m.comments && m.comments.length > 0;
+    let interactHtml = '';
+    if (hasLikes || hasComments) {
+        interactHtml = '<div class="bg-gray-50 mt-2.5 rounded-[6px] px-3 py-2 text-[13px] relative before:content-[\'\'] before:absolute before:bottom-full before:left-3 before:border-4 before:border-transparent before:border-b-gray-50">';
+        if (hasLikes) interactHtml += `<div class="flex items-start text-[#576b95] font-medium ${hasComments?'border-b border-gray-200/60 pb-1.5 mb-1.5':''}"><i data-lucide="heart" class="w-3.5 h-3.5 mr-1.5 mt-0.5 flex-shrink-0"></i><span class="leading-relaxed">${m.likes.join(', ')}</span></div>`;
+         if (hasComments) {
+            interactHtml += m.comments.map(c => `<div class="active:bg-gray-200 transition-colors py-0.5 leading-relaxed cursor-pointer break-words" onclick="window.wxActions.handleCommentClick(${m.id}, ${c.id})"><span class="text-[#576b95] font-medium">${c.senderName}</span>${c.replyTo ? ` 回复 <span class="text-[#576b95] font-medium">${c.replyTo}</span>` : ''}<span class="text-gray-800">：${c.text}</span></div>`).join('');
+         }
+        interactHtml += '</div>';
+    }
+
+      // 菜单弹出动画区
+      const menuHtml = wxState.activeMomentMenuId === m.id ? `
+        <div class="absolute right-8 top-[-6px] bg-[#4c5154] rounded-[6px] flex items-center px-4 py-2 text-white space-x-5 animate-in slide-in-from-right-2 duration-150 z-10 shadow-lg">
+          <div class="flex items-center space-x-1 cursor-pointer active:opacity-50" onclick="window.wxActions.likeMoment(${m.id})"><i data-lucide="heart" class="w-4 h-4"></i><span class="text-[12px] font-bold">${m.likes.includes(my.name)?'取消':'赞'}</span></div>
+          <div class="w-[1px] h-4 bg-gray-600"></div>
+          <div class="flex items-center space-x-1 cursor-pointer active:opacity-50" onclick="window.wxActions.openMomentComment(${m.id})"><i data-lucide="message-circle" class="w-4 h-4"></i><span class="text-[12px] font-bold">评论</span></div>
+          <div class="w-[1px] h-4 bg-gray-600"></div>
+          <div class="flex items-center space-x-1 cursor-pointer active:opacity-50" onclick="window.wxActions.favoriteMoment(${m.id})"><i data-lucide="star" class="w-4 h-4"></i><span class="text-[12px] font-bold">收藏</span></div>
+        </div>
+      ` : '';
+
+      return `
+        <div class="flex items-start p-4 border-b border-gray-100/60 bg-white">
+          <div class="w-10 h-10 rounded-[8px] overflow-hidden bg-gray-100 flex-shrink-0 mr-3 shadow-sm border border-gray-100">${getVidHtml(m.avatar, '', false)}</div>
+          <div class="flex-1 flex flex-col min-w-0">
+            <span class="text-[#576b95] font-medium text-[15px] mb-1">${m.senderName}</span>
+            ${m.text ? `<span class="text-gray-800 text-[15px] leading-relaxed break-words whitespace-pre-wrap">${m.text}</span>` : ''}
+            ${m.imageUrl ? `<img src="${m.imageUrl}" class="mt-2 max-w-[70%] max-h-48 object-cover rounded-[4px] border border-gray-100" onclick="window.actions.showToast('查看大图')" />` : ''}
+            ${m.virtualImageText ? `
+              <div class="mt-2 w-48 min-h-[12rem] bg-white cursor-pointer select-none rounded-[4px] shadow-sm overflow-hidden border border-gray-200 relative" onclick="const overlay = this.querySelector('.img-overlay'); overlay.classList.toggle('opacity-0'); overlay.classList.toggle('pointer-events-none');">
+                <div class="absolute inset-0 p-4 overflow-y-auto text-[13px] text-gray-700 leading-relaxed text-left bg-white hide-scrollbar">
+                   <span class="font-medium text-gray-400 block mb-1 flex items-center"><i data-lucide="image" class="mr-1" style="width:14px; height:14px;"></i>照片内容：</span>
+                   ${m.virtualImageText}
+                </div>
+                <div class="img-overlay absolute inset-0 bg-gray-100 flex flex-col items-center justify-center text-gray-400 transition-opacity duration-300 z-10">
+                   <i data-lucide="image" class="mb-2 text-gray-300" style="width: 36px; height: 36px;"></i>
+                   <span class="text-[11px] font-bold tracking-widest animate-pulse">图片加载中...</span>
+                </div>
+              </div>
+            ` : ''}
+            <div class="flex items-center justify-between mt-3 relative">
+              <div class="flex items-center space-x-3 text-[12px] text-gray-400">
+                <span>${m.time}</span>
+                <span class="text-[#576b95] cursor-pointer active:opacity-50" onclick="window.wxActions.deleteMoment(${m.id})">删除</span>
+              </div>
+              <div class="bg-gray-100 rounded-[4px] px-2 py-0.5 cursor-pointer active:bg-gray-200" onclick="window.wxActions.toggleMomentMenu(${m.id})"><i data-lucide="more-horizontal" class="text-[#576b95] w-4 h-4"></i></div>
+              ${menuHtml}
+            </div>
+            ${interactHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    contentHtml = `
+      <div id="moments-scroll" class="flex-1 overflow-y-auto bg-white hide-scrollbar relative pb-10" onclick="if(wxState.activeMomentMenuId) window.wxActions.toggleMomentMenu(null)">
+         <input type="file" id="upload-moment-bg" accept="image/*" class="hidden" onchange="window.wxActions.handleMomentBgUpload(event)" />
+         <div class="relative h-60 bg-gray-200 flex items-center justify-center overflow-visible cursor-pointer" onclick="document.getElementById('upload-moment-bg').click()">
+            <img src="${store.momentBg}" class="w-full h-full object-cover" />
+            <div class="absolute inset-x-0 bottom-[-20px] flex justify-end items-end px-4">
+               <span class="text-white font-bold text-[20px] mr-4 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] pb-6">${my.name}</span>
+               <div class="w-16 h-16 rounded-[12px] overflow-hidden border-2 border-white shadow-md bg-white flex items-center justify-center z-10">${getVidHtml(my.avatar, false)}</div>
+            </div>
+         </div>
+         <div class="h-10 bg-white"></div> <div class="flex flex-col">${feedHtml.length > 0 ? feedHtml : '<div class="text-center text-gray-400 mt-20 text-[13px] tracking-widest">点击右上角发表第一条动态吧</div>'}</div>
+      </div>
+    `;
+  } else if (wxState.activeTab === 'me') {
+    const my = store.personas[0];
+    contentHtml = `
+      <div class="flex-1 overflow-y-auto bg-[#f3f3f3] hide-scrollbar pt-2 pb-10">
+        <div class="bg-white p-6 flex items-center mb-2 shadow-sm relative mx-3 rounded-[16px] border border-gray-100 mt-2">
+           <input type="file" id="upload-my-avatar-main" accept="image/*" class="hidden" onchange="window.wxActions.handleMyAvatarUploadMain(event)" />
+           <div class="w-16 h-16 rounded-[12px] overflow-hidden bg-gray-100 flex items-center justify-center cursor-pointer mr-4 shadow-sm border border-gray-200" onclick="document.getElementById('upload-my-avatar-main').click()">${getVidHtml(my.avatar, false)}</div>
+           <div class="flex-1 flex flex-col justify-center">
+              <input value="${my.name}" onchange="window.wxActions.updateMyName(this.value)" class="text-xl font-bold text-gray-800 bg-transparent outline-none w-full" placeholder="输入你的名字" />
+              <span class="text-[13px] text-gray-500 mt-1 font-mono">微信号：wxid_${Date.now().toString().slice(-6)}</span>
+           </div>
+           <i data-lucide="qr-code" class="text-gray-400" style="width:20px;height:20px;"></i>
+        </div>
+
+        <div class="bg-white mx-3 rounded-[16px] shadow-sm mb-2 border border-gray-100 overflow-hidden">
+           <div class="px-4 py-4 flex justify-between items-center cursor-pointer active:bg-gray-50 transition-colors" onclick="window.wxActions.editGlobalPrompt()">
+              <div class="flex items-center"><i data-lucide="globe" class="text-gray-600 mr-3 w-5 h-5"></i><span class="text-[15px] text-gray-800 font-bold">通用用户人设</span></div>
+              <div class="flex items-center"><span class="text-[12px] font-bold ${store.globalPrompt ? 'text-[#07c160]' : 'text-gray-400'} mr-2 truncate w-24 text-right">${store.globalPrompt ? '已配置' : '未配置'}</span><i data-lucide="chevron-right" class="text-gray-300 w-4 h-4"></i></div>
+           </div>
+        </div>
+
+        <div class="bg-white mx-3 rounded-[16px] shadow-sm mb-2 border border-gray-100 overflow-hidden">
+           <div class="px-4 py-4 border-b border-gray-50 flex justify-between items-center cursor-pointer active:bg-gray-50 transition-colors" onclick="window.wxActions.openView('personaManage')">
+              <div class="flex items-center"><i data-lucide="users-2" class="text-gray-600 mr-3 w-5 h-5"></i><span class="text-[15px] text-gray-800 font-bold">用户身份管理</span></div>
+              <div class="flex items-center"><span class="text-[12px] font-bold text-gray-400 mr-2">${store.personas.length} 个身份</span><i data-lucide="chevron-right" class="text-gray-300 w-4 h-4"></i></div>
+           </div>
+           <div class="px-4 py-4 border-b border-gray-50 flex justify-between items-center cursor-pointer active:bg-gray-50 transition-colors" onclick="window.wxActions.openView('emojiManage')">
+              <div class="flex items-center"><i data-lucide="smile-plus" class="text-gray-600 mr-3 w-5 h-5"></i><span class="text-[15px] text-gray-800 font-bold">表情包库</span></div>
+              <div class="flex items-center"><span class="text-[12px] font-bold text-gray-400 mr-2">${store.emojiLibs ? store.emojiLibs.length : 0} 个库</span><i data-lucide="chevron-right" class="text-gray-300 w-4 h-4"></i></div>
+           </div>
+           <div class="px-4 py-4 flex justify-between items-center cursor-pointer active:bg-gray-50 transition-colors" onclick="window.wxActions.openView('favorites')">
+              <div class="flex items-center"><i data-lucide="box" class="text-gray-600 mr-3 w-5 h-5"></i><span class="text-[15px] text-gray-800 font-bold">收藏</span></div>
+              <div class="flex items-center"><span class="text-[12px] font-bold text-gray-400 mr-2">${store.favorites ? store.favorites.length : 0} 条记录</span><i data-lucide="chevron-right" class="text-gray-300 w-4 h-4"></i></div>
+           </div>
+        </div>
+
+        <div class="bg-white mx-3 rounded-[16px] shadow-sm mb-6 border border-gray-100 overflow-hidden">
+           <div class="px-4 py-4 flex justify-between items-center cursor-pointer active:bg-gray-50 transition-colors" onclick="window.wxActions.openView('wallet')">
+              <div class="flex items-center"><i data-lucide="wallet" class="text-gray-600 mr-3 w-5 h-5"></i><span class="text-[15px] text-gray-800 font-bold">服务 / 钱包</span></div>
+              <i data-lucide="chevron-right" class="text-gray-300 w-4 h-4"></i>
+           </div>
+        </div>
+      </div>
+    `;
+  }
+  // 🌟 构建“发起新对话”的弹窗 (修复了嵌套语法报错)
+  let modalHtml = '';
+  if (wxState.showNewChatModal) {
+    modalHtml = `
+      <div class="absolute inset-0 z-[60] bg-black/40 flex items-end justify-center animate-in fade-in backdrop-blur-sm" onclick="window.wxActions.toggleNewChatModal()">
+        <div class="bg-[#f3f3f3] w-full max-h-[75vh] rounded-t-[24px] overflow-hidden shadow-2xl animate-in slide-in-from-bottom-4 flex flex-col" onclick="event.stopPropagation()">
+          <div class="bg-white px-4 py-4 flex justify-between items-center border-b border-gray-100">
+            <div class="cursor-pointer active:opacity-50" onclick="window.wxActions.toggleNewChatModal()"><i data-lucide="chevron-left" class="w-6 h-6 text-gray-600"></i></div>
+            <span class="font-bold text-gray-800 text-[16px]">发起新对话</span>
+            <div class="w-8"></div>
+          </div>
+          <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-10">
+            ${store.contacts.map(c => {
+              // 提前计算好所有的状态和样式，绝不在 HTML 里嵌套复杂的逻辑
+              const hasChat = store.chats.some(chat => chat.charId === c.id);
+              const opacityClass = hasChat ? 'opacity-40 grayscale cursor-not-allowed' : 'cursor-pointer active:scale-95 border border-transparent hover:border-[#07c160]/30';
+              const clickEvent = hasChat ? '' : `onclick="window.wxActions.startNewChat('${c.id}')"`;
+              const textClass = hasChat ? 'text-gray-400' : 'text-[#07c160]';
+              const textStr = hasChat ? '已在消息列表中' : '点击发起聊天';
+              
+              return `
+                <div class="bg-white rounded-[16px] p-3 flex items-center shadow-sm transition-all ${opacityClass}" ${clickEvent}>
+                  <div class="w-12 h-12 rounded-[12px] overflow-hidden bg-gray-100 flex items-center justify-center mr-3 flex-shrink-0 shadow-sm border border-gray-100">${getVidHtml(c.avatar, '', false)}</div>
+                  <div class="flex-1 flex flex-col overflow-hidden">
+                    <span class="text-[15px] font-medium text-gray-800 truncate">${c.name}</span>
+                    <span class="text-[11px] ${textClass} mt-0.5 font-medium">${textStr}</span>
+                  </div>
+                </div>
+              `;
+            }).join('')}
+            ${store.contacts.length === 0 ? '<div class="text-center text-gray-400 mt-10 text-[13px] font-bold tracking-widest">暂无角色，请先去通讯录创建哦</div>' : ''}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="w-full h-full bg-white flex flex-col relative animate-in zoom-in-95 duration-200">
+      
+      <div class="backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 z-10 sticky top-0 relative transition-all" style="${store.appearance?.topBarBg ? `background: url('${store.appearance.topBarBg}') center/cover no-repeat !important; border-bottom: none !important;` : 'background-color: rgba(243, 244, 246, 0.9);'}">
+        <div class="text-gray-800 cursor-pointer w-1/4 active:opacity-50 transition-opacity" onclick="window.actions.setCurrentApp(null)">
+          <i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i>
+        </div>
+        
+        <span class="absolute left-1/2 -translate-x-1/2 font-bold text-gray-800 text-[17px] tracking-wide">${headerTitle}</span>
+        
+        <div class="w-1/4 flex justify-end space-x-3 text-gray-800">
+          ${wxState.activeTab === 'moments' ? `
+            <i data-lucide="wand-2" class="cursor-pointer active:scale-90 transition-transform text-[#07c160]" style="width: 24px; height: 24px;" onclick="window.wxActions.triggerAIMoment()" title="让AI发动态"></i>
+            <i data-lucide="camera" class="cursor-pointer active:scale-90 transition-transform" style="width: 24px; height: 24px;" onclick="window.wxActions.openPublishMoment()"></i>
+          ` : wxState.activeTab === 'contacts' ? `
+            <i data-lucide="layout-list" class="cursor-pointer active:scale-90 transition-transform" style="width: 22px; height: 22px;" onclick="window.wxActions.openGroupManage()"></i>
+            <i data-lucide="user-plus" class="cursor-pointer active:scale-90 transition-transform" style="width: 24px; height: 24px;" onclick="window.wxActions.openContactEdit(null)"></i>
+          ` : wxState.activeTab === 'chats' ? `
+            <i data-lucide="plus" class="cursor-pointer active:scale-90 transition-transform" style="width: 24px; height: 24px;" onclick="window.wxActions.toggleNewChatModal()"></i>
+          ` : ''}
+        </div>
+      </div>
+
+      ${contentHtml}
+
+      <div class="backdrop-blur-md border-t border-gray-200 flex items-center justify-around pb-6 pt-2 z-10 transition-all" style="${store.appearance?.bottomBarBg ? `background: url('${store.appearance.bottomBarBg}') center/cover no-repeat !important; border-top: none !important;` : 'background-color: rgba(249, 250, 251, 0.9);'}">
+        <div onclick="window.wxActions.switchTab('chats')" class="flex flex-col items-center space-y-1 cursor-pointer w-16 ${wxState.activeTab === 'chats' ? 'text-[#07c160]' : 'text-gray-500'}">
+          <i data-lucide="message-circle" class="${wxState.activeTab === 'chats' ? 'fill-current' : ''}" style="width: 24px; height: 24px;"></i>
+          <span class="text-[10px] font-bold">消息</span>
+        </div>
+        <div onclick="window.wxActions.switchTab('contacts')" class="flex flex-col items-center space-y-1 cursor-pointer w-16 ${wxState.activeTab === 'contacts' ? 'text-[#07c160]' : 'text-gray-500'}">
+          <i data-lucide="users" style="width: 24px; height: 24px;"></i>
+          <span class="text-[10px] font-bold">通讯录</span>
+        </div>
+        <div onclick="window.wxActions.switchTab('moments')" class="flex flex-col items-center space-y-1 cursor-pointer w-16 ${wxState.activeTab === 'moments' ? 'text-[#07c160]' : 'text-gray-500'}">
+          <i data-lucide="aperture" style="width: 24px; height: 24px;"></i>
+          <span class="text-[10px] font-bold">朋友圈</span>
+        </div>
+        <div onclick="window.wxActions.switchTab('me')" class="flex flex-col items-center space-y-1 cursor-pointer w-16 ${wxState.activeTab === 'me' ? 'text-[#07c160]' : 'text-gray-500'}">
+          <i data-lucide="user" style="width: 24px; height: 24px;"></i>
+          <span class="text-[10px] font-bold">我</span>
+        </div>
+      </div>
+      ${wxState.momentInput && wxState.momentInput.active ? `
+        <div class="absolute inset-0 z-[70] bg-transparent" onclick="window.wxActions.closeMomentComment()">
+           <div class="absolute bottom-0 left-0 right-0 bg-gray-100 px-3 py-2 border-t border-gray-200 flex items-center shadow-[0_-5px_15px_rgba(0,0,0,0.05)] animate-in slide-in-from-bottom-2" onclick="event.stopPropagation()">
+              <input type="text" id="moment-comment-input" class="flex-1 bg-white rounded-[6px] px-3 py-2 outline-none text-[15px]" placeholder="${wxState.momentInput.replyTo ? '回复 ' + wxState.momentInput.replyTo + '：' : '评论'}" autofocus onkeydown="if(event.key==='Enter') window.wxActions.submitMomentComment()" />
+              <button class="ml-3 bg-[#07c160] text-white px-4 py-2 rounded-[6px] font-bold text-[14px] active:opacity-80 transition-opacity" onclick="window.wxActions.submitMomentComment()">发送</button>
+           </div>
+        </div>
+      ` : ''}
+      ${wxState.showGlobalPromptModal ? `
+        <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in backdrop-blur-sm" onclick="window.wxActions.closeGlobalPrompt()">
+           <div class="bg-[#f3f3f3] w-[85%] max-w-[320px] rounded-[16px] overflow-hidden shadow-2xl animate-in zoom-in-95 flex flex-col" onclick="event.stopPropagation()">
+              <div class="bg-white px-4 py-4 flex justify-between items-center border-b border-gray-100">
+                 <span class="font-bold text-gray-800 text-[16px] mx-auto">通用用户人设</span>
+              </div>
+              <div class="p-4 bg-white">
+                 <textarea id="global-prompt-input" rows="6" class="w-full bg-gray-50 rounded-lg p-3 outline-none text-[14px] resize-none text-gray-700 leading-relaxed hide-scrollbar" placeholder="输入通用用户人设（该设定将对所有角色生效）...">${store.globalPrompt || ''}</textarea>
+              </div>
+              <div class="flex border-t border-gray-100 bg-white">
+                 <div class="flex-1 py-3.5 text-center text-gray-500 font-bold border-r border-gray-100 cursor-pointer active:bg-gray-50" onclick="window.wxActions.closeGlobalPrompt()">取消</div>
+                 <div class="flex-1 py-3.5 text-center text-[#07c160] font-bold cursor-pointer active:bg-gray-50" onclick="window.wxActions.saveGlobalPrompt()">保存</div>
+              </div>
+           </div>
+        </div>
+      ` : ''}
+
+      ${modalHtml}
+
+    </div>
+  `;
+}
+
+// ================= 🐕 终极 AI 巡逻犬 & 时光机唤醒引擎 =================
+
+const checkAutoMsg = async () => {
+  if (wxState.callType) return; // 通话中不准来烦我
+  
+  for (const char of store.contacts) {
+    if (!char.autoMsgEnabled) continue;
+    const chat = store.chats.find(c => c.charId === char.id);
+    if (!chat || chat.messages.length === 0) continue;
+    
+    const lastMsg = chat.messages[chat.messages.length - 1];
+    if (lastMsg.isHidden) continue; 
+    
+    const coldMinutes = char.autoMsgTime || 60;
+    const lastTime = new Date(lastMsg.id); 
+    const now = new Date();
+    const diffMinutes = (now - lastTime) / 1000 / 60;
+
+    // 当冷落时间达标，且当前没在打字时触发
+    if (diffMinutes >= coldMinutes && !wxState.isTyping) {
+       chat.messages.push({
+         id: Date.now(),
+         sender: 'System',
+         text: `(系统时间已过去很久，你发现Eve很久没理你了，请根据你现在的心情，主动发一条消息寻找她。可以直接说你刚刚去干嘛了，或者表达思念。)`,
+         isMe: true, isHidden: true, msgType: 'system'
+       });
+
+       try {
+         const { callLLM } = await import('../utils/llm.js');
+         const replyText = await callLLM(char.id, chat.messages, false);
+         
+         chat.messages.push({
+           id: Date.now(), sender: char.name, text: replyText, isMe: false, msgType: 'text', time: getNowTime()
+         });
+         
+         // 如果你没在看这个角色的聊天界面，就弹出顶部通知！
+         const isLookingAtChat = store.currentApp === 'wechat' && wxState.view === 'chatRoom' && wxState.activeChatId === char.id;
+         if (!isLookingAtChat && window.actions.notify) {
+            window.actions.notify(char.name, replyText, char.avatar);
+         }
+
+         // 🌟 无条件触发通知 (配合 Bark 即可实现 iOS 杀后台真推送)
+         if (window.actions.notify) {
+            window.actions.notify(char.name, replyText, char.avatar);
+         }
+         
+         if (wxState.view === 'chatRoom' && wxState.activeChatId === char.id) {
+           window.render();
+           setTimeout(() => window.wxActions.scrollToBottom(), 100);
+         } else { window.render(); }
+       } catch(e) { chat.messages.pop(); }
+    }
+  }
+};
+
+// 1. 常规的后台静默巡逻（只要系统没冻结它，就每分钟执行一次）
+setInterval(checkAutoMsg, 60000);
+
+// 🌟 2. 核心魔法：iOS 唤醒侦测！
+// 当你切到微信/锁屏，过了 2 小时后切回这个网页，页面从“隐藏”变成“可见”的一瞬间，立刻强行执行一次时间检查！
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible') {
+    console.log("🌞 页面苏醒！启动时光机检查...");
+    checkAutoMsg();
+  }
+});

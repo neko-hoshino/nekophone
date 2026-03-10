@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>喵喵机</title>
+  
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon-192x192.png" type="image/png">
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.js"></script>
+  
+ <style>
+    :root {
+      /* 1. 全局排版保底 */
+      --system-font: system-ui, -apple-system, sans-serif;
+      --chat-font: inherit;
+      --chat-font-size: 15px;
+
+      /* 2. 聊天室框架保底 */
+      --chat-bg-color: #f3f3f3;
+      --chat-bg-image: none;
+      --chat-bg-overlay: transparent;
+      
+      --top-bar-bg: rgba(243, 244, 246, 0.9);
+      --top-bar-img: none;
+      --top-bar-height: auto;
+      
+      --bottom-bar-bg: rgba(249, 250, 251, 0.9);
+      --bottom-bar-img: none;
+      --bottom-bar-height: auto;
+
+      /* 3. 顶栏名字排版保底 */
+      --name-color: #1f2937;
+      --name-font: inherit;
+      --name-size: 17px;
+      --name-align: center;
+
+      /* 4. 气泡配色保底 (出厂默认的绿白气泡) */
+      --bubble-me-bg: #95ec69;
+      --bubble-me-img: none;
+      --bubble-me-text: #000000;
+      --bubble-me-opacity: 1;
+      
+      --bubble-char-bg: #ffffff;
+      --bubble-char-img: none;
+      --bubble-char-text: #000000;
+      --bubble-char-opacity: 1;
+
+      /* 5. 转账卡片保底 (出厂默认的橙色) */
+      --transfer-width: 100%;
+      --transfer-height: auto;
+      --transfer-opacity: 1;
+      --transfer-pending-bg: #f98a2e;
+      --transfer-accepted-bg: #f9b674;
+      --transfer-pending-img: none;
+      --transfer-accepted-img: none;
+      --transfer-pending-icon: #fca253;
+    }
+
+    /* 整个手机默认使用系统字体 */
+    body {
+      font-family: var(--system-font);
+      -webkit-touch-callout: none;
+      -webkit-user-select: none;
+      user-select: none;
+      touch-action: manipulation;
+    }
+    
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+  </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center sm:p-4 min-h-screen">
+  
+  <div class="relative w-full h-[100dvh] sm:w-[375px] sm:h-[812px] bg-white sm:rounded-[40px] sm:shadow-2xl overflow-hidden" id="phone-container">
+    <div class="w-full h-full flex items-center justify-center text-gray-400 font-bold">
+      手机启动中...
+    </div>
+  </div>
+
+  <div id="toast-container" class="absolute top-14 inset-x-0 flex justify-center z-[100] hidden opacity-0 transition-opacity duration-300 pointer-events-none">
+    <div id="toast-msg" class="bg-gray-800/90 backdrop-blur-sm text-white px-5 py-2.5 rounded-full shadow-lg text-sm font-medium"></div>
+  </div>
+
+  <script type="module" src="./js/main.js"></script>
+  
+</body>
+</html>

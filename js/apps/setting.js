@@ -1,0 +1,224 @@
+// js/apps/setting.js
+import { store } from '../store.js';
+
+// --- 1. 内部逻辑：读取当前表单上填写的数值 ---
+function getFormValues() {
+  return {
+    baseUrl: document.getElementById('api-base-url').value.trim(),
+    apiKey: document.getElementById('api-key').value.trim(),
+    model: document.getElementById('api-model').value.trim(),
+    temperature: parseFloat(document.getElementById('api-temp').value)
+  };
+}
+
+function getMinimaxValues() {
+  return {
+    enabled: document.getElementById('minimax-enabled').checked, // 新增：全局开关
+    groupId: document.getElementById('minimax-group-id').value.trim(),
+    apiKey: document.getElementById('minimax-api-key').value.trim()
+  };
+}
+
+// --- 2. 绑定给 HTML 按钮的交互事件 ---
+window.settingsActions = {
+  // 拖动滑块时实时显示数值
+  updateTempDisplay: (val) => {
+    document.getElementById('temp-display').innerText = val;
+  },
+  // 系统通知滑块专属动作
+  toggleNotification: (e) => {
+    const isChecked = e.target.checked;
+    if (isChecked) {
+      Notification.requestPermission().then(p => {
+        if (p === 'granted') {
+          store.enableNotifications = true;
+          window.actions.showToast('系统通知已开启！请放心切后台');
+        } else {
+          e.target.checked = false; // 授权失败，把滑块自动弹回去
+          store.enableNotifications = false;
+          window.actions.showToast('授权被拒绝！请确保是从主屏幕打开的哦');
+        }
+        window.render();
+      });
+    } else {
+      store.enableNotifications = false;
+      window.actions.showToast('系统通知已静音');
+      window.render();
+    }
+  },
+
+  // 读取预设并填入表单
+  loadPreset: (index) => {
+    if (index === "") return;
+    const preset = store.apiPresets[index];
+    document.getElementById('api-base-url').value = preset.baseUrl;
+    document.getElementById('api-key').value = preset.apiKey;
+    document.getElementById('api-model').value = preset.model;
+    document.getElementById('api-temp').value = preset.temperature;
+    document.getElementById('temp-display').innerText = preset.temperature;
+    window.actions.showToast(`已加载预设：${preset.name}`);
+  },
+
+  // 把当前表单保存为新预设
+  savePreset: () => {
+    const name = document.getElementById('new-preset-name').value.trim();
+    if (!name) return window.actions.showToast('⚠️ 请输入预设名称！');
+    
+    const newPreset = { name, ...getFormValues() };
+    store.apiPresets.push(newPreset);
+    document.getElementById('new-preset-name').value = ''; // 清空输入框
+    window.actions.showToast(`✅ 预设 [${name}] 保存成功！`);
+    
+    // 刷新一下当前页面，让下拉菜单里出现新预设
+    window.actions.setCurrentApp('settings');
+  },
+
+  // 一键拉取可用模型
+  fetchModels: async () => {
+    const btn = document.getElementById('fetch-models-btn');
+    const vals = getFormValues();
+    if (!vals.baseUrl || !vals.apiKey) {
+      return window.actions.showToast('⚠️ 请先填写 Base URL 和 API Key');
+    }
+
+    btn.innerText = '拉取中...';
+    btn.disabled = true;
+
+    try {
+      // 兼容 OpenAI 格式的拉取接口
+      const res = await fetch(`${vals.baseUrl.replace(/\/+$/, '')}/models`, {
+        headers: { 'Authorization': `Bearer ${vals.apiKey}` }
+      });
+      if (!res.ok) throw new Error(`HTTP 状态码: ${res.status}`);
+      const data = await res.json();
+
+      let models = [];
+      if (data && data.data && Array.isArray(data.data)) {
+        models = data.data.map(m => m.id);
+      } else {
+        throw new Error('API 返回的数据格式不符合规范');
+      }
+
+      if (models.length > 0) {
+        window.actions.showToast(`✅ 成功拉取 ${models.length} 个模型！`);
+        // 把拉取到的模型塞进 datalist 下拉提示框里
+        const dataList = document.getElementById('model-list');
+        dataList.innerHTML = models.map(m => `<option value="${m}">`).join('');
+        document.getElementById('api-model').value = models[0]; // 自动填入第一个
+      }
+    } catch (error) {
+      window.actions.showToast(`❌ 拉取失败: ${error.message}`);
+    } finally {
+      btn.innerText = '拉取可用模型';
+      btn.disabled = false;
+    }
+  },
+
+  // 最终应用：保存到全局 Store
+  applySettings: () => {
+    store.apiConfig = getFormValues();
+    store.minimaxConfig = getMinimaxValues(); // 🌟 保存 Minimax 设置
+    window.actions.showToast('设置已生效！');
+  }
+};
+
+// --- 3. 渲染 UI 界面 ---
+export function renderSettingsApp(store) {
+  const c = store.apiConfig; // 当前生效的配置
+  const presetsHtml = store.apiPresets.map((p, i) => `<option value="${i}">${p.name}</option>`).join('');
+
+  return `
+    <div class="w-full h-full bg-gray-50 flex flex-col relative animate-in slide-in-from-bottom-4 fade-in duration-300">
+      
+      <div class="bg-white/80 backdrop-blur-md pt-8 pb-3 px-4 flex items-center border-b border-gray-200 z-10 sticky top-0">
+        <div class="cursor-pointer text-blue-500" onclick="window.actions.setCurrentApp(null)">
+          <i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i>
+        </div>
+        <span class="flex-1 text-center font-bold text-gray-800 mr-7">系统设置</span>
+      </div>
+
+      <div class="flex-1 overflow-y-auto p-4 space-y-4 pb-20">
+
+      <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mt-4">
+            <div class="flex justify-between items-center">
+                <span class="font-bold text-gray-800 text-[14px] flex items-center"><i data-lucide="bell-ring" class="w-4 h-4 mr-2 text-purple-500"></i>是否开启系统通知</span>
+                <input type="checkbox" ${("Notification" in window && Notification.permission === 'granted' && store.enableNotifications !== false) ? 'checked' : ''} onchange="window.settingsActions.toggleNotification(event)" class="ios-switch shrink-0" />
+            </div>
+        </div>
+        
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3">
+          <div class="flex items-center space-x-2 text-blue-500 mb-2">
+            <i data-lucide="key" style="width: 18px; height: 18px;"></i>
+            <h3 class="font-bold text-gray-800 text-sm">文本对话 API 设置</h3>
+          </div>
+          
+          <div class="pb-2 border-b border-gray-50">
+            <span class="text-[10px] font-bold text-gray-500 block mb-1">快速加载预设：</span>
+            <select onchange="window.settingsActions.loadPreset(this.value)" class="w-full p-2 bg-blue-50 text-blue-600 border border-blue-100 rounded-xl text-xs font-bold outline-none cursor-pointer">
+              <option value="">-- 选择已保存的预设 --</option>
+              ${presetsHtml}
+            </select>
+          </div>
+          
+          <span class="text-[10px] font-bold text-gray-500 block -mb-1 mt-2">Base URL (兼容 OpenAI 格式):</span>
+          <input type="text" id="api-base-url" value="${c.baseUrl}" class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500 transition-colors" />
+          
+          <span class="text-[10px] font-bold text-gray-500 block -mb-1">API Key (秘钥):</span>
+          <input type="password" id="api-key" value="${c.apiKey}" class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500 transition-colors" />
+
+          <div class="flex justify-between items-end mb-1 mt-2">
+            <span class="text-[10px] font-bold text-gray-500 block">模型名称 (Model):</span>
+            <button id="fetch-models-btn" onclick="window.settingsActions.fetchModels()" class="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-blue-100 text-blue-600 active:bg-blue-200 transition-colors">
+              拉取可用模型
+            </button>
+          </div>
+          <input type="text" id="api-model" value="${c.model}" list="model-list" placeholder="手动输入，或点击上方拉取" class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500 transition-colors" />
+          <datalist id="model-list"></datalist>
+          
+          <div class="pt-2">
+            <div class="flex justify-between items-center mb-2">
+              <span class="text-xs font-bold text-gray-600">创造力 (Temperature): <span id="temp-display" class="text-blue-500">${c.temperature}</span></span>
+            </div>
+            <input type="range" id="api-temp" min="0" max="2" step="0.1" value="${c.temperature}" oninput="window.settingsActions.updateTempDisplay(this.value)" class="w-full accent-blue-500" />
+          </div>
+
+          <div class="pt-3 border-t border-gray-100 mt-2 space-y-2">
+            <h3 class="font-bold text-gray-800 text-sm">保存为新预设</h3>
+            <div class="flex space-x-2">
+              <input type="text" id="new-preset-name" placeholder="预设名称 (如: 备用代理)" class="flex-1 p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm focus:outline-none focus:border-blue-500" />
+              <button onclick="window.settingsActions.savePreset()" class="px-4 bg-blue-500 text-white font-medium rounded-xl flex items-center justify-center active:bg-blue-600 transition-colors shadow-sm">
+                <i data-lucide="plus" style="width: 18px; height: 18px;"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3">
+            <style>
+              .ios-switch { position: relative; width: 44px; height: 24px; appearance: none; background: #e5e5ea; border-radius: 24px; outline: none; cursor: pointer; transition: background 0.3s ease; }
+              .ios-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: transform 0.3s ease; }
+              .ios-switch:checked { background: #34c759; }
+              .ios-switch:checked::after { transform: translateX(20px); }
+            </style>
+            
+            <div class="flex justify-between items-center border-b border-gray-50 pb-2 mb-2">
+              <h3 class="font-bold text-gray-800 text-sm flex items-center"><i data-lucide="mic" class="w-4 h-4 mr-1 text-blue-500"></i>Minimax 语音配置</h3>
+              <input type="checkbox" id="minimax-enabled" ${store.minimaxConfig?.enabled !== false ? 'checked' : ''} class="ios-switch" />
+            </div>
+
+            <span class="text-[10px] font-bold text-gray-500 block mt-2">Group ID:</span>
+            <input type="text" id="minimax-group-id" value="${store.minimaxConfig?.groupId || ''}" class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500" />
+            
+            <span class="text-[10px] font-bold text-gray-500 block">API Key:</span>
+            <input type="text" id="minimax-api-key" value="${store.minimaxConfig?.apiKey || ''}" autocomplete="off" style="-webkit-text-security: disc;" class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500" />
+        </div>
+
+        <button onclick="window.settingsActions.applySettings()" class="w-full mt-4 py-3.5 bg-[#07c160] text-white font-bold rounded-xl active:opacity-80 shadow-md transition-opacity flex justify-center items-center space-x-2">
+          <i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
+          <span>保存并全局应用</span>
+        </button>
+
+      </div>
+    </div>
+  `;
+}
