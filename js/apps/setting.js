@@ -36,6 +36,26 @@ window.settingsActions = {
     a.click();
     window.actions.showToast('备份已导出！请妥善保存在手机文件里');
   },
+  // 🌟 核弹级数据清空引擎
+  factoryReset: () => {
+    if (confirm('⚠️ 严重警告：这将彻底清空您的所有聊天记录、角色、身份、世界书以及设定！\n\n您确定要【恢复出厂设置】吗？')) {
+       if (confirm('🚨 【最终确认】此操作绝对不可逆！\n请确保您已经导出了备份！真的要全部删除吗？')) {
+          // 1. 炸掉 LocalStorage
+          localStorage.removeItem('neko_store');
+          // 2. 炸掉海量数据库 IndexedDB
+          if (window.DB) {
+             const req = indexedDB.deleteDatabase('NekoPhoneDB');
+             req.onsuccess = () => {
+                window.actions.showToast('数据已彻底清空，正在重启宇宙...');
+                setTimeout(() => location.reload(), 1500);
+             };
+             req.onerror = () => location.reload();
+          } else {
+             location.reload();
+          }
+       }
+    }
+  },
   // 🌟 内存探针更新
   updateStorageDisplay: () => {
     const dbSize = JSON.stringify(store).length;
@@ -299,6 +319,11 @@ export function renderSettingsApp(store) {
            </div>
            <p class="text-[11px] text-gray-400 font-bold leading-relaxed">已接入底层海量数据库，支持 1000MB+ 存储。若读取变慢可点击瘦身。</p>
            <button onclick="window.settingsActions.optimizeStorage()" class="w-full bg-blue-50 text-blue-500 font-bold py-2.5 rounded-xl active:bg-blue-100 transition-colors text-[13px] flex items-center justify-center border border-blue-100"><i data-lucide="zap" class="w-4 h-4 mr-1"></i>深度压缩并清理无用数据</button>
+           <div class="mt-8 mb-6 flex flex-col space-y-3 px-1 animate-in slide-in-from-bottom-2 duration-500">
+          <button onclick="window.settingsActions.factoryReset()" class="w-full bg-red-50 text-red-500 font-bold py-2.5 rounded-xl active:bg-red-100 transition-colors text-[13px] flex items-center justify-center border border-red-100">
+             <i data-lucide="alert-triangle" class="w-4 h-4 mr-2"></i>清除所有数据 (恢复出厂设置)
+          </button>
+        </div>
         </div>
 
         <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mt-4 space-y-0">

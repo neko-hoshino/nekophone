@@ -72,22 +72,13 @@ if (!window.apActions) {
     
     handleImageUpload: (key, event) => {
       const file = event.target.files[0]; if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let w = img.width, h = img.height, max = 1080;
-          if (w > h && w > max) { h *= max/w; w = max; }
-          else if (h > max) { w *= max/h; h = max; }
-          canvas.width = w; canvas.height = h;
-          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          store.appearance[key] = canvas.toDataURL('image/jpeg', 0.8);
-          window.actions.showToast('图片已加载！'); window.render();
-        };
-        img.src = e.target.result;
-      };
-      reader.readAsDataURL(file); event.target.value = '';
+      // 🌟 接入全局压缩引擎
+      window.actions.compressImage(file, (base64) => {
+         store.appearance[key] = base64;
+         window.actions.showToast('图片已极速加载！'); 
+         window.render();
+      });
+      event.target.value = '';
     },
 
     handleItemUpload: (dictKey, itemId, event) => {

@@ -5,7 +5,7 @@ if (!window.homeActions) {
   window.homeActions = {
     updateAvatar: (e) => {
       const file = e.target.files[0]; if(!file) return;
-      // 🌟 使用强力压缩器替换原生的 FileReader
+      // 🌟 接入全局压缩引擎，告别原图爆存！
       window.actions.compressImage(file, (base64) => {
          store.personas[0].avatar = base64; 
          window.render(); 
@@ -123,8 +123,8 @@ export function renderHomeApp(store) {
                    <input type="text" value="${my.name}" onchange="window.homeActions.updateName(this.value)" class="font-medium ${txtMain} text-2xl tracking-wide bg-transparent outline-none text-right w-full ${isDark?'placeholder-white/30':'placeholder-gray-800/40'}" placeholder="你的名字" />
                 </div>
                 <div class="flex flex-col items-end space-y-4 mt-2 w-full shrink-0">
-                   <input type="text" value="正在构建AI世界..." class="w-[70%] ${inputBg} backdrop-blur-md px-3 py-2.5 text-[11px] font-serif rounded-full outline-none text-right shadow-sm border" onclick="event.stopPropagation()" />
-                   <input type="text" value="向左滑动查看音乐" class="w-[80%] mr-[20%] ${inputBg} backdrop-blur-md px-3 py-2.5 text-[11px] font-serif rounded-full outline-none text-center shadow-sm border" onclick="event.stopPropagation()" />
+                   <input type="text" value="正在进入..." class="w-[70%] ${inputBg} backdrop-blur-md px-3 py-2.5 text-[11px] font-serif rounded-full outline-none text-right shadow-sm border" onclick="event.stopPropagation()" />
+                   <input type="text" value="梦之旅途" class="w-[80%] mr-[20%] ${inputBg} backdrop-blur-md px-3 py-2.5 text-[11px] font-serif rounded-full outline-none text-center shadow-sm border" onclick="event.stopPropagation()" />
                 </div>
                 <div class="flex-1"></div> 
              </div>

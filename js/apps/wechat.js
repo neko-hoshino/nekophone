@@ -2916,7 +2916,7 @@ export function renderWeChatApp(store) {
       ${wxState.momentInput && wxState.momentInput.active ? `
         <div class="absolute inset-0 z-[70] bg-transparent" onclick="window.wxActions.closeMomentComment()">
            <div class="absolute bottom-0 left-0 right-0 bg-gray-100 px-3 py-2 border-t border-gray-200 flex items-center shadow-[0_-5px_15px_rgba(0,0,0,0.05)] animate-in slide-in-from-bottom-2" onclick="event.stopPropagation()">
-              <input type="text" id="moment-comment-input" class="flex-1 bg-white rounded-[6px] px-3 py-2 outline-none text-[15px]" placeholder="${wxState.momentInput.replyTo ? '回复 ' + wxState.momentInput.replyTo + '：' : '评论'}" autofocus onkeydown="if(event.key==='Enter') window.wxActions.submitMomentComment()" />
+              <input type="text" id="moment-comment-input" class="flex-1 bg-white rounded-[6px] px-3 py-2 outline-none text-[15px]" placeholder="${wxState.momentInput.replyTo ? '回复 ' + wxState.momentInput.replyTo + '：' : '评论'}" autofocus onkeydown="if(nt.key==='Enter') window.wxActions.submitMomentComment()" />
               <button class="ml-3 bg-[#07c160] text-white px-4 py-2 rounded-[6px] font-bold text-[14px] active:opacity-80 transition-opacity" onclick="window.wxActions.submitMomentComment()">发送</button>
            </div>
         </div>
