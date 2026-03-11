@@ -1,5 +1,7 @@
 // js/store.js
-export const store = {
+// 🌟 开局先去硬盘里找存档，找不到再用默认设置
+const savedStore = localStorage.getItem('neko_store');
+export const store = savedStore ? JSON.parse(savedStore) : {
   currentTime: '00:00',
   currentApp: null,
   

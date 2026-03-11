@@ -455,17 +455,21 @@ window.wxActions = {
     wxState.showNewChatModal = false;
     window.wxActions.openChat(charId); // 立刻进入聊天室！
   },
-  // 🌟 全新：长按菜单核心引擎
+  // 🌟 全新：长按菜单核心引擎 (带防滑误触机制)
   handleTouchStart: (msgId) => {
     wxState.longPressTimer = setTimeout(() => {
-      saveScroll(); // 🌟 弹出菜单前锁定位置
+      saveScroll(); 
       wxState.activeMenuMsgId = msgId;
       window.render();
-      restoreScroll(); // 🌟 渲染完瞬间原地恢复！
-    }, 500);
+      restoreScroll(); 
+    }, 400); // 长按 0.4 秒触发
+  },
+  // 🌟 核心修复：只要手指滑动了，立马取消长按判定！
+  handleTouchMove: () => {
+    if (wxState.longPressTimer) { clearTimeout(wxState.longPressTimer); wxState.longPressTimer = null; }
   },
   handleTouchEnd: () => {
-    if (wxState.longPressTimer) clearTimeout(wxState.longPressTimer);
+    if (wxState.longPressTimer) { clearTimeout(wxState.longPressTimer); wxState.longPressTimer = null; }
   },
   closeContextMenu: () => {
     saveScroll();
@@ -483,16 +487,30 @@ window.wxActions = {
     window.render();
     restoreScroll();
   },
-  editMessage: (msgId) => {
+  // 🌟 新增：高级居中编辑弹窗
+  openEditMessageModal: (msgId) => {
     saveScroll();
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     const msg = chat.messages.find(m => m.id === msgId);
-    if (!msg) return;
-    const newText = prompt("编辑该消息：", msg.text);
-    if (newText !== null && newText.trim() !== '') {
-      msg.text = newText.trim();
+    if (msg) {
+       wxState.editMsgData = { id: msgId, text: msg.text };
+       wxState.activeMenuMsgId = null; 
+       window.render();
     }
-    wxState.activeMenuMsgId = null; 
+    restoreScroll();
+  },
+  closeEditMessageModal: () => {
+    saveScroll(); wxState.editMsgData = null; window.render(); restoreScroll();
+  },
+  saveEditedMessage: () => {
+    saveScroll();
+    const newText = document.getElementById('edit-msg-textarea').value.trim();
+    if (newText) {
+       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+       const msg = chat.messages.find(m => m.id === wxState.editMsgData.id);
+       if (msg) msg.text = newText;
+    }
+    wxState.editMsgData = null;
     window.render();
     restoreScroll();
   },
@@ -2400,7 +2418,7 @@ export function renderWeChatApp(store) {
             <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.favoriteMessage(${msg.id})"><i data-lucide="star" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">收藏</span></div>
             <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.startMultiSelect(${msg.id})"><i data-lucide="check-square" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">多选</span></div>
             ${msg.isMe ? `<div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.recallMessage(${msg.id})"><i data-lucide="undo-2" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">撤回</span></div>` : ''}
-            <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.editMessage(${msg.id})"><i data-lucide="edit" class="w-[18px] h-[18px] mb-1 text-blue-400"></i><span class="text-[10px] text-blue-400 scale-90">编辑</span></div>
+            <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.openEditMessageModal(${msg.id})"><i data-lucide="edit" class="w-[18px] h-[18px] mb-1 text-blue-400"></i><span class="text-[10px] text-blue-400 scale-90">编辑</span></div>
             <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.deleteMessage(${msg.id})"><i data-lucide="trash-2" class="w-[18px] h-[18px] mb-1 text-red-400"></i><span class="text-[10px] text-red-400 scale-90">删除</span></div>
           </div>
         `;
@@ -2420,7 +2438,9 @@ export function renderWeChatApp(store) {
                onmouseup="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}" 
                onmouseleave="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}" 
                ontouchstart="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchStart(${msg.id})`}" 
-               ontouchend="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}">
+               ontouchend="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}"
+               ontouchmove="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchMove()`}"
+               onmousemove="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchMove()`}">
                
             <div class="mc-bubble ${bubbleClass}" style="${bubbleStyle}">${contentHtml}</div>
             ${menuHtml}
@@ -2654,9 +2674,19 @@ export function renderWeChatApp(store) {
   const chatsHtml = store.chats.map(chat => {
     const char = store.contacts.find(c => c.id === chat.charId); // 🌟 修复：叫 char，不叫 chatChar
     if (!char) return '';
-    // 🌟 修复：在外部消息预览中，也把 isHidden 的隐藏提示词给过滤掉！
     const validMsgs = chat.messages.filter(m => !m.isOffline && !m.isHidden);
-    const preview = validMsgs.length > 0 ? validMsgs[validMsgs.length - 1].text : '暂无消息';
+    let preview = '暂无消息';
+    if (validMsgs.length > 0) {
+       const rawText = validMsgs[validMsgs.length - 1].text || '';
+       // 暴力剔除所有的 HTML 标签
+       const cleanText = rawText.replace(/<[^>]+>/g, '').trim();
+       if (cleanText === '') {
+          preview = rawText.includes('<') ? '[网页卡片]' : '[空白消息]';
+       } else {
+          // 只取第一行内容，防止多行把列表撑爆
+          preview = cleanText.split('\n')[0];
+       }
+    }
     return `
       <div onclick="window.wxActions.openChat('${char.id}')" class="flex items-center px-4 py-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 active:bg-gray-100">
         <div class="w-12 h-12 bg-gray-100 rounded-full flex-shrink-0 overflow-hidden flex items-center justify-center text-2xl mr-3">
@@ -2933,6 +2963,23 @@ export function renderWeChatApp(store) {
            </div>
         </div>
       ` : ''}
+      ${wxState.editMsgData ? `
+          <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeEditMessageModal()">
+            <div class="bg-[#f6f6f6] w-full rounded-[24px] overflow-hidden shadow-2xl flex flex-col" onclick="event.stopPropagation()">
+               <div class="bg-white px-5 py-4 flex justify-between items-center border-b border-gray-100 shadow-sm">
+                 <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="edit-3" class="text-blue-500 mr-2 w-5 h-5"></i>编辑消息</span>
+                 <i data-lucide="x" class="text-gray-400 cursor-pointer active:scale-90 transition-transform bg-gray-50 p-1 rounded-full w-6 h-6" onclick="window.wxActions.closeEditMessageModal()"></i>
+               </div>
+               <div class="p-5 flex flex-col space-y-4">
+                  <textarea id="edit-msg-textarea" rows="8" class="w-full bg-white border border-gray-100 rounded-xl p-3 outline-none text-[15px] text-gray-800 font-medium leading-relaxed shadow-sm resize-none hide-scrollbar">${wxState.editMsgData.text}</textarea>
+                  <div class="flex space-x-3 pt-2">
+                    <button class="flex-1 bg-white border border-gray-200 text-gray-600 font-bold py-3.5 rounded-xl active:bg-gray-50 transition-colors shadow-sm" onclick="window.wxActions.closeEditMessageModal()">取消</button>
+                    <button class="flex-1 bg-blue-500 text-white font-bold py-3.5 rounded-xl active:bg-blue-600 transition-colors shadow-md" onclick="window.wxActions.saveEditedMessage()">保存修改</button>
+                  </div>
+               </div>
+            </div>
+          </div>
+        ` : ''}
 
       ${modalHtml}
 

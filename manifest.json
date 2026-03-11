@@ -1,6 +1,6 @@
 {
-  "name": "nekophone",
-  "short_name": "nphone",
+  "name": "NeKoPhone",
+  "short_name": "NeKoPhone",
   "start_url": "./index.html",
   "display": "standalone",
   "background_color": "#f0f4f8",

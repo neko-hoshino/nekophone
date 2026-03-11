@@ -5,26 +5,26 @@ if (!window.homeActions) {
   window.homeActions = {
     updateAvatar: (e) => {
       const file = e.target.files[0]; if(!file) return;
-      const r = new FileReader();
-      r.onload = (ev) => { store.personas[0].avatar = ev.target.result; window.render(); };
-      r.readAsDataURL(file); e.target.value = '';
+      const r = new FileReader(); r.onload = (ev) => { store.personas[0].avatar = ev.target.result; window.render(); }; r.readAsDataURL(file); e.target.value = '';
     },
     updateName: (val) => { store.personas[0].name = val || 'Eve'; window.render(); },
-    // 🌟 新增：音乐播放器控制神经 (带强力错误反馈)
+    
+    // 🌟 音频控制：因为已经在 main.js 解锁过了，这里必定成功！
     playMusic: () => {
       if (window.keepAliveAudio) {
-        window.keepAliveAudio.play().then(() => {
-          window.render(); // 播放成功，刷新UI变成暂停键
-        }).catch(e => {
-          console.log("播放失败拦截:", e);
-          window.actions.showToast('需要先在聊天页面随便点几下，解锁苹果音频权限哦！');
-        });
+        window.keepAliveAudio.play().then(() => window.render()).catch(e => window.actions.showToast('请先在屏幕空白处点一下再播放！'));
       }
     },
-    pauseMusic: () => {
-      if (window.keepAliveAudio) {
-        window.keepAliveAudio.pause();
-        window.render();
+    pauseMusic: () => { if (window.keepAliveAudio) { window.keepAliveAudio.pause(); window.render(); } },
+    
+    // 🌟 动态小圆点计算引擎
+    updateDots: (e) => {
+      const idx = Math.round(e.target.scrollLeft / e.target.clientWidth);
+      const d0 = document.getElementById('home-dot-0');
+      const d1 = document.getElementById('home-dot-1');
+      if (d0 && d1) {
+         d0.style.opacity = idx === 0 ? '1' : '0.3';
+         d1.style.opacity = idx === 1 ? '1' : '0.3';
       }
     }
   };
@@ -60,23 +60,6 @@ function createDockIcon(iconName, label, actionStr, mcClass, isDark) {
   `;
 }
 
-function renderStatusBar(store, isDark) {
-  const txtClass = isDark ? 'text-white drop-shadow-md' : 'text-gray-800 drop-shadow-sm';
-  return `
-    <div class="absolute top-0 left-0 right-0 flex justify-between items-center px-6 pt-3 pb-2 text-xs font-bold z-50 ${txtClass} pointer-events-none">
-      <span id="status-time" class="tracking-wider">${store.currentTime || '12:00'}</span>
-      <div class="flex items-center space-x-1.5 opacity-80">
-        <i data-lucide="signal" style="width: 14px; height: 14px;"></i>
-        <i data-lucide="wifi" style="width: 14px; height: 14px;"></i>
-        <div class="flex items-center">
-          <span class="mr-1">${store.batteryLevel || 100}%</span>
-          <i data-lucide="battery-medium" style="width: 16px; height: 16px;"></i>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
 export function renderHomeApp(store) {
   const my = (store.personas && store.personas.length > 0) ? store.personas[0] : { name: '', avatar: '' };
   let avatarHtml = `<div class="w-full h-full flex items-center justify-center text-4xl">${my.avatar}</div>`;
@@ -97,9 +80,7 @@ export function renderHomeApp(store) {
     <div class="w-full h-full relative flex flex-col overflow-hidden animate-in fade-in duration-300" style="${bgStyle}">
       <input type="file" id="home-avatar-upload" accept="image/*" class="hidden" onchange="window.homeActions.updateAvatar(event)" />
 
-      ${ap.hideStatusBar ? '' : renderStatusBar(store, isDark)}
-
-      <div class="flex-1 w-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar">
+      <div class="flex-1 w-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar" onscroll="window.homeActions.updateDots(event)">
         
         <div class="w-full h-full flex-shrink-0 snap-center flex flex-col pt-12 px-5 pb-4 overflow-y-auto hide-scrollbar relative">
           <div class="w-full pt-2 shrink-0 ${txtMain}">
@@ -121,7 +102,7 @@ export function renderHomeApp(store) {
           <div class="flex-1 grid grid-cols-2 gap-3 mt-4">
              <div class="flex flex-col h-full">
                 <div class="flex-1"></div> 
-                <div class="grid grid-cols-2 gap-y-4 gap-x-4 pb-20 mt-4">
+                <div class="grid grid-cols-2 gap-y-4 gap-x-4 pb-16 mt-4">
                    ${createAppIcon('message-circle', '微信', "window.actions.setCurrentApp('wechat')", 'mc-icon-wechat', isDark)}
                    ${createAppIcon('messages-square', '论坛', "window.actions.showToast('打开论坛')", 'mc-icon-forum', isDark)}
                    ${createAppIcon('twitter', 'X', "window.actions.showToast('打开 X')", 'mc-icon-x', isDark)}
@@ -136,9 +117,9 @@ export function renderHomeApp(store) {
                    </div>
                    <input type="text" value="${my.name}" onchange="window.homeActions.updateName(this.value)" class="font-medium ${txtMain} text-2xl tracking-wide bg-transparent outline-none text-right w-full ${isDark?'placeholder-white/30':'placeholder-gray-800/40'}" placeholder="你的名字" />
                 </div>
-                <div class="flex flex-col items-end space-y-4 mt-4 w-full shrink-0">
-                   <input type="text" value="正在构建AI世界..." class="w-[70%] ${inputBg} backdrop-blur-md px-3 py-2.5 text-[11px] font-medium rounded-full outline-none text-right shadow-sm border" onclick="event.stopPropagation()" />
-                   <input type="text" value="向左滑动查看音乐👉" class="w-[70%] mr-[20%] ${inputBg} backdrop-blur-md px-3 py-2.5 text-[11px] font-medium rounded-full outline-none text-center shadow-sm border" onclick="event.stopPropagation()" />
+                <div class="flex flex-col items-end space-y-4 mt-2 w-full shrink-0">
+                   <input type="text" value="正在构建AI世界..." class="w-[70%] ${inputBg} backdrop-blur-md px-3 py-2.5 text-[11px] font-serif rounded-full outline-none text-right shadow-sm border" onclick="event.stopPropagation()" />
+                   <input type="text" value="向左滑动查看音乐" class="w-[80%] mr-[20%] ${inputBg} backdrop-blur-md px-3 py-2.5 text-[11px] font-serif rounded-full outline-none text-center shadow-sm border" onclick="event.stopPropagation()" />
                 </div>
                 <div class="flex-1"></div> 
              </div>
@@ -170,9 +151,8 @@ export function renderHomeApp(store) {
               </div>
            </div>
         </div>
-      </div>
 
-      <div class="flex justify-center items-center space-x-2 mb-2 ${isDark ? 'text-white' : 'text-gray-800'}">
+      </div> <div class="flex justify-center items-center space-x-2 mb-2 pb-4 mt-2 ${isDark ? 'text-white' : 'text-gray-800'} shrink-0 z-20 pointer-events-none">
          <div id="home-dot-0" class="w-1.5 h-1.5 rounded-full bg-current transition-opacity duration-300" style="opacity: 1;"></div>
          <div id="home-dot-1" class="w-1.5 h-1.5 rounded-full bg-current transition-opacity duration-300" style="opacity: 0.3;"></div>
       </div>
@@ -183,6 +163,7 @@ export function renderHomeApp(store) {
          ${createDockIcon('palette', '外观', "window.actions.setCurrentApp('appearance')", 'mc-icon-appearance', isDark)}
          ${createDockIcon('settings', '设置', "window.actions.setCurrentApp('settings')", 'mc-icon-settings', isDark)}
       </div>
+
     </div>
   `;
 }

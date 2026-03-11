@@ -25,6 +25,34 @@ window.settingsActions = {
   updateTempDisplay: (val) => {
     document.getElementById('temp-display').innerText = val;
   },
+  // 🌟 终极数据备份引擎
+  exportData: () => {
+    const dataStr = JSON.stringify(store);
+    const blob = new Blob([dataStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Eve通讯系统备份_${new Date().toLocaleDateString().replace(/\//g,'-')}.json`;
+    a.click();
+    window.actions.showToast('备份已导出！请妥善保存在手机文件里');
+  },
+  importData: (event) => {
+    const file = event.target.files[0]; if(!file) return;
+    const r = new FileReader();
+    r.onload = (e) => {
+      try {
+        const imported = JSON.parse(e.target.result);
+        if(imported && imported.contacts) {
+           Object.assign(store, imported);
+           localStorage.setItem('neko_store', JSON.stringify(store)); // 强制写入本地存储
+           window.actions.showToast('数据恢复成功！正在重启系统...');
+           setTimeout(() => location.reload(), 1500); // 刷新页面生效
+        } else { window.actions.showToast('无效的备份文件！'); }
+      } catch(err) { window.actions.showToast('文件解析失败！'); }
+    };
+    r.readAsText(file);
+    event.target.value = '';
+  },
   // 系统通知滑块专属动作
   toggleNotification: (e) => {
     const isChecked = e.target.checked;
@@ -172,7 +200,11 @@ export function renderSettingsApp(store) {
               拉取可用模型
             </button>
           </div>
-          <input type="text" id="api-model" value="${c.model}" list="model-list" placeholder="手动输入，或点击上方拉取" class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500 transition-colors" />
+          <input type="text" id="api-model" value="${c.model}" list="model-list" placeholder="手动输入，或点击上方拉取" 
+          onfocus="this.dataset.old = this.value; this.value = '';" 
+          onblur="if(!this.value) this.value = this.dataset.old;" 
+          onchange="store.apiConfig.model = this.value; window.render();"
+          class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500 transition-colors" />
           <datalist id="model-list"></datalist>
           
           <div class="pt-2">
@@ -217,6 +249,21 @@ export function renderSettingsApp(store) {
           <i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
           <span>保存并全局应用</span>
         </button>
+
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mt-4 space-y-0">
+            <h3 class="font-bold text-gray-800 text-sm flex items-center mb-2"><i data-lucide="database" class="w-4 h-4 mr-1 text-blue-500"></i>系统数据备份</h3>
+            
+            <div class="flex justify-between items-center py-3.5 border-b border-gray-50 cursor-pointer active:bg-gray-50 transition-colors" onclick="window.settingsActions.exportData()">
+              <span class="text-[13px] font-bold text-gray-700">导出备份文件</span>
+              <i data-lucide="download-cloud" class="w-4.5 h-4.5 text-gray-400"></i>
+            </div>
+            
+            <input type="file" id="import-data-input" accept=".json" class="hidden" onchange="window.settingsActions.importData(event)" />
+            <div class="flex justify-between items-center py-3.5 cursor-pointer active:bg-gray-50 transition-colors" onclick="document.getElementById('import-data-input').click()">
+              <span class="text-[13px] font-bold text-gray-700">恢复本地数据</span>
+              <i data-lucide="upload-cloud" class="w-4.5 h-4.5 text-gray-400"></i>
+            </div>
+        </div>
 
       </div>
     </div>

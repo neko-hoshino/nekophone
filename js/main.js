@@ -191,7 +191,9 @@ function render() {
   // 🌟 终极免疫盾：暴力隐藏所有文件上传输入框 + 修复头像被吞噬的层级问题
   fontCss += `
     input[type="file"] { display: none !important; position: absolute !important; width: 0 !important; height: 0 !important; opacity: 0 !important; z-index: -9999 !important; pointer-events: none !important; }
-    
+    #wx-input, #publish-moment-text, #moment-comment-input, #edit-msg-textarea, #virtual-input, 
+    #transfer-amount, #transfer-note, #edit-persona-prompt, #edit-char-prompt, #global-prompt-input, 
+    textarea { font-size: 16px !important; }
     #phone-container .mc-avatar { 
        position: relative !important; 
        z-index: 50 !important;
@@ -208,34 +210,49 @@ function render() {
   
   const container = document.getElementById('phone-container');
   
-  if (store.currentApp === null) {
-    container.innerHTML = renderHomeApp(store);
-  } else if (store.currentApp === 'settings') {
-    container.innerHTML = renderSettingsApp(store);
-  } else if (store.currentApp === 'wechat') {
-    container.innerHTML = renderWeChatApp(store);
-  } else if (store.currentApp === 'worldbook') {
-    container.innerHTML = renderWorldbookApp(store);
-  } else if (store.currentApp === 'memory') {
-    container.innerHTML = renderMemoryApp(store);
-  } else if (store.currentApp === 'appearance') {
-    container.innerHTML = renderAppearanceApp(store);
-  } else {
-    container.innerHTML = `
+  // 🌟 1. 先计算出当前页面该显示什么内容
+  let appHtml = '';
+  if (store.currentApp === null) appHtml = renderHomeApp(store);
+  else if (store.currentApp === 'settings') appHtml = renderSettingsApp(store);
+  else if (store.currentApp === 'wechat') appHtml = renderWeChatApp(store);
+  else if (store.currentApp === 'worldbook') appHtml = renderWorldbookApp(store);
+  else if (store.currentApp === 'memory') appHtml = renderMemoryApp(store);
+  else if (store.currentApp === 'appearance') appHtml = renderAppearanceApp(store);
+  else appHtml = `
       <div class="w-full h-full bg-white flex flex-col items-center justify-center text-gray-400">
         <i data-lucide="hammer" class="w-12 h-12 mb-4 text-gray-300"></i>
         <p>Eve，这个页面还在开发中哦！</p>
-        <button onclick="window.actions.setCurrentApp(null)" class="mt-6 px-4 py-2 bg-blue-500 text-white font-bold rounded-xl active:scale-95 transition-transform">
-          返回桌面
-        </button>
+        <button onclick="window.actions.setCurrentApp(null)" class="mt-6 px-4 py-2 bg-blue-500 text-white font-bold rounded-xl active:scale-95 transition-transform">返回桌面</button>
+      </div>`;
+
+  // 🌟 2. 跨 App 全局状态栏渲染引擎 (完美覆盖所有页面)
+  const isHomeDark = store.currentApp === null && (ap.darkMode || false);
+  const txtClass = isHomeDark ? 'text-white drop-shadow-md' : 'text-gray-800 drop-shadow-sm';
+  const statusBarHtml = ap.hideStatusBar ? '' : `
+    <div class="absolute top-0 left-0 right-0 flex justify-between items-center px-6 pt-3 pb-2 text-[11px] font-bold z-[9999] pointer-events-none ${txtClass}">
+      <span id="status-time" class="tracking-wider">${store.currentTime || '12:00'}</span>
+      <div class="flex items-center space-x-1.5 opacity-80">
+        <i data-lucide="signal" style="width: 14px; height: 14px;"></i>
+        <i data-lucide="wifi" style="width: 14px; height: 14px;"></i>
+        <div class="flex items-center"><span class="mr-1">${store.batteryLevel || 100}%</span><i data-lucide="battery-medium" style="width: 16px; height: 16px;"></i></div>
       </div>
-    `;
-  }
+    </div>
+  `;
+
+  // 🌟 3. 将状态栏永远盖在 App 界面最上方！
+  container.innerHTML = statusBarHtml + appHtml;
   
   if (window.lucide) {
     window.lucide.createIcons();
   }
-}
+
+  if (window.lucide) {
+    window.lucide.createIcons();
+  }
+  
+  // 🌟 终极免疫失忆：只要画面有任何变动，立刻把整个宇宙保存进本地硬盘！
+  localStorage.setItem('neko_store', JSON.stringify(store));
+} 
 
 window.onload = () => {
   updateTime();
@@ -244,26 +261,21 @@ window.onload = () => {
 };
 // ================= 🌟 终极黑魔法：无声音频后台保活引擎 =================
 const keepAliveAudio = new Audio();
-window.keepAliveAudio = keepAliveAudio; // 🌟 暴露给小手机桌面使用！
-keepAliveAudio.src = "https://cdn.pixabay.com/download/audio/2022/03/15/audio_787593c662.mp3";
+window.keepAliveAudio = keepAliveAudio; 
+// 🌟 必须用本地 Base64！防止苹果因为网络延迟而掐断权限！
+keepAliveAudio.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
 keepAliveAudio.loop = true;
 keepAliveAudio.setAttribute('playsinline', 'true'); 
 keepAliveAudio.setAttribute('webkit-playsinline', 'true');
 
-// 强制绑定全屏点击，一次性击穿苹果的音频限制
-document.body.addEventListener('click', function unlockAudio() {
+// 🌟 核心破壁动作：在你第一次触摸屏幕的瞬间，偷偷解锁音频系统并立马暂停！
+document.addEventListener('touchstart', function unlockAudio() {
     keepAliveAudio.play().then(() => {
-        console.log("🎶 保活音乐启动！");
-        // 🌟 强行告诉控制中心：“我在放歌！”
+        keepAliveAudio.pause(); // 瞬间暂停，仅为骗取苹果的音频大门钥匙
         if ('mediaSession' in navigator) {
-            navigator.mediaSession.metadata = new MediaMetadata({
-                title: 'Eve的通讯系统',
-                artist: '后台接收引擎运行中',
-                artwork: [{ src: 'icon-192x192.png', sizes: '192x192', type: 'image/png' }]
-            });
-            navigator.mediaSession.playbackState = 'playing';
+            navigator.mediaSession.metadata = new MediaMetadata({ title: 'Eve的通讯系统', artist: '后台接收引擎' });
         }
     }).catch(()=>{});
-    document.body.removeEventListener('click', unlockAudio);
+    document.removeEventListener('touchstart', unlockAudio);
 }, { once: true });
 // =======================================================
