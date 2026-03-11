@@ -32,10 +32,48 @@ window.settingsActions = {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Eve通讯系统备份_${new Date().toLocaleDateString().replace(/\//g,'-')}.json`;
+    a.download = `neko_backup_${new Date().toLocaleDateString().replace(/\//g,'-')}.json`;
     a.click();
     window.actions.showToast('备份已导出！请妥善保存在手机文件里');
   },
+  // 🌟 内存探针更新
+  updateStorageDisplay: () => {
+    const dbSize = JSON.stringify(store).length;
+    const mb = (dbSize / 1024 / 1024).toFixed(2);
+    const el = document.getElementById('storage-size-display');
+    if (el) el.innerText = `${mb} MB`;
+  },
+  // 🌟 一键瘦身与无用数据清理引擎
+  optimizeStorage: async () => {
+    window.actions.showToast('正在执行深层瘦身，请勿退出页面...');
+    const beforeSize = JSON.stringify(store).length;
+    // 1. 物理抹杀孤儿数据 (删掉已经被删除的角色的聊天和记忆)
+    const validCharIds = store.contacts.map(c => c.id);
+    store.chats = store.chats.filter(c => validCharIds.includes(c.charId));
+    store.memories = (store.memories || []).filter(m => validCharIds.includes(m.charId));
+    // 2. 将历史积压的庞大 Base64 原图全部重度压缩
+    const compressPromises = [];
+    const compressIfNeed = (obj, key) => {
+       if (obj[key] && obj[key].length > 100000 && obj[key].startsWith('data:image')) {
+          compressPromises.push(new Promise(res => {
+             window.actions.compressImage(obj[key], (newBase64) => {
+                obj[key] = newBase64; res();
+             });
+          }));
+       }
+    };
+    store.personas.forEach(p => compressIfNeed(p, 'avatar'));
+    store.contacts.forEach(c => { compressIfNeed(c, 'avatar'); compressIfNeed(c, 'bgImage'); });
+    if (store.momentBg) compressIfNeed(store, 'momentBg');
+    store.chats.forEach(chat => chat.messages.forEach(m => { if (m.imageUrl) compressIfNeed(m, 'imageUrl'); }));
+    store.moments?.forEach(m => { if (m.imageUrl) compressIfNeed(m, 'imageUrl'); });
+    await Promise.all(compressPromises);
+    const afterSize = JSON.stringify(store).length;
+    const savedMb = ((beforeSize - afterSize) / 1024 / 1024).toFixed(2);
+    window.actions.showToast(`瘦身完成！共为您清理出 ${savedMb} MB 空间！`);
+    window.render();
+  },
+  // 🌟 修复：恢复数据也必须写入新的 DB 引擎
   importData: (event) => {
     const file = event.target.files[0]; if(!file) return;
     const r = new FileReader();
@@ -44,9 +82,13 @@ window.settingsActions = {
         const imported = JSON.parse(e.target.result);
         if(imported && imported.contacts) {
            Object.assign(store, imported);
-           localStorage.setItem('neko_store', JSON.stringify(store)); // 强制写入本地存储
-           window.actions.showToast('数据恢复成功！正在重启系统...');
-           setTimeout(() => location.reload(), 1500); // 刷新页面生效
+           store.currentApp = null;
+           if (window.DB) {
+              window.DB.set(store).then(() => {
+                 window.actions.showToast('数据恢复成功！正在重启系统...');
+                 setTimeout(() => location.reload(), 1500); 
+              });
+           }
         } else { window.actions.showToast('无效的备份文件！'); }
       } catch(err) { window.actions.showToast('文件解析失败！'); }
     };
@@ -165,7 +207,7 @@ export function renderSettingsApp(store) {
         <span class="flex-1 text-center font-bold text-gray-800 mr-7">系统设置</span>
       </div>
 
-      <div class="flex-1 overflow-y-auto p-4 space-y-4 pb-20">
+      <div id="setting-scroll" class="flex-1 overflow-y-auto p-4 space-y-4 pb-20">
 
       <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mt-4">
             <div class="flex justify-between items-center">
@@ -249,6 +291,15 @@ export function renderSettingsApp(store) {
           <i data-lucide="check-circle" style="width: 18px; height: 18px;"></i>
           <span>保存并全局应用</span>
         </button>
+
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mt-4 space-y-3">
+           <div class="flex justify-between items-center">
+             <span class="font-bold text-gray-800 text-sm flex items-center"><i data-lucide="hard-drive" class="w-4 h-4 mr-1 text-blue-500"></i>系统存储探针</span>
+             <span id="storage-size-display" class="text-[14px] font-mono font-black text-[#07c160]">计算中...</span>
+           </div>
+           <p class="text-[11px] text-gray-400 font-bold leading-relaxed">已接入底层海量数据库，支持 1000MB+ 存储。若读取变慢可点击瘦身。</p>
+           <button onclick="window.settingsActions.optimizeStorage()" class="w-full bg-blue-50 text-blue-500 font-bold py-2.5 rounded-xl active:bg-blue-100 transition-colors text-[13px] flex items-center justify-center border border-blue-100"><i data-lucide="zap" class="w-4 h-4 mr-1"></i>深度压缩并清理无用数据</button>
+        </div>
 
         <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mt-4 space-y-0">
             <h3 class="font-bold text-gray-800 text-sm flex items-center mb-2"><i data-lucide="database" class="w-4 h-4 mr-1 text-blue-500"></i>系统数据备份</h3>

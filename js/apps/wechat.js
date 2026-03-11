@@ -131,25 +131,9 @@ const wxState = {
 };
 wxState.ringtone.loop = true;
 
-// 独立记忆各个页面的滚动条，互不干扰！
-const saveScroll = () => {
-    const chatEl = document.getElementById('chat-scroll');
-    if (chatEl) wxState.savedChatScroll = chatEl.scrollTop;
-    const setEl = document.getElementById('settings-scroll');
-    if (setEl) wxState.savedSettingsScroll = setEl.scrollTop;
-    const momEl = document.getElementById('moments-scroll');
-    if (momEl) wxState.savedMomentsScroll = momEl.scrollTop;
-};
-const restoreScroll = () => {
-    requestAnimationFrame(() => {
-        const chatEl = document.getElementById('chat-scroll');
-        if (chatEl && wxState.savedChatScroll !== undefined) chatEl.scrollTop = wxState.savedChatScroll;
-        const setEl = document.getElementById('settings-scroll');
-        if (setEl && wxState.savedSettingsScroll !== undefined) setEl.scrollTop = wxState.savedSettingsScroll;
-        const momEl = document.getElementById('moments-scroll');
-        if (momEl && wxState.savedMomentsScroll !== undefined) momEl.scrollTop = wxState.savedMomentsScroll;
-    });
-};
+// 🌟 废弃旧版手动存储，动作已全部转交 main.js 全局智能雷达！
+const saveScroll = () => {};
+const restoreScroll = () => {};
 window.wxActions = {
   // 🌟 新增：全平台兼容的“300毫秒连击”戳一戳判定器
   lastAvatarClickTime: 0,
@@ -850,7 +834,7 @@ window.wxActions = {
   triggerAIMoment: async () => {
     const chars = store.contacts; if (chars.length === 0) return window.actions.showToast('通讯录还没人哦');
     const char = chars[Math.floor(Math.random() * chars.length)];
-    window.actions.showToast(`${char.name} 正在编辑动态...`);
+    window.actions.showToast(`正在更新动态...`);
     try {
         const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
@@ -1320,7 +1304,10 @@ window.wxActions = {
 
     try {
       const { callLLM } = await import('../utils/llm.js');
-      const replyText = await callLLM(charId, chat.messages, isActive ? wxState.view === 'offlineStory' : false);
+      // 🌟 核心修复：加入 200秒 强制超时机制！防止苹果杀后台导致无限“正在输入”
+      const llmPromise = callLLM(charId, chat.messages, isActive ? wxState.view === 'offlineStory' : false);
+      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('请求超时（网络波动或被系统掐断）')), 200000));
+      const replyText = await Promise.race([llmPromise, timeoutPromise]);
       if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
 
       let remainingText = replyText.replace(/\[\d{1,2}:\d{2}\][:：]?\s*/g, '').replace(/\[(线上聊天|线下剧情)\][:：]?\s*/g, '').trim();
@@ -1550,15 +1537,16 @@ window.wxActions = {
       }
 
     } catch (error) { 
-      // 🌟 核心：检测是不是因为切到后台导致请求被系统掐断了
+      // 确保 error.message 是安全的，防止读取报错导致二次崩溃
+      const errMsg = error ? (error.message || error.toString()) : "未知网络错误";
       if (document.hidden) {
          chat.messages.push({ 
-           id: Date.now(), sender: 'system', text: `你刚刚切出了页面，导致与大模型的连接被系统中断。请点击重roll重新发送。`, 
+           id: Date.now(), sender: 'system', text: `你切出了页面，导致与大模型的连接被系统强行中断。请重roll。`, 
            isMe: true, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() 
          });
       } else {
          chat.messages.push({ 
-           id: Date.now(), sender: char.name, text: `[系统] 请求失败: ${error.message} (点击重roll)`, 
+           id: Date.now(), sender: char.name, text: `[系统] 请求失败: ${errMsg} (请点击重roll)`, 
            isMe: false, source: 'wechat', isOffline: false, msgType: 'text', time: getNowTime() 
          });
       }
@@ -1930,7 +1918,7 @@ export function renderWeChatApp(store) {
            <div class="w-1/4 flex justify-end"><i data-lucide="plus" class="cursor-pointer active:scale-90 transition-transform text-[#07c160]" style="width: 28px; height: 28px;" onclick="window.wxActions.addGroup()"></i></div>
          </div>
          
-         <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-10">
+         <div id="wechat-group-scroll" class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-10">
             <p class="text-[11px] text-gray-400 font-bold mb-3 px-1 tracking-widest uppercase">修改名称后实时自动保存</p>
             ${store.groups.map(g => `
               <div class="bg-white rounded-[12px] p-3.5 shadow-sm border border-gray-100 flex items-center justify-between">
@@ -1988,7 +1976,7 @@ export function renderWeChatApp(store) {
            ${isManage ? '<div class="p-1 active:scale-90 transition-transform"><i data-lucide="check" class="w-6 h-6 text-[#07c160]"></i></div>' : '<div class="p-1 active:scale-90 transition-transform"><i data-lucide="settings" class="w-6 h-6 text-gray-800"></i></div>'}
            </div>
          </div>
-         <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar ${isManage ? 'pb-24' : 'pb-10'}">
+         <div id="wechat-favorites-scroll" class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar ${isManage ? 'pb-24' : 'pb-10'}">
             ${store.favorites.map(f => `
               <div class="bg-white p-4 rounded-[12px] shadow-sm flex items-start ${isManage ? 'cursor-pointer active:bg-gray-50' : ''} transition-colors" ${isManage ? `onclick="window.wxActions.toggleSelectFav(${f.id})"` : ''}>
                 ${isManage ? `<div class="mr-3 mt-1 w-[22px] h-[22px] rounded-full border flex-shrink-0 ${wxState.selectedFavIds?.includes(f.id) ? 'bg-[#07c160] border-[#07c160]' : 'border-gray-300'} flex items-center justify-center transition-colors shadow-sm">${wxState.selectedFavIds?.includes(f.id) ? '<i data-lucide="check" class="text-white" style="width:14px; height:14px;"></i>' : ''}</div>` : ''}
@@ -2018,7 +2006,7 @@ export function renderWeChatApp(store) {
            <span class="flex-1 text-center font-bold text-gray-800">我的身份列表</span>
            <div class="w-1/4 flex justify-end"><i data-lucide="plus" class="cursor-pointer active:scale-90 transition-transform text-[#07c160]" style="width: 26px; height: 26px;" onclick="window.wxActions.openPersonaEdit(null)"></i></div>
          </div>
-         <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-10">
+         <div id="persona-scroll" class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-10">
             <p class="text-[11px] text-gray-400 font-bold mb-3 px-1 tracking-widest">可绑定至不同角色的聊天中</p>
             ${store.personas.map(p => `
               <div class="bg-white rounded-[12px] p-4 shadow-sm border border-gray-100 flex items-center justify-between cursor-pointer active:bg-gray-50 transition-colors" onclick="window.wxActions.openPersonaEdit('${p.id}')">
@@ -2086,7 +2074,7 @@ export function renderWeChatApp(store) {
              <i data-lucide="plus" class="cursor-pointer active:scale-90 transition-transform" style="width: 26px; height: 26px;" onclick="window.wxActions.addEmojiLib()"></i>
            </div>
          </div>
-         <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-10">
+         <div id="emoji-manage-scroll" class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-10">
             <p class="text-[11px] text-gray-400 font-bold mb-3 px-1 tracking-widest">点击名称修改，点击卡片编辑内部图片</p>
             ${store.emojiLibs.map(lib => `
               <div class="bg-white rounded-[12px] p-3.5 shadow-sm border border-gray-100 flex items-center justify-between">
@@ -2111,7 +2099,7 @@ export function renderWeChatApp(store) {
            <span class="flex-1 text-center font-medium text-gray-800 truncate">${lib.name}</span>
            <div class="w-1/4"></div>
          </div>
-         <div class="flex-1 overflow-y-auto p-4 hide-scrollbar pb-10">
+         <div id="emoji-edit-scroll" class="flex-1 overflow-y-auto p-4 hide-scrollbar pb-10">
             <div class="bg-white rounded-[12px] p-4 shadow-sm border border-gray-100 mb-4 space-y-3">
               <span class="text-[14px] font-medium text-gray-800 flex items-center"><i data-lucide="zap" class="text-blue-500 mr-2 w-4 h-4"></i>极速批量导入</span>
               <textarea id="batch-emoji-input" rows="3" class="w-full bg-gray-50 rounded-lg p-3 outline-none text-[12px] resize-none text-gray-700 leading-relaxed" placeholder="支持格式：\n名称1: http://图片链接\n直接粘贴 http://图片链接"></textarea>
@@ -2335,8 +2323,9 @@ export function renderWeChatApp(store) {
         bubbleStyle = ''; 
         contentHtml = `<div class="relative w-48 min-h-[12rem] bg-white cursor-pointer select-none" onclick="const overlay = this.querySelector('.img-overlay'); overlay.classList.toggle('opacity-0'); overlay.classList.toggle('pointer-events-none');"><div class="absolute inset-0 p-4 overflow-y-auto text-[13px] text-gray-700 leading-relaxed text-left bg-white"><span class="font-bold text-gray-400 block mb-1 flex items-center"><i data-lucide="image" class="mr-1" style="width:14px; height:14px;"></i>照片内容：</span>${msg.text}</div><div class="img-overlay absolute inset-0 bg-gray-100 flex flex-col items-center justify-center text-gray-400 transition-opacity duration-300 z-10"><i data-lucide="image" class="mb-2 text-gray-300" style="width: 36px; height: 36px;"></i><span class="text-[11px] font-bold tracking-widest animate-pulse">图片加载中...</span></div></div>`;
       } else if (msg.msgType === 'voice') {
-        bubbleClass = 'mc-bubble-voice px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-hidden'; 
-        bubbleStyle = `font-family: var(--chat-font); font-size: var(--chat-font-size); background-color: var(${msg.isMe ? '--bubble-me-bg' : '--bubble-char-bg'}); background-image: var(${msg.isMe ? '--bubble-me-img' : '--bubble-char-img'}); background-size: cover; color: var(${msg.isMe ? '--bubble-me-text' : '--bubble-char-text'}); opacity: var(${msg.isMe ? '--bubble-me-opacity' : '--bubble-char-opacity'}); border-top-${msg.isMe ? 'right' : 'left'}-radius: 2px;`;
+        // 🌟 将默认颜色写死在 Class 里，不再依赖变量！
+        bubbleClass = `mc-bubble-voice px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-hidden text-[15px] ${msg.isMe ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`; 
+        bubbleStyle = '';
         const duration = Math.min(Math.max(Math.round(msg.text.length / 4), 2), 60); const numBars = Math.min(8 + Math.floor(duration * 1.8), 45); 
         let barsHtml = ''; for (let i = 0; i < numBars; i++) barsHtml += `<div class="w-[2px] ${['h-2', 'h-4', 'h-3', 'h-5', 'h-2', 'h-6', 'h-3', 'h-4'][i % 8]} bg-current rounded-full animate-pulse opacity-80" style="animation-delay: ${(i * 100) % 1000}ms"></div>`;        
         // 🌟 点击展开文字时，带上播放音频的代码！
@@ -2352,25 +2341,24 @@ export function renderWeChatApp(store) {
         bubbleStyle = ''; 
         contentHtml = `<img src="${msg.imageUrl}" class="w-full h-auto rounded-lg object-cover max-h-[300px] cursor-pointer" onclick="window.actions.showToast('查看大图')" alt="照片" />`;
       } else if (msg.msgType === 'transfer') {
-        maxWidthClass = 'max-w-[85%]';
-        bubbleClass = 'mc-bubble-transfer rounded-xl shadow-sm overflow-hidden flex flex-col cursor-pointer active:scale-95 transition-transform'; 
-        bubbleStyle = `width: var(--transfer-width); height: var(--transfer-height); opacity: var(--transfer-opacity);`; 
+        maxWidthClass = ''; 
+        bubbleClass = 'mc-bubble-transfer w-[230px] h-[95px] rounded-xl shadow-sm overflow-hidden flex flex-col cursor-pointer active:scale-95 transition-transform'; 
+        bubbleStyle = ''; 
         const isPending = (msg.transferState || 'pending') === 'pending'; 
         const stateText = isPending ? msg.transferData.note : (msg.transferState === 'accepted' ? '已收款' : '已退还');
-        const tBg = isPending ? 'var(--transfer-pending-bg)' : 'var(--transfer-accepted-bg)';
-        const tImg = isPending ? 'var(--transfer-pending-img)' : 'var(--transfer-accepted-img)';
-        const tIcon = isPending ? 'var(--transfer-pending-icon)' : 'transparent';
+        const tBg = isPending ? '#fbab66' : '#f9ede3';
+        const textCol = isPending ? 'text-white' : 'text-[#f69b49]';
         contentHtml = `
-          <div class="mc-transfer-top flex items-center p-3.5 text-white space-x-3 transition-colors" style="background-color: ${tBg}; background-image: ${tImg}; background-size: cover; background-position: center;" onclick="window.wxActions.openTransferModal(${msg.id})">
-            <div class="mc-transfer-icon w-10 h-10 rounded-full flex items-center justify-center border ${isPending ? 'border-[#fbab66]' : 'border-transparent'} flex-shrink-0 transition-colors" style="background-color: ${tIcon};">
-              <i data-lucide="${isPending ? 'arrow-right-left' : (msg.transferState === 'accepted' ? 'check' : 'corner-up-left')}" style="width:20px; height:20px; color: ${isPending ? 'white' : 'rgba(255,255,255,0.8)'};"></i>
+          <div class="mc-transfer-top flex-1 flex items-center p-3.5 space-x-3 transition-colors ${textCol}" style="background-color: ${tBg};" onclick="window.wxActions.openTransferModal(${msg.id})">
+            <div class="mc-transfer-icon w-10 h-10 rounded-full flex items-center justify-center border border-current flex-shrink-0 transition-colors opacity-90">
+              <i data-lucide="${isPending ? 'arrow-right-left' : (msg.transferState === 'accepted' ? 'check' : 'corner-up-left')}" style="width:20px; height:20px; color: currentcolor;"></i>
             </div>
             <div class="mc-transfer-info flex flex-col overflow-hidden">
               <span class="mc-transfer-amt text-[15px] font-bold">¥${msg.transferData.amount}</span>
               <span class="mc-transfer-note text-[11px] opacity-90 truncate">${stateText}</span>
             </div>
           </div>
-          <div class="mc-transfer-bot bg-white px-3 py-1.5 text-[10px] text-gray-400 font-bold border-t border-gray-100 flex items-center justify-between">
+          <div class="mc-transfer-bot h-[26px] bg-white px-3 flex items-center justify-between text-[10px] text-gray-400 font-bold border-t border-gray-100 flex-shrink-0">
             <span>转账</span>
             ${!isPending ? `<i data-lucide="check-circle" style="width:12px; height:12px;" class="opacity-50"></i>` : ''}
           </div>
@@ -2389,8 +2377,9 @@ export function renderWeChatApp(store) {
           <div class="border-t border-gray-100 mx-3 py-1.5 flex justify-between items-center text-[10px] text-gray-400"><span>聊天记录</span></div>
         `;
       } else {
-        bubbleClass = 'mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-wrap break-words';
-        bubbleStyle = `font-family: var(--chat-font); font-size: var(--chat-font-size); background-color: var(${msg.isMe ? '--bubble-me-bg' : '--bubble-char-bg'}); background-image: var(${msg.isMe ? '--bubble-me-img' : '--bubble-char-img'}); background-size: cover; color: var(${msg.isMe ? '--bubble-me-text' : '--bubble-char-text'}); opacity: var(${msg.isMe ? '--bubble-me-opacity' : '--bubble-char-opacity'}); border-top-${msg.isMe ? 'right' : 'left'}-radius: 2px;`;
+        // 🌟 将默认颜色写死在 Class 里，不再依赖变量！
+        bubbleClass = `mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-wrap break-words text-[15px] ${msg.isMe ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`;
+        bubbleStyle = '';
         const quoteHtml = msg.quote ? `<div class="text-[11px] bg-black/5 rounded-md px-2 py-1.5 mb-1.5 border-l-2 border-black/20 break-words whitespace-pre-wrap leading-relaxed" style="color: inherit; opacity: 0.75;">${msg.quote.sender}：${msg.quote.text}</div>` : '';
         contentHtml = quoteHtml + msg.text;
       }
@@ -2478,14 +2467,14 @@ export function renderWeChatApp(store) {
         <div class="absolute inset-0 z-[-1]" style="background: var(--chat-bg-overlay); pointer-events: none;"></div>
         ${wxState.activeMenuMsgId ? `<div class="absolute inset-0 z-[90]" onclick="window.wxActions.closeContextMenu()" ontouchstart="window.wxActions.closeContextMenu()"></div>` : ''}
         
-        <div class="mc-topbar backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200/50 z-10 sticky top-0 transition-colors" style="background-color: ${wxState.isMultiSelecting ? '#f3f3f3' : 'var(--top-bar-bg)'}; background-image: ${wxState.isMultiSelecting ? 'none' : 'var(--top-bar-img)'}; background-size: cover; height: var(--top-bar-height);">
+        <div class="mc-topbar backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200/50 z-10 sticky top-0 transition-colors ${wxState.isMultiSelecting ? 'bg-[#f3f3f3]' : 'bg-gray-100/90'}">
           ${wxState.isMultiSelecting ? `
             <div class="cursor-pointer text-gray-800 w-1/4 text-[15px]" onclick="window.wxActions.cancelMultiSelect()">取消</div>
             <span class="flex-1 text-center font-bold text-gray-800 text-[16px]">已选择 ${wxState.selectedMsgIds.length} 项</span>
             <div class="w-1/4"></div>
           ` : `
             <div class="mc-btn-back flex items-center cursor-pointer text-gray-800 w-1/4" onclick="window.wxActions.closeChat()"><i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i></div>
-            <span class="mc-title flex-1 font-bold transition-all duration-300 ${wxState.isTyping ? 'opacity-60 animate-pulse' : ''}" style="color: var(--name-color); font-family: var(--name-font); font-size: var(--name-size); text-align: var(--name-align);">${wxState.isTyping ? '对方正在输入...' : char?.name}</span>
+            <span class="mc-title flex-1 font-bold text-gray-800 text-[17px] text-center transition-all duration-300 ${wxState.isTyping ? 'opacity-60 animate-pulse' : ''}">${wxState.isTyping ? '对方正在输入...' : char?.name}</span>
             <div class="mc-btn-more w-1/4 flex justify-end"><i data-lucide="more-horizontal" class="text-gray-800 cursor-pointer active:scale-90" style="width: 24px; height: 24px;" onclick="window.wxActions.openSettings()"></i></div>
           `}
         </div>
@@ -2502,8 +2491,8 @@ export function renderWeChatApp(store) {
             <div class="flex flex-col items-center cursor-pointer hover:text-red-500 transition-colors active:scale-90" onclick="window.wxActions.deleteSelected()"><i data-lucide="trash-2" class="w-[22px] h-[22px] mb-1"></i><span class="text-[10px]">删除</span></div>
           </div>
         ` : `
-          <div class="mc-bottombar px-3 py-2 pb-6 border-t border-gray-200/50 z-20 relative transition-all duration-200" style="background-color: var(--bottom-bar-bg); background-image: var(--bottom-bar-img); background-size: cover; min-height: var(--bottom-bar-height);">
-            
+          <div class="mc-bottombar bg-gray-50/90 px-3 py-2 pb-6 border-t border-gray-200/50 z-20 relative transition-all duration-200">
+
             ` + (() => {
               if (!wxState.quoteMsgId) return '';
               const qm = chatData.messages.find(m => m.id === wxState.quoteMsgId);
@@ -2694,7 +2683,7 @@ export function renderWeChatApp(store) {
   // 内容区
   let contentHtml = '';
   if (wxState.activeTab === 'chats') {
-    contentHtml = `<div class="flex-1 overflow-y-auto hide-scrollbar">${chatsHtml}</div>`;
+    contentHtml = `<div id="chats-tab-scroll" class="flex-1 overflow-y-auto hide-scrollbar">${chatsHtml}</div>`;
   } else if (wxState.activeTab === 'contacts') {
     // 🌟 生成手风琴式分组列表
     const groupsHtml = store.groups.map(group => {
@@ -2717,7 +2706,7 @@ export function renderWeChatApp(store) {
         </div>
       `;
     }).join('');
-    contentHtml = `<div class="flex-1 overflow-y-auto hide-scrollbar bg-[#f3f3f3] pt-2">${groupsHtml}</div>`;
+    contentHtml = `<div id="contacts-tab-scroll" class="flex-1 overflow-y-auto hide-scrollbar bg-[#f3f3f3] pt-2">${groupsHtml}</div>`;
   } else if (wxState.activeTab === 'moments') {
     const my = store.personas[0];
     store.moments = store.moments || [];
@@ -2802,7 +2791,7 @@ export function renderWeChatApp(store) {
   } else if (wxState.activeTab === 'me') {
     const my = store.personas[0];
     contentHtml = `
-      <div class="flex-1 overflow-y-auto bg-[#f3f3f3] hide-scrollbar pt-2 pb-10">
+      <div id="me-tab-scroll" class="flex-1 overflow-y-auto bg-[#f3f3f3] hide-scrollbar pt-2 pb-10">
         <div class="bg-white p-6 flex items-center mb-2 shadow-sm relative mx-3 rounded-[16px] border border-gray-100 mt-2">
            <input type="file" id="upload-my-avatar-main" accept="image/*" class="hidden" onchange="window.wxActions.handleMyAvatarUploadMain(event)" />
            <div class="w-16 h-16 rounded-[12px] overflow-hidden bg-gray-100 flex items-center justify-center cursor-pointer mr-4 shadow-sm border border-gray-200" onclick="document.getElementById('upload-my-avatar-main').click()">${getVidHtml(my.avatar, false)}</div>

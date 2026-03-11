@@ -94,7 +94,7 @@ export function renderMemoryApp(store) {
            ${store.contacts.length === 0 ? '<span class="text-xs text-gray-600 p-2">请先前往通讯录添加角色</span>' : ''}
         </div>
 
-        <div class="flex-1 overflow-y-auto hide-scrollbar p-3 space-y-3 pb-24">
+        <div id="memory-scroll" class="flex-1 overflow-y-auto hide-scrollbar p-3 space-y-3 pb-24">
            ${memState.activeTab === 'core' ? '<p class="text-[10px] text-gray-400 font-bold mb-1 px-1 tracking-widest">核心记忆永久生效</p>' : '<p class="text-[10px] text-gray-400 font-bold mb-1 px-1 tracking-widest">碎片记忆平时静默，当聊天中出现关键词时自动提取</p>'}
            
            ${currentList.map(item => `

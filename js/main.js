@@ -1,5 +1,5 @@
 // js/main.js
-import { store } from './store.js';
+import { store, DB } from './store.js';
 import { renderHomeApp } from './apps/home.js';
 import { renderSettingsApp } from './apps/setting.js';
 import { renderWeChatApp } from './apps/wechat.js';
@@ -24,25 +24,30 @@ window.actions = {
       setTimeout(() => toastContainer.classList.add('hidden'), 300);
     }, 2500);
   },
-// 🌟 核心防爆引擎：全局图片极速压缩器 (将 MB 级图片瞬间压缩至 KB 级)
-  compressImage: (file, callback) => {
-     const reader = new FileReader();
-     reader.onload = (e) => {
+// 🌟 核心防爆引擎升级：同时支持文件和 base64 数据的极速压缩
+  compressImage: (source, callback) => {
+     const processImage = (src) => {
         const img = new Image();
         img.onload = () => {
            const canvas = document.createElement('canvas');
            let w = img.width, h = img.height;
-           const maxSize = 800; // 限制最大分辨率，足够手机清晰显示
+           const maxSize = 800; // 限制最大分辨率
            if (w > h && w > maxSize) { h *= maxSize / w; w = maxSize; }
            else if (h > maxSize) { w *= maxSize / h; h = maxSize; }
            canvas.width = w; canvas.height = h;
            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-           // 🌟 强行转换为 WebP 格式，保留透明度且体积缩小 90%
-           callback(canvas.toDataURL('image/webp', 0.6));
+           callback(canvas.toDataURL('image/webp', 0.6)); // 极限压缩
         };
-        img.src = e.target.result;
+        img.src = src;
      };
-     reader.readAsDataURL(file);
+     // 判断是新上传的文件，还是已存在的历史 Base64 数据
+     if (source instanceof File || source instanceof Blob) {
+         const reader = new FileReader();
+         reader.onload = (e) => processImage(e.target.result);
+         reader.readAsDataURL(source);
+     } else if (typeof source === 'string') {
+         processImage(source);
+     }
   }
 };
 // ================= 全局消息通知引擎 (原生本地版) =================
@@ -107,6 +112,11 @@ function updateTime() {
 }
 
 function render() {
+  // 🌟 1. 渲染前第一步：全局动态捕获所有以 "-scroll" 结尾的容器状态！(同时捕获上下和左右滑动)
+  const scrollStates = {};
+  document.querySelectorAll('[id$="-scroll"]').forEach(el => {
+      scrollStates[el.id] = { top: el.scrollTop, left: el.scrollLeft };
+  });
   // ================= 🌟 全局外观与图库引擎 =================
   const ap = store.appearance || {};
   let fontCss = '';
@@ -226,7 +236,6 @@ function render() {
     document.head.appendChild(styleTag);
   }
   styleTag.innerHTML = fontCss;
-  // =======================================================
   
   const container = document.getElementById('phone-container');
   
@@ -241,7 +250,7 @@ function render() {
   else appHtml = `
       <div class="w-full h-full bg-white flex flex-col items-center justify-center text-gray-400">
         <i data-lucide="hammer" class="w-12 h-12 mb-4 text-gray-300"></i>
-        <p>Eve，这个页面还在开发中哦！</p>
+        <p>这个页面还在开发中哦！</p>
         <button onclick="window.actions.setCurrentApp(null)" class="mt-6 px-4 py-2 bg-blue-500 text-white font-bold rounded-xl active:scale-95 transition-transform">返回桌面</button>
       </div>`;
 
@@ -262,17 +271,50 @@ function render() {
   // 🌟 3. 将状态栏永远盖在 App 界面最上方！
   container.innerHTML = statusBarHtml + appHtml;
   
-  if (window.lucide) {
-    window.lucide.createIcons();
-  }
+  if (window.lucide) window.lucide.createIcons();
   
-  // 🌟 终极免疫失忆：只要画面有任何变动，立刻把整个宇宙保存进本地硬盘！
-  localStorage.setItem('neko_store', JSON.stringify(store));
-} 
+  if (store.currentApp === 'settings' && window.settingsActions?.updateStorageDisplay) {
+      window.settingsActions.updateStorageDisplay();
+  }
+  // 🌟 4. 渲染结束后：光速全自动恢复所有滚动条位置！
+  requestAnimationFrame(() => {
+     Object.keys(scrollStates).forEach(id => {
+         const el = document.getElementById(id);
+         if (el) {
+             el.scrollTop = scrollStates[id].top;
+             el.scrollLeft = scrollStates[id].left;
+         }
+     });
+  });
+  // 🌟 5. 换用海量数据库 IndexedDB 存储！
+  if (window.DB) {
+     window.DB.set(JSON.parse(JSON.stringify(store))).catch(e => console.log('DB存储失败', e));
+  }
+};
+window.DB = DB; // 暴露给全局
 
-window.onload = () => {
+window.onload = async () => {
   updateTime();
   setInterval(updateTime, 1000); 
+
+  // 🌟 开机自检：无缝加载新数据库或迁移旧数据
+  try {
+    const savedDB = await DB.get();
+    if (savedDB) {
+       Object.assign(store, savedDB);
+       store.currentApp = null; // 强制回城防卡死
+    } else {
+       // 如果新数据库是空的，检查有没有老版 localStorage 存档
+       const oldLocal = localStorage.getItem('neko_store');
+       if (oldLocal) {
+          Object.assign(store, JSON.parse(oldLocal));
+          store.currentApp = null;
+          await DB.set(store); // 瞬间存入新硬盘
+          localStorage.removeItem('neko_store'); // 销毁旧炸弹！
+       }
+    }
+  } catch(e) { console.log('读取DB失败', e) }
+
   render(); 
 };
 // ================= 🌟 终极黑魔法：无声音频后台保活引擎 =================
@@ -289,7 +331,7 @@ document.addEventListener('touchstart', function unlockAudio() {
     keepAliveAudio.play().then(() => {
         keepAliveAudio.pause(); // 瞬间暂停，仅为骗取苹果的音频大门钥匙
         if ('mediaSession' in navigator) {
-            navigator.mediaSession.metadata = new MediaMetadata({ title: 'Eve的通讯系统', artist: '后台接收引擎' });
+            navigator.mediaSession.metadata = new MediaMetadata({ title: 'nekophone', artist: '后台接收引擎' });
         }
     }).catch(()=>{});
     document.removeEventListener('touchstart', unlockAudio);

@@ -187,7 +187,7 @@ export function renderAppearanceApp(store) {
           <span class="absolute left-1/2 -translate-x-1/2 font-black text-gray-800 text-[16px]">${isIcon ? '更改主屏幕图标' : '更改全局交互按钮'}</span>
           <div class="w-6"></div>
         </div>
-        <div class="flex-1 overflow-y-auto p-4 hide-scrollbar pb-20">
+        <div id="icon-edit-scroll"class="flex-1 overflow-y-auto p-4 hide-scrollbar pb-20">
            <p class="text-[11px] text-gray-400 font-bold mb-4 px-1 tracking-widest">建议使用背景透明的 PNG 图片获得最佳效果</p>
            ${renderGallery(isIcon ? 'customIcons' : 'customButtons', isIcon ? iconList : buttonList)}
            <button onclick="window.apActions.clearAllItems('${isIcon ? 'customIcons' : 'customButtons'}')" class="w-full mt-6 py-3.5 bg-white text-red-500 font-bold rounded-2xl active:bg-red-50 transition-colors border border-red-100 shadow-sm flex items-center justify-center">
@@ -206,7 +206,7 @@ export function renderAppearanceApp(store) {
         <div class="w-6"></div>
       </div>
 
-      <div class="flex-1 overflow-y-auto hide-scrollbar p-4 space-y-6 pb-20">
+      <div id="appearance-scroll"class="flex-1 overflow-y-auto hide-scrollbar p-4 space-y-6 pb-20">
         
         <div class="space-y-2">
           <span class="text-[11px] font-black text-gray-600 uppercase tracking-widest pl-2">全局背景图像</span>

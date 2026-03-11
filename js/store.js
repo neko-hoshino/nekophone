@@ -1,7 +1,20 @@
 // js/store.js
 // 🌟 开局先去硬盘里找存档，找不到再用默认设置
-const savedStore = localStorage.getItem('neko_store');
-export const store = savedStore ? JSON.parse(savedStore) : {
+// js/store.js
+// 🌟 开局先去硬盘里找存档，找不到再用默认设置
+const savedStoreStr = localStorage.getItem('neko_store');
+let parsedStore = null;
+try {
+  if (savedStoreStr) {
+     parsedStore = JSON.parse(savedStoreStr);
+     // 🌟 核心防卡死：每次重启小手机，强制回到桌面！绝不停留在上次爆内存的子页面里！
+     parsedStore.currentApp = null;
+  }
+} catch (e) {
+  console.error('存档读取失败，可能已损坏', e);
+}
+
+export const store = parsedStore || {
   currentTime: '00:00',
   currentApp: null,
   
@@ -50,4 +63,37 @@ export const store = savedStore ? JSON.parse(savedStore) : {
       ] 
     }
   ]
+};
+
+// ================= IndexedDB 海量数据库引擎 (支持 1GB+) =================
+export const DB = {
+  init() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open('NekoPhoneDB', 1);
+      req.onupgradeneeded = e => {
+         if (!e.target.result.objectStoreNames.contains('data')) {
+             e.target.result.createObjectStore('data');
+         }
+      };
+      req.onsuccess = e => resolve(e.target.result);
+      req.onerror = e => reject(e);
+    });
+  },
+  async get() {
+    const db = await this.init();
+    return new Promise(resolve => {
+      const tx = db.transaction('data', 'readonly');
+      const req = tx.objectStore('data').get('store');
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    });
+  },
+  async set(val) {
+    const db = await this.init();
+    return new Promise(resolve => {
+      const tx = db.transaction('data', 'readwrite');
+      tx.objectStore('data').put(val, 'store');
+      tx.oncomplete = () => resolve(true);
+    });
+  }
 };
