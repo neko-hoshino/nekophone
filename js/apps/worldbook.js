@@ -223,9 +223,9 @@ export function renderWorldbookApp(store) {
            <div class="flex justify-between items-center">
               <span class="text-[14px] font-bold text-gray-700">插入位置</span>
               <select id="wb-edit-pos" class="bg-transparent outline-none text-[14px] font-medium text-gray-800 text-right appearance-none cursor-pointer">
-                 <option value="front" ${data.position === 'front' ? 'selected' : ''}>前置 (注入前)</option>
-                 <option value="middle" ${data.position === 'middle' ? 'selected' : ''}>中间 (注入后)</option>
-                 <option value="back" ${data.position === 'back' ? 'selected' : ''}>后置 (尾端)</option>
+                 <option value="front" ${data.position === 'front' ? 'selected' : ''}>前</option>
+                 <option value="middle" ${data.position === 'middle' ? 'selected' : ''}>中</option>
+                 <option value="back" ${data.position === 'back' ? 'selected' : ''}>后</option>
               </select>
            </div>
         </div>

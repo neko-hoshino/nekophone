@@ -43,9 +43,12 @@ export const store = parsedStore || {
   },
 
   // 👇 下面是微信模块需要用到的新数据
-  personas: [],
+  personas: [
+    { id: 'p_default', name: '你的名字', avatar: '', isCurrent: true, prompt: '请在这里输入你的人设' }
+  ],
   contacts: [],
-  chats: []
+  chats: [],
+  groups: [{ id: 'default', name: '默认分组' }],
 };
 
 // ================= IndexedDB 海量数据库引擎 (支持 1GB+) =================
@@ -80,3 +83,12 @@ export const DB = {
     });
   }
 };
+// ================= 🌟 终极生命线：全系统防断层自愈引擎 =================
+if (!store.personas || store.personas.length === 0) {
+  store.personas = [{ id: 'p_default', name: '你的名字', avatar: '', prompt: '' }];
+}
+if (!store.contacts) store.contacts = [];
+if (!store.chats) store.chats = [];
+if (!store.groups || store.groups.length === 0) store.groups = [{ id: 'default', name: '默认分组' }];
+if (!store.favorites) store.favorites = [];
+if (!store.emojiLibs) store.emojiLibs = [];

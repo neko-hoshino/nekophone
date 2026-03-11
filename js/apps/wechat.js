@@ -1560,8 +1560,17 @@ window.wxActions = {
 // --- 渲染 UI ---
 export function renderWeChatApp(store) {
   // 🌟 初始化旧数据的分组字段
+  if (!store.personas || store.personas.length === 0) store.personas = [{ id: 'p_default', name: '你的名字', avatar: '', prompt: '' }];
+  if (!store.contacts) store.contacts = [];
+  if (!store.chats) store.chats = [];
   if (!store.groups || store.groups.length === 0) store.groups = [{ id: 'default', name: '默认分组' }];
   store.contacts.forEach(c => { if (!c.groupId) c.groupId = 'default'; });
+
+  // 🌟 幽灵防卡死：如果当前聊天室的角色被删了，立刻强行踢回主界面
+  if (wxState.activeChatId && !store.contacts.find(c => c.id === wxState.activeChatId)) {
+     wxState.view = 'main';
+     wxState.activeChatId = null;
+  }
 
   const char = store.contacts.find(c => c.id === wxState.activeChatId);
   const chatData = store.chats.find(c => c.charId === wxState.activeChatId) || { messages: [] };
@@ -1709,11 +1718,11 @@ export function renderWeChatApp(store) {
                </div>
                <div class="flex justify-between items-center border-t border-gray-100 pt-4">
                  <span class="text-[15px] font-medium text-gray-800">未读冷落触发时长</span>
-                 <div class="flex items-center"><input type="number" id="set-auto-interval" value="${char.autoMsgInterval || 5}" class="w-12 text-center outline-none bg-gray-50 p-1.5 rounded-lg text-[15px] font-medium text-black" /><span class="ml-2 text-[13px] text-gray-500">分钟</span></div>
+                 <div class="flex items-center"><input type="number" id="set-auto-interval" value="${char.autoMsgInterval || 10}" class="w-12 text-center outline-none bg-gray-50 p-1.5 rounded-lg text-[15px] font-medium text-black" /><span class="ml-2 text-[13px] text-gray-500">分钟</span></div>
                </div>
                <div class="flex justify-between items-center border-t border-gray-100 pt-4">
                  <div class="flex flex-col"><span class="text-[15px] font-medium text-gray-800">附带历史记忆条数</span><span class="text-[10px] text-gray-500">1-100，越大越耗Token</span></div>
-                 <div class="flex items-center"><input type="number" id="set-context-limit" value="${char.contextLimit || 25}" class="w-12 text-center outline-none bg-gray-50 p-1.5 rounded-lg text-[15px] font-medium text-black" /><span class="ml-2 text-[13px] text-gray-500">回合</span></div>
+                 <div class="flex items-center"><input type="number" id="set-context-limit" value="${char.contextLimit || 30}" class="w-12 text-center outline-none bg-gray-50 p-1.5 rounded-lg text-[15px] font-medium text-black" /><span class="ml-2 text-[13px] text-gray-500">回合</span></div>
                </div>
             </div>
 
@@ -2512,7 +2521,7 @@ export function renderWeChatApp(store) {
               <div class="flex-1 bg-white/90 backdrop-blur-sm rounded-xl flex items-center pr-1 min-h-[38px] shadow-sm border border-gray-100">
                 <input type="text" id="wx-input" onkeydown="if(event.key==='Enter') window.wxActions.sendMessage()" class="mc-input flex-1 h-full py-2 px-3 outline-none text-[15px] bg-transparent" />
                 <div class="flex items-center space-x-1 pl-1 pr-1">
-                  <button class="mc-btn-ai w-8 h-8 flex items-center justify-center text-gray-800 active:scale-90 transition-transform" title="获取AI回复" onclick="window.wxActions.getReply()"><i data-lucide="sparkles" style="width: 22px; height: 22px;"></i></button>
+                  <button class="mc-btn-ai w-8 h-8 flex items-center justify-center text-gray-800 active:scale-90 transition-transform" title="获取回复" onclick="window.wxActions.getReply()"><i data-lucide="sparkles" style="width: 22px; height: 22px;"></i></button>
                   <button class="mc-btn-send w-8 h-8 flex items-center justify-center text-gray-800 active:scale-90 transition-transform" title="发送" onclick="window.wxActions.sendMessage()"><i data-lucide="send" style="width: 20px; height: 20px; margin-left: 2px;"></i></button>
                 </div>
               </div>
@@ -2609,13 +2618,13 @@ export function renderWeChatApp(store) {
                     </div>
                     <div>
                        <div class="flex justify-between items-end mb-2 pl-1">
-                         <span class="text-[12px] font-black text-gray-400 uppercase tracking-widest">让 AI 总结过去多少条聊天？</span>
+                         <span class="text-[12px] font-black text-gray-400 uppercase tracking-widest">总结过去多少条聊天？</span>
                          <span class="text-[16px] font-black text-[#07c160] font-mono">${wxState.extractMemoryConfig.msgCount} 条</span>
                        </div>
                        <input type="range" min="2" max="100" value="${wxState.extractMemoryConfig.msgCount}" class="w-full accent-[#07c160] h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer" oninput="window.wxActions.updateExtractConfig('msgCount', this.value)" />
                     </div>
                     <button class="w-full bg-[#07c160] text-white font-bold py-3.5 rounded-[14px] flex items-center justify-center active:scale-95 transition-transform shadow-[0_4px_15px_rgba(7,193,96,0.3)] mt-2" onclick="window.wxActions.startExtractMemory()">
-                      ${wxState.isExtracting ? '<i data-lucide="loader-2" class="animate-spin mr-2 w-5 h-5"></i>大模型飞速阅读中...' : '<i data-lucide="sparkles" class="mr-2 w-5 h-5"></i>开始 AI 一键提炼'}
+                      ${wxState.isExtracting ? '<i data-lucide="loader-2" class="animate-spin mr-2 w-5 h-5"></i>大模型飞速阅读中...' : '<i data-lucide="sparkles" class="mr-2 w-5 h-5"></i>开始一键提炼'}
                     </button>
                  </div>
                ` : `
@@ -2626,7 +2635,7 @@ export function renderWeChatApp(store) {
                     </div>
                     ${wxState.extractMemoryConfig.type === 'fragment' ? `
                       <div class="space-y-2 animate-in fade-in">
-                        <span class="text-[12px] font-black text-blue-400 uppercase tracking-widest block pl-1">AI自动生成的触发词</span>
+                        <span class="text-[12px] font-black text-blue-400 uppercase tracking-widest block pl-1">自动生成的触发词</span>
                         <input id="extract-mem-keywords" value="${wxState.extractMemoryConfig.keywords}" class="w-full bg-blue-50/50 border border-blue-100 rounded-xl p-3 outline-none text-[14px] text-blue-600 font-bold placeholder-blue-300" />
                       </div>
                     ` : ''}
@@ -2882,7 +2891,7 @@ export function renderWeChatApp(store) {
         
         <div class="w-1/4 flex justify-end space-x-3 text-gray-800">
           ${wxState.activeTab === 'moments' ? `
-            <i data-lucide="wand-2" class="cursor-pointer active:scale-90 transition-transform text-[#07c160]" style="width: 24px; height: 24px;" onclick="window.wxActions.triggerAIMoment()" title="让AI发动态"></i>
+            <i data-lucide="wand-2" class="cursor-pointer active:scale-90 transition-transform text-[#07c160]" style="width: 24px; height: 24px;" onclick="window.wxActions.triggerAIMoment()" title="让角色发动态"></i>
             <i data-lucide="camera" class="cursor-pointer active:scale-90 transition-transform" style="width: 24px; height: 24px;" onclick="window.wxActions.openPublishMoment()"></i>
           ` : wxState.activeTab === 'contacts' ? `
             <i data-lucide="layout-list" class="cursor-pointer active:scale-90 transition-transform" style="width: 22px; height: 22px;" onclick="window.wxActions.openGroupManage()"></i>
