@@ -5,9 +5,14 @@ if (!window.homeActions) {
   window.homeActions = {
     updateAvatar: (e) => {
       const file = e.target.files[0]; if(!file) return;
-      const r = new FileReader(); r.onload = (ev) => { store.personas[0].avatar = ev.target.result; window.render(); }; r.readAsDataURL(file); e.target.value = '';
+      // 🌟 使用强力压缩器替换原生的 FileReader
+      window.actions.compressImage(file, (base64) => {
+         store.personas[0].avatar = base64; 
+         window.render(); 
+      });
+      e.target.value = '';
     },
-    updateName: (val) => { store.personas[0].name = val || 'Eve'; window.render(); },
+    updateName: (val) => { store.personas[0].name = val; window.render(); },
     
     // 🌟 音频控制：因为已经在 main.js 解锁过了，这里必定成功！
     playMusic: () => {
@@ -91,7 +96,7 @@ export function renderHomeApp(store) {
              <div class="flex justify-between items-center px-1 mb-3">
                <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">日</span><span class="text-[14px] font-bold opacity-70">13</span></div>
                <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">一</span><span class="text-[14px] font-bold opacity-70">14</span></div>
-               <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">二</span><div class="${isDark ? 'bg-white text-black' : 'bg-white/30 text-gray-900 border-white/20'} border rounded-full w-7 h-7 flex items-center justify-center text-[14px] font-bold shadow-sm">15</div></div>
+               <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">二</span><div class="${isDark ? 'bg-white/30 text-white border-black/20' : 'bg-white/30 text-gray-900 border-white/20'} border rounded-full w-7 h-7 flex items-center justify-center text-[14px] font-bold shadow-sm">15</div></div>
                <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">三</span><span class="text-[14px] font-bold opacity-70">16</span></div>
                <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">四</span><span class="text-[14px] font-bold opacity-70">17</span></div>
                <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">五</span><span class="text-[14px] font-bold opacity-70">18</span></div>

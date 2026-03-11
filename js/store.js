@@ -16,7 +16,7 @@ export const store = savedStore ? JSON.parse(savedStore) : {
     apiKey: ''
   },
   apiPresets: [
-    { name: 'GG公益站', baseUrl: 'https://gcli.ggchan.dev/', apiKey: 'gg-gcli-Wweij52Um-yEv9jxKkOz3LN47PMAHXv8zv-NWYDU6SY', model: 'gemini-2.5-pro', temperature: 0.8 },
+    { name: 'GG公益站', baseUrl: 'https://gcli.ggchan.dev/', apiKey: 'gg-gcli-Wweij52Um-yEv9jxKkOz3LN47PMAHXv8zv-NWYDU6SY', model: '', temperature: 0.8 },
   ],
 
   // 👇 新增：CSS 皮肤预设仓库

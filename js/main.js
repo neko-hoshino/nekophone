@@ -23,6 +23,26 @@ window.actions = {
       toastContainer.classList.add('opacity-0');
       setTimeout(() => toastContainer.classList.add('hidden'), 300);
     }, 2500);
+  },
+// 🌟 核心防爆引擎：全局图片极速压缩器 (将 MB 级图片瞬间压缩至 KB 级)
+  compressImage: (file, callback) => {
+     const reader = new FileReader();
+     reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+           const canvas = document.createElement('canvas');
+           let w = img.width, h = img.height;
+           const maxSize = 800; // 限制最大分辨率，足够手机清晰显示
+           if (w > h && w > maxSize) { h *= maxSize / w; w = maxSize; }
+           else if (h > maxSize) { w *= maxSize / h; h = maxSize; }
+           canvas.width = w; canvas.height = h;
+           canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+           // 🌟 强行转换为 WebP 格式，保留透明度且体积缩小 90%
+           callback(canvas.toDataURL('image/webp', 0.6));
+        };
+        img.src = e.target.result;
+     };
+     reader.readAsDataURL(file);
   }
 };
 // ================= 全局消息通知引擎 (原生本地版) =================
@@ -242,10 +262,6 @@ function render() {
   // 🌟 3. 将状态栏永远盖在 App 界面最上方！
   container.innerHTML = statusBarHtml + appHtml;
   
-  if (window.lucide) {
-    window.lucide.createIcons();
-  }
-
   if (window.lucide) {
     window.lucide.createIcons();
   }

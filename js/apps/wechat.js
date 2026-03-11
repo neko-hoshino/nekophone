@@ -339,14 +339,10 @@ window.wxActions = {
     restoreScroll();
   },
   handleContactAvatarUpload: (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      wxState.tempAvatar = e.target.result;
-      window.render();
-    };
-    reader.readAsDataURL(file);
+    const file = event.target.files[0]; if (!file) return;
+    window.actions.compressImage(file, (base64) => {
+      wxState.tempAvatar = base64; window.render();
+    });
     event.target.value = '';
   },
   saveContact: () => {
@@ -797,7 +793,17 @@ window.wxActions = {
   // ================= 🌟 朋友圈核心引擎 (含 AI 交互) =================
   handleMomentBgUpload: (event) => {
     const file = event.target.files[0]; if (!file) return;
-    const r = new FileReader(); r.onload = (e) => { store.momentBg = e.target.result; window.render(); }; r.readAsDataURL(file); event.target.value = '';
+    window.actions.compressImage(file, (base64) => {
+       store.momentBg = base64; window.render(); 
+    });
+    event.target.value = '';
+  },
+  handleMomentImageUpload: (event) => {
+    const file = event.target.files[0]; if (!file) return;
+    window.actions.compressImage(file, (base64) => {
+       wxState.tempMomentImage = base64; window.render(); 
+    });
+    event.target.value = '';
   },
   // 🌟 朋友圈动作升级 (支持虚拟照片)
   openPublishMoment: () => { saveScroll(); wxState.tempMomentImage = null; wxState.tempMomentVirtual = null; wxState.view = 'momentPublish'; window.render(); },
@@ -805,10 +811,6 @@ window.wxActions = {
   setTempMomentVirtual: () => { wxState.tempMomentVirtual = ''; window.render(); },
   clearTempMomentVirtual: () => { wxState.tempMomentVirtual = null; window.render(); },
   clearTempMomentImage: () => { wxState.tempMomentImage = null; window.render(); },
-  handleMomentImageUpload: (event) => {
-    const file = event.target.files[0]; if (!file) return;
-    const r = new FileReader(); r.onload = (e) => { wxState.tempMomentImage = e.target.result; window.render(); }; r.readAsDataURL(file); event.target.value = '';
-  },
   submitMoment: async () => {
     const text = document.getElementById('publish-moment-text').value.trim();
     const virtualInput = document.getElementById('moment-virtual-input');
@@ -915,7 +917,10 @@ window.wxActions = {
   updateMyName: (name) => { store.personas[0].name = name; window.render(); },
   handleMyAvatarUploadMain: (event) => {
     const file = event.target.files[0]; if (!file) return;
-    const r = new FileReader(); r.onload = (e) => { store.personas[0].avatar = e.target.result; window.render(); }; r.readAsDataURL(file); event.target.value = '';
+    window.actions.compressImage(file, (base64) => {
+      store.personas[0].avatar = base64; window.render();
+    });
+    event.target.value = '';
   },
   // 🌟 全局人设弹窗化动作
   editGlobalPrompt: () => { wxState.showGlobalPromptModal = true; window.render(); },
@@ -941,7 +946,10 @@ window.wxActions = {
   openPersonaEdit: (id) => { saveScroll(); wxState.editingPersonaId = id; wxState.tempPersonaAvatar = null; wxState.view = 'personaEdit'; window.render(); },
   handlePersonaAvatarUpload: (event) => {
     const file = event.target.files[0]; if (!file) return;
-    const r = new FileReader(); r.onload = (e) => { wxState.tempPersonaAvatar = e.target.result; window.render(); }; r.readAsDataURL(file); event.target.value = '';
+    window.actions.compressImage(file, (base64) => {
+      wxState.tempPersonaAvatar = base64; window.render();
+    });
+    event.target.value = '';
   },
   savePersona: () => {
     const name = document.getElementById('edit-persona-name').value.trim() || '新身份';
@@ -1047,20 +1055,16 @@ window.wxActions = {
   
   // 🌟 找回丢失的头像和通话形象上传处理函数
   handleSettingImageUpload: (event, targetType) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
+    const file = event.target.files[0]; if (!file) return;
+    window.actions.compressImage(file, (base64) => {
       const char = store.contacts.find(c => c.id === wxState.activeChatId);
-      if (targetType === 'myAvatar') store.personas[0].avatar = e.target.result;
-      if (targetType === 'charAvatar') char.avatar = e.target.result;
-      if (targetType === 'myVideo') store.personas[0].videoAvatar = e.target.result;
-      if (targetType === 'charVideo') char.videoAvatar = e.target.result;
-      window.actions.showToast('图片已加载！');
-      window.render();
-    };
-    reader.readAsDataURL(file);
-    event.target.value = ''; // 清空选择
+      if (targetType === 'myAvatar') store.personas[0].avatar = base64;
+      if (targetType === 'charAvatar') char.avatar = base64;
+      if (targetType === 'myVideo') store.personas[0].videoAvatar = base64;
+      if (targetType === 'charVideo') char.videoAvatar = base64;
+      window.actions.showToast('图片已加载！'); window.render();
+    });
+    event.target.value = '';
   },
 
   clearSettingBg: () => {
@@ -1072,32 +1076,16 @@ window.wxActions = {
       restoreScroll();
     },
     handleSettingBgUpload: (event) => {
-      saveScroll();
-      const file = event.target.files[0]; if (!file) { restoreScroll(); return; }
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const img = new Image();
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let w = img.width, h = img.height;
-          const maxSize = 1080; 
-          if (w > h && w > maxSize) { h *= maxSize / w; w = maxSize; }
-          else if (h > maxSize) { w *= maxSize / h; h = maxSize; }
-          canvas.width = w; canvas.height = h;
-          canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          
-          const char = store.contacts.find(c => c.id === wxState.activeChatId);
-          char.bgImage = canvas.toDataURL('image/jpeg', 0.7); // 🌟 存到角色个人数据里
-          
-          window.actions.showToast('专属背景图已加载！记得点保存~');
-          window.render();
-          restoreScroll();
-        };
-        img.src = e.target.result;
-      };
-      reader.readAsDataURL(file);
-      event.target.value = '';
-    },
+    saveScroll();
+    const file = event.target.files[0]; if (!file) { restoreScroll(); return; }
+    window.actions.compressImage(file, (base64) => {
+      const char = store.contacts.find(c => c.id === wxState.activeChatId);
+      char.bgImage = base64; 
+      window.actions.showToast('专属背景图已加载！记得点保存~');
+      window.render(); restoreScroll();
+    });
+    event.target.value = '';
+  },
 
   // 🎨 CSS 皮肤预设逻辑
     updateCustomCSS: (val) => {
@@ -1184,17 +1172,14 @@ window.wxActions = {
   closeTransferModal: () => { saveScroll(); wxState.activeTransferId = null; window.render(); restoreScroll(); },
 
   handleImageUpload: (event) => {
-    const file = event.target.files[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (e) => {
+    const file = event.target.files[0]; if (!file) return;
+    window.actions.compressImage(file, (base64) => {
       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
       if (chat) {
-        chat.messages.push({ id: Date.now(), sender: store.personas[0].name, text: '发送了一张真实照片', imageUrl: e.target.result, isMe: true, source: 'wechat', isOffline: false, msgType: 'real_image', time: getNowTime() });
+        chat.messages.push({ id: Date.now(), sender: store.personas[0].name, text: '发送了一张真实照片', imageUrl: base64, isMe: true, source: 'wechat', isOffline: false, msgType: 'real_image', time: getNowTime() });
         wxState.showPlusMenu = false; window.render(); window.wxActions.scrollToBottom();
       }
-    };
-    reader.readAsDataURL(file);
+    });
     event.target.value = '';
   },
 
