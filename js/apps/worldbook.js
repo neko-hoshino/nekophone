@@ -132,7 +132,7 @@ export function renderWorldbookApp(store) {
            `).join('')}
         </div>
 
-        <div class="flex-1 overflow-y-auto hide-scrollbar p-3 space-y-3 pb-24">
+        <div id="wb-scroll" class="flex-1 overflow-y-auto hide-scrollbar p-3 space-y-3 pb-24">
            ${currentList.map(item => `
               <div class="bg-white rounded-[16px] p-4 flex justify-between items-center shadow-sm border border-gray-100 cursor-pointer active:scale-[0.98] transition-transform" onclick="window.wbActions.openEdit(${item.id})">
                  <div class="flex flex-col flex-1 overflow-hidden mr-3">

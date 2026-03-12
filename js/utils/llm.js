@@ -11,9 +11,14 @@ export async function callLLM(charId, history, isOffline = false) {
   const timeString = now.toLocaleString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   const wb = char.worldbook ? `\n【附加设定补充】\n${char.worldbook}` : '';
-  const emo = char.emojis ? `\n【常用表情包库】\n请在回复中自然地使用以下表情：\n${char.emojis}` : '';
-  // 🌟 只有当表情包库存在时，才告诉它有这个超能力，防止它瞎编！
-  const emojiRule = char.emojis ? `\n   - 发表情包：[表情包] 名字（❗只能使用上方词典内包含的名字！）` : '';
+  let emo = '';
+  let emojiRule = '';
+  if (char.emojis === 'disabled') {
+     emo = '\n【系统最高指令】：你被明确禁止使用任何表情包！绝对不可输出任何带 [表情包] 字样的指令。';
+  } else if (char.emojis) {
+     emo = `\n【你拥有的表情包词典】\n允许使用的表情名字：${char.emojis}\n❗注意：只能且必须使用上方词典内包含的名字，绝对禁止瞎编！`;
+     emojiRule = `\n   - 发表情包：[表情包] 名字`;
+  }
 
   const systemRules = `
 【最高指令：完全拟人化聊天协议】
@@ -22,21 +27,23 @@ export async function callLLM(charId, history, isOffline = false) {
 【当前系统实时时间】：${timeString}。
 ❗时间感知与输出红线：
    - 必须根据当前系统时间调整状态。
-   - 聊天记录里的时间标签仅供判断，回复时【绝对禁止】自己输出时间标签！
+   - 聊天记录每一句话前面都附带了类似 [22:20] 的时间戳，这是给你判断时间流逝用的。
+   - ❗警告：你回复时【绝对禁止】模仿和输出时间戳、[系统提示]、[好友申请] 等任何系统标签！只准输出你要说的话的正文！
 
-1. 视觉与节奏铁律：单句严禁超过24字，长句用换行符(\\n)拆分连发！句末禁句号。
-2. 场景隔离：[线上聊天]严禁使用星号或括号写动作！[线下剧情]采用小说体裁。只有在音视频通话中，才能用星号*包裹动作。
+1. [线上聊天]：单句严禁超过24字，长句必须用换行符(\\n)拆分连发！句末禁句号。严禁使用星号或括号写动作！
+2. [线下剧情]采用小说体裁，自然分段。
+3. 只有在音视频通话中，才能用星号*包裹动作。
    
 3. 你的特殊交互超能力（❗必须独占一行触发）：
    - 发语音：[语音]: 你要说的话
    - 发照片：[虚拟照片]: 照片画面描述
    ${emojiRule}
-   - 转账：[发起转账]
+   - 转账：当你想要给用户转账时，必须使用指令 [发起转账] 金额：xx，备注：必须写明转账原因 (注意：备注为硬性要求，绝不可省略！)
    - 收款：[点击收款]
    - 换头像：[更换头像]: 最新图片。❗必须用户明确要求才能换，且必须附带文字回复！
    - 修改备注：[修改备注]: 新称呼。❗必须附带文字回复！
    - 撤回消息：[撤回上一条消息] (❗当你发觉说错话时使用)
-   - 发朋友圈：[发朋友圈: 你的动态内容] 
+   - 发朋友圈：当你在对话中情绪波动较大时，可以在回复的最末尾另起一行，加上指令 [发朋友圈: 你的动态内容]，系统会自动为你发布。
    - 戳一戳用户：[戳一戳] （❗当你想要引起我的注意、撒娇或调戏时单独使用这行）
 `;
 
@@ -71,6 +78,7 @@ export async function callLLM(charId, history, isOffline = false) {
       if (kws.length > 0 && kws.some(k => recentText.includes(k))) shouldInject = true;
     } else if (wbItem.type === 'local') {
       if (char.mountedWorldbooks && char.mountedWorldbooks.includes(wbItem.id)) shouldInject = true;
+      if (isOffline && char.offlineWorldbooks && char.offlineWorldbooks.includes(wbItem.id)) shouldInject = true;
     }
 
     if (shouldInject) {
@@ -103,15 +111,13 @@ export async function callLLM(charId, history, isOffline = false) {
     }
   });
 
-  const coreMemStr = coreMemories.length > 0 ? `\n【核心记忆/思想钢印】\n（这是你永远不可磨灭的底调）：\n${coreMemories.map(m => `* ${m}`).join('\n')}` : '';
+  const coreMemStr = coreMemories.length > 0 ? `\n【核心记忆】\n（这是永远不可磨灭的记忆）：\n${coreMemories.map(m => `* ${m}`).join('\n')}` : '';
   const fragMemStr = triggeredFragments.length > 0 ? `\n\n【触发的回忆片段】\n（系统提示：受到当前聊天内容的触发，你的脑海中浮现出了以下回忆，请结合语境自然地运用它们）：\n${triggeredFragments.map(m => `* ${m}`).join('\n')}` : '';
-
-
   // ================= 🌟 第四步：组装超级“汉堡包”系统提示词 =================
   const globalP = store.globalPrompt ? `\n【通用用户人设】\n${store.globalPrompt}` : '';
   const userPrompt = userPersona.prompt ? `\n【当前用户身份设定】\n${userPersona.prompt}` : '';
 
-  // 完美融合理论：角色卡 -> 核心记忆 -> 临时设定 -> 规则 -> 触发的碎片记忆
+  // 完美融合理论：角色卡 -> 核心记忆 -> 临时设定 -> 规则 -> 触发的碎片记忆 -> 最新朋友圈
   const systemPrompt = `【角色卡】
 名字：${char.name}
 设定：${char.prompt}${coreMemStr}${wb}${emo}${globalP}
@@ -124,7 +130,10 @@ ${systemRules}${frontStr}${middleStr}${fragMemStr}`;
 
   // ================= 🌟 第五步：推入纯净版聊天记录 =================
   // 告诉 AI 当前所处的绝对场景，防止它搞混
-  const modeStr = isOffline ? "\n【系统最高指令：当前为线下剧情模式！请用小说体裁描写动作和对话，绝不输出时间标签。】" : "\n【系统最高指令：当前为线上微信聊天！纯文本对话，绝不可使用星号或括号写动作！绝不输出时间标签和前缀！】";
+  // 🌟 核心升级：线下模式采用严格的“对话、想法、动作”三分法排版！
+  const modeStr = isOffline 
+    ? "\n【系统最高指令：当前为线下剧情模式！请采用轻小说体裁描写。❗绝对红线格式：人物对话必须用双引号“”包裹；人物内心想法必须用全角括号（）包裹；旁白与动作描写直接输出正文，不要用任何符号包裹！绝不可输出时间标签！】" 
+    : "\n【系统最高指令：当前为线上微信聊天！纯文本对话，绝不可使用星号或括号写动作！绝不输出时间标签和前缀！】";
   messages[0].content += modeStr;
 
   recentHistory.forEach(m => {
@@ -134,8 +143,12 @@ ${systemRules}${frontStr}${middleStr}${fragMemStr}`;
     } else if (m.msgType === 'real_image' && m.imageUrl) {
       msgContent = [{ type: "text", text: m.text }, { type: "image_url", image_url: { url: m.imageUrl } }];
     } else {
-      // 🌟 核心净化：只传纯文字！不要再加 [22:20] [线上聊天] 这种前缀了！
-      msgContent = m.text; 
+      // 🌟 恢复时间感知：把时间戳隐蔽地塞在每句话前面
+      msgContent = `[${m.time || '刚刚'}] ${m.text}`;
+      // 🌟 拦截感知：如果带有拦截标记，立刻贴上拒收红牌！
+      if (m.isIntercepted) {
+          msgContent += `\n[系统提示：该消息发送失败，已被用户拒收（显示红色感叹号）！]`;
+      }
     }
     messages.push({ role: m.isMe ? 'user' : 'assistant', content: msgContent });
   });

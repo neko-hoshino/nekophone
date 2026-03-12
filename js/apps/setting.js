@@ -71,6 +71,11 @@ window.settingsActions = {
     const validCharIds = store.contacts.map(c => c.id);
     store.chats = store.chats.filter(c => validCharIds.includes(c.charId));
     store.memories = (store.memories || []).filter(m => validCharIds.includes(m.charId));
+    const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+    const oldMomentsCount = (store.moments || []).length;
+    store.moments = (store.moments || []).filter(m => m.id >= threeDaysAgo);
+    const deletedCount = oldMomentsCount - store.moments.length;
+    if (deletedCount > 0) console.log(`[系统] 已物理销毁 ${deletedCount} 条过期朋友圈数据`);
     // 2. 将历史积压的庞大 Base64 原图全部重度压缩
     const compressPromises = [];
     const compressIfNeed = (obj, key) => {

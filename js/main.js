@@ -110,13 +110,28 @@ function updateTime() {
   const timeEl = document.getElementById('status-time');
   if (timeEl) timeEl.innerText = store.currentTime;
 }
-
+if (!window.globalScrollStates) window.globalScrollStates = {};
 function render() {
-  // 🌟 1. 渲染前第一步：全局动态捕获所有以 "-scroll" 结尾的容器状态！(同时捕获上下和左右滑动)
-  const scrollStates = {};
+  // 记录滚动条（存入全局）
   document.querySelectorAll('[id$="-scroll"]').forEach(el => {
-      scrollStates[el.id] = { top: el.scrollTop, left: el.scrollLeft };
+      window.globalScrollStates[el.id] = { top: el.scrollTop, left: el.scrollLeft };
   });
+  
+  // 记录所有带有 ID 的输入框的未保存内容和焦点状态（存入局部，防弹窗刷新清空）
+  const tempInputs = {};
+  document.querySelectorAll('input[id], textarea[id], select[id]').forEach(el => {
+      if (el.type === 'file') return; // 跳过文件上传框
+      if (el.type === 'checkbox') tempInputs[el.id] = el.checked;
+      else tempInputs[el.id] = el.value;
+  });
+  
+  // 记录键盘焦点和光标选区（防输入法掉落）
+  const activeEl = document.activeElement;
+  const focusId = activeEl && activeEl.id ? activeEl.id : null;
+  let selStart = 0, selEnd = 0;
+  if (focusId && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
+      try { selStart = activeEl.selectionStart; selEnd = activeEl.selectionEnd; } catch(e){}
+  }
   // ================= 🌟 全局外观与图库引擎 =================
   const ap = store.appearance || {};
   let fontCss = '';
@@ -276,13 +291,30 @@ function render() {
   if (store.currentApp === 'settings' && window.settingsActions?.updateStorageDisplay) {
       window.settingsActions.updateStorageDisplay();
   }
-  // 🌟 4. 渲染结束后：光速全自动恢复所有滚动条位置！
+  // 4.1 同步恢复输入内容和焦点，坚决不让手机键盘掉下去！
+  Object.keys(tempInputs).forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+          if (el.type === 'checkbox') el.checked = tempInputs[id];
+          else el.value = tempInputs[id];
+      }
+  });
+  if (focusId) {
+      const el = document.getElementById(focusId);
+      if (el) {
+          el.focus(); // 强制唤回输入法
+          if ((el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') && selStart !== undefined) {
+              try { el.setSelectionRange(selStart, selEnd); } catch(e){}
+          }
+      }
+  }
+  // 4.2 异步恢复所有页面的滚动条
   requestAnimationFrame(() => {
-     Object.keys(scrollStates).forEach(id => {
+     Object.keys(window.globalScrollStates).forEach(id => {
          const el = document.getElementById(id);
          if (el) {
-             el.scrollTop = scrollStates[id].top;
-             el.scrollLeft = scrollStates[id].left;
+             el.scrollTop = window.globalScrollStates[id].top;
+             el.scrollLeft = window.globalScrollStates[id].left;
          }
      });
   });
@@ -317,23 +349,68 @@ window.onload = async () => {
 
   render(); 
 };
-// ================= 🌟 终极黑魔法：无声音频后台保活引擎 =================
+// ================= 🌟 终极黑魔法：进阶有声/无声音频后台保活引擎 =================
+// 我们内置了 3 首歌：1首纯静音（用于防打扰），2首极其安静的无版权轻音乐（用于骗过苹果保活检测）
+const audioPlaylist = [
+  { name: "无声潜行.mp3 (纯静音)", src: "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA" },
+  { name: "Lo-Fi 助眠 (安静保活)", src: "https://assets.mixkit.co/music/preview/mixkit-sleepy-cat-135.mp3" },
+  { name: "夜间钢琴曲 (平稳保活)", src: "https://assets.mixkit.co/music/preview/mixkit-beautiful-dream-493.mp3" }
+];
+
+window.audioState = { currentIndex: 0, loopMode: 'list', isPlaying: false };
 const keepAliveAudio = new Audio();
 window.keepAliveAudio = keepAliveAudio; 
-// 🌟 必须用本地 Base64！防止苹果因为网络延迟而掐断权限！
-keepAliveAudio.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
-keepAliveAudio.loop = true;
 keepAliveAudio.setAttribute('playsinline', 'true'); 
 keepAliveAudio.setAttribute('webkit-playsinline', 'true');
+keepAliveAudio.src = audioPlaylist[0].src;
 
-// 🌟 核心破壁动作：在你第一次触摸屏幕的瞬间，偷偷解锁音频系统并立马暂停！
+// 🌟 全新媒体控制中心
+window.audioPlayer = {
+  play: () => keepAliveAudio.play(),
+  pause: () => keepAliveAudio.pause(),
+  next: () => {
+     window.audioState.currentIndex = (window.audioState.currentIndex + 1) % audioPlaylist.length;
+     window.audioPlayer.loadAndPlay();
+  },
+  prev: () => {
+     window.audioState.currentIndex = (window.audioState.currentIndex - 1 + audioPlaylist.length) % audioPlaylist.length;
+     window.audioPlayer.loadAndPlay();
+  },
+  toggleLoop: () => {
+     window.audioState.loopMode = window.audioState.loopMode === 'list' ? 'single' : 'list';
+     if (window.render) window.render();
+  },
+  loadAndPlay: () => {
+     const track = audioPlaylist[window.audioState.currentIndex];
+     keepAliveAudio.src = track.src;
+     keepAliveAudio.play().catch(()=>{});
+     // 骗取 iOS 锁屏控制中心的显示！
+     if ('mediaSession' in navigator) {
+         navigator.mediaSession.metadata = new MediaMetadata({ title: track.name, artist: 'NekoPhone 后台保活引擎' });
+     }
+     if (window.render) window.render();
+  },
+  getTrackName: () => audioPlaylist[window.audioState.currentIndex].name
+};
+
+// 监听播放状态，实现自动循环与 UI 刷新
+keepAliveAudio.addEventListener('ended', () => {
+   if (window.audioState.loopMode === 'single') {
+       keepAliveAudio.play().catch(()=>{});
+   } else {
+       window.audioPlayer.next();
+   }
+});
+keepAliveAudio.addEventListener('play', () => { window.audioState.isPlaying = true; if(window.render) window.render(); });
+keepAliveAudio.addEventListener('pause', () => { window.audioState.isPlaying = false; if(window.render) window.render(); });
+
+// 核心破壁动作：在你第一次触摸屏幕的瞬间，偷偷解锁音频系统并立马暂停！
 document.addEventListener('touchstart', function unlockAudio() {
     keepAliveAudio.play().then(() => {
-        keepAliveAudio.pause(); // 瞬间暂停，仅为骗取苹果的音频大门钥匙
+        keepAliveAudio.pause(); 
         if ('mediaSession' in navigator) {
-            navigator.mediaSession.metadata = new MediaMetadata({ title: 'nekophone', artist: '后台接收引擎' });
+            navigator.mediaSession.metadata = new MediaMetadata({ title: 'NekoPhone 准备就绪', artist: '后台接收引擎' });
         }
     }).catch(()=>{});
     document.removeEventListener('touchstart', unlockAudio);
 }, { once: true });
-// =======================================================

@@ -14,13 +14,12 @@ if (!window.homeActions) {
     },
     updateName: (val) => { store.personas[0].name = val; window.render(); },
     
-    // 🌟 音频控制：因为已经在 main.js 解锁过了，这里必定成功！
-    playMusic: () => {
-      if (window.keepAliveAudio) {
-        window.keepAliveAudio.play().then(() => window.render()).catch(e => window.actions.showToast('请先在屏幕空白处点一下再播放！'));
-      }
-    },
-    pauseMusic: () => { if (window.keepAliveAudio) { window.keepAliveAudio.pause(); window.render(); } },
+    // 🌟 音频控制引擎
+    playMusic: () => { if(window.audioPlayer) window.audioPlayer.play().catch(e => window.actions.showToast('请先在空白处点一下再播放！')); },
+    pauseMusic: () => { if(window.audioPlayer) window.audioPlayer.pause(); },
+    nextMusic: () => { if(window.audioPlayer) window.audioPlayer.next(); },
+    prevMusic: () => { if(window.audioPlayer) window.audioPlayer.prev(); },
+    toggleLoop: () => { if(window.audioPlayer) window.audioPlayer.toggleLoop(); },
     
     // 🌟 动态小圆点计算引擎
     updateDots: (e) => {
@@ -138,22 +137,37 @@ export function renderHomeApp(store) {
                  <span class="text-[10px] font-bold tracking-widest uppercase">Background Engine</span>
               </div>
               
-              <div class="w-28 h-28 rounded-full border-4 ${isDark?'border-white/10':'border-white/40'} shadow-2xl flex items-center justify-center relative overflow-hidden bg-gray-900 animate-spin ${window.keepAliveAudio?.paused !== false ? '[animation-play-state:paused]' : ''}" style="animation-duration: 4s;">
+              <div class="w-28 h-28 rounded-full border-4 ${isDark?'border-white/10':'border-white/40'} shadow-2xl flex items-center justify-center relative overflow-hidden bg-gray-900 animate-spin ${!(window.audioState?.isPlaying) ? '[animation-play-state:paused]' : ''}" style="animation-duration: 4s;">
                  <img src="icon-192x192.png" class="w-full h-full object-cover opacity-70 scale-110" />
                  <div class="absolute w-6 h-6 bg-white/80 backdrop-blur-md rounded-full border border-gray-300 shadow-inner"></div>
               </div>
               
-              <span class="mt-5 text-[16px] font-bold ${txtMain}">无声音频保活</span>
-              <span class="text-[11px] ${txtSub} mt-1 mb-6">Silent_Audio.mp3</span>
-              
-              <div class="flex items-center space-x-8">
-                 <i data-lucide="skip-back" class="w-5 h-5 opacity-30 ${txtMain}"></i>
-                 ${window.keepAliveAudio?.paused !== false 
-                   ? `<div class="w-14 h-14 rounded-full ${isDark?'bg-white text-black':'bg-gray-800 text-white'} flex items-center justify-center cursor-pointer active:scale-95 shadow-xl transition-transform" onclick="window.homeActions.playMusic()"><i data-lucide="play" class="w-6 h-6 ml-1"></i></div>`
-                   : `<div class="w-14 h-14 rounded-full ${isDark?'bg-white text-black':'bg-gray-800 text-white'} flex items-center justify-center cursor-pointer active:scale-95 shadow-xl transition-transform" onclick="window.homeActions.pauseMusic()"><i data-lucide="pause" class="w-6 h-6"></i></div>`
-                 }
-                 <i data-lucide="skip-forward" class="w-5 h-5 opacity-30 ${txtMain}"></i>
-              </div>
+              ${(() => {
+                 // 动态获取当前引擎状态
+                 const trackName = window.audioPlayer ? window.audioPlayer.getTrackName() : "载入中...";
+                 const isPlaying = window.audioState ? window.audioState.isPlaying : false;
+                 const loopMode = window.audioState ? window.audioState.loopMode : 'list';
+                 const loopIcon = loopMode === 'list' ? 'repeat' : 'repeat-1';
+                 
+                 return `
+                    <span class="mt-5 text-[16px] font-bold ${txtMain}">后台保活引擎</span>
+                    <div class="flex items-center space-x-2 mt-1 mb-5">
+                       <span class="text-[11px] ${txtSub} truncate max-w-[130px]">${trackName}</span>
+                       <div class="cursor-pointer active:scale-90 p-1" onclick="window.homeActions.toggleLoop()" title="切换循环模式">
+                           <i data-lucide="${loopIcon}" class="w-3.5 h-3.5 opacity-70 hover:opacity-100 transition-opacity ${txtMain}"></i>
+                       </div>
+                    </div>
+                    
+                    <div class="flex items-center space-x-8">
+                       <i data-lucide="skip-back" class="w-6 h-6 cursor-pointer active:scale-90 transition-transform ${txtMain} opacity-80 hover:opacity-100" onclick="window.homeActions.prevMusic()"></i>
+                       ${!isPlaying 
+                         ? `<div class="w-14 h-14 rounded-full ${isDark?'bg-white text-black':'bg-gray-800 text-white'} flex items-center justify-center cursor-pointer active:scale-95 shadow-xl transition-transform" onclick="window.homeActions.playMusic()"><i data-lucide="play" class="w-6 h-6 ml-1"></i></div>`
+                         : `<div class="w-14 h-14 rounded-full ${isDark?'bg-white text-black':'bg-gray-800 text-white'} flex items-center justify-center cursor-pointer active:scale-95 shadow-xl transition-transform" onclick="window.homeActions.pauseMusic()"><i data-lucide="pause" class="w-6 h-6"></i></div>`
+                       }
+                       <i data-lucide="skip-forward" class="w-6 h-6 cursor-pointer active:scale-90 transition-transform ${txtMain} opacity-80 hover:opacity-100" onclick="window.homeActions.nextMusic()"></i>
+                    </div>
+                 `;
+              })()}
            </div>
         </div>
 
