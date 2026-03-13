@@ -3,7 +3,7 @@ import { store } from '../store.js';
 
 const getNowTime = () => new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 
-// ================= 🌟 1. Minimax 语音请求引擎 (纯净稳定版) =================
+// =================  1. Minimax 语音请求引擎 (纯净稳定版) =================
 async function fetchMinimaxVoice(text, voiceId) {
   const config = store.minimaxConfig || {};
   if (config.enabled === false) return null;
@@ -18,7 +18,7 @@ async function fetchMinimaxVoice(text, voiceId) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
       body: JSON.stringify({
-        model: "speech-01-turbo", // 🌟 焊死正确的模型
+        model: "speech-01-turbo", 
         text: cleanText, 
         stream: false,
         voice_setting: { voice_id: voiceId, speed: 1, vol: 1, pitch: 0 }
@@ -35,7 +35,6 @@ async function fetchMinimaxVoice(text, voiceId) {
     
     if (data.data && data.data.audio) {
       const hexStr = data.data.audio;
-      // 🌟 核心认错：换回你之前证实 100% 好用的 match 解析法！！绝不再用 for 循环！
       const bytes = new Uint8Array(hexStr.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
       const blob = new Blob([bytes], { type: 'audio/mp3' });
       return URL.createObjectURL(blob);
@@ -46,13 +45,12 @@ async function fetchMinimaxVoice(text, voiceId) {
   return null;
 }
 
-// ================= 🌟 2. 后台静默自动记忆引擎 =================
+// ================= 2. 后台静默自动记忆引擎 =================
 async function triggerAutoMemory(charId, msgs) {
   if (!store.apiConfig?.apiKey) return;
   try {
     const logText = msgs.map(m => `${m.sender}: ${m.msgType==='text' ? m.text : '[' + m.msgType + ']'}`).join('\n');
     
-    // 🌟 核心调教：赋予 AI 鉴别废话与判定“重要等级”的双重能力
     const promptStr = `【后台任务】请判断以下近期的对话记录中，是否包含剧情进展、情感转折或新设定。
 如果只是毫无营养的日常闲聊（如早安、吃了吗等），请务必只输出“无”这一个字。
 如果有重要内容，请客观简练地总结为一个记忆碎片（50字以内）。
@@ -77,7 +75,7 @@ ${logText}`;
        return; 
     }
 
-    // 🌟 智能解析 AI 打上的重要性标签
+    // 智能解析 AI 打上的重要性标签
     let memType = 'fragment';
     let summary = rawSummary;
     if (summary.includes('核心')) { memType = 'core'; summary = summary.replace(/【?\[?核心\]?】?/g, '').trim(); }
@@ -113,43 +111,35 @@ const wxState = {
   callStartTime: null,
   pendingCallMsg: '',
   ringtone: new Audio('https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3'),
-  savedScroll: 0, // 🌟 修复 Bug：用来记忆滚动条高度
-  // 👇 新增：长按菜单引擎变量
+  savedScroll: 0, 
   activeMenuMsgId: null, 
   longPressTimer: null, 
-  quoteMsgId: null, // 🌟 新增：用来记住你正在引用哪条消息
-  isMultiSelecting: false, // 🌟 新增：是否处于多选模式
-  selectedMsgIds: [],  // 🌟 新增：记录被选中的消息 ID 数组
-  // 👇 新增：通讯录状态引擎
+  quoteMsgId: null, // 用来记住你正在引用哪条消息
+  isMultiSelecting: false, // 是否处于多选模式
+  selectedMsgIds: [],  // 记录被选中的消息 ID 数组
   expandedGroups: {}, // 记录哪些分组是展开的
   editingContactId: null, // 当前正在编辑的角色ID
   tempAvatar: null, // 临时存储上传的头像
-  // 👇 新增：“我”页面状态引擎
   editingPersonaId: null,
   editingEmojiLibId: null,
   favManageMode: false,
   selectedFavIds: [],
-  tempPersonaAvatar: null, // 🌟 新增：用来存正在编辑的身份头像
-  showEmojiMenu: false, // 🌟 新增：表情面板开关
-  activeEmojiTab: 0, // 🌟 新增：表情面板当前停留的 Tab 页
-  showEmojiMountModal: false, // 🌟 新增：聊天设置里的挂载弹窗开关
+  tempPersonaAvatar: null, // 用来存正在编辑的身份头像
+  showEmojiMenu: false, // 表情面板开关
+  activeEmojiTab: 0, // 表情面板当前停留的 Tab 页
+  showEmojiMountModal: false, // 聊天设置里的挂载弹窗开关
   showWbMountModal: false,  // 控制世界书弹窗
   activeWbGroup: '全部',     // 世界书分组筛选状态
-  // 👇 新增：绑定身份弹窗的开关与临时记忆
   showPersonaMountModal: false, 
   tempBoundPersonaId: null,
-  // 👇 新增：朋友圈核心状态
   tempMomentImage: null,
   activeMomentMenuId: null, // 当前点开了哪个动态的菜单
   momentInput: { active: false, momentId: null, replyTo: null }, // 评论输入框状态
-  // 👇 新增：全局人设弹窗与朋友圈虚拟照片状态
   showGlobalPromptModal: false,
   tempMomentVirtual: null,
-  // 👇 新增：多选转发状态引擎
   showForwardModal: false,
   forwardType: 'single', // 'single' 逐条, 'merge' 合并
   forwardMsgIds: [],      // 记录要转发的消息ID
-  // 👇 新增：记忆提取引擎状态
   showExtractMemoryModal: false,
   extractMemoryStep: 1, // 1=选择轮数和类型，2=编辑保存结果
   extractMemoryConfig: { msgCount: 20, type: 'fragment', keywords: '' },
@@ -158,11 +148,11 @@ const wxState = {
 };
 wxState.ringtone.loop = true;
 
-// 🌟 废弃旧版手动存储，动作已全部转交 main.js 全局智能雷达！
+// 废弃旧版手动存储，动作已全部转交 main.js 全局智能雷达！
 const saveScroll = () => {};
 const restoreScroll = () => {};
 window.wxActions = {
-  // 🌟 新增：全平台兼容的“300毫秒连击”戳一戳判定器
+// 全平台兼容的“300毫秒连击”戳一戳判定器
   lastAvatarClickTime: 0,
   handleAvatarClick: (charId) => {
     const now = Date.now();
@@ -174,7 +164,6 @@ window.wxActions = {
     }
   },
   clearChatHistory: () => {
-      // 🌟 明确提示只清空当前记录
       if(!confirm('⚠️ 确定要清空当前窗口的聊天记录吗？此操作不会删除角色或其记忆设定。')) return;
       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
       if(chat) chat.messages = [];
@@ -225,7 +214,7 @@ window.wxActions = {
   togglePlusMenu: () => { 
     saveScroll(); 
     wxState.showPlusMenu = !wxState.showPlusMenu; 
-    wxState.showEmojiMenu = false; // 🌟 与表情面板互斥
+    wxState.showEmojiMenu = false; 
     window.render(); 
     restoreScroll(); 
   },
@@ -269,7 +258,6 @@ window.wxActions = {
     restoreScroll();
   },
   continueOffline: () => {
-      // 🌟 核心修复：强行点亮“正在构思...”指示灯并刷新画面
       wxState.isTyping = true;
       window.render();
       window.wxActions.getReply(true, null, '(系统指令：请顺着上面的剧情继续往下写，不要重复，自然地推动情节发展。)');
@@ -304,15 +292,15 @@ window.wxActions = {
     window.render();
     restoreScroll();
   },
-  // 🌟 新增：表情面板开关
+  // 表情面板开关
   toggleEmojiMenu: () => {
     saveScroll();
     wxState.showEmojiMenu = !wxState.showEmojiMenu;
-    wxState.showPlusMenu = false; // 🌟 与+号面板互斥
+    wxState.showPlusMenu = false; // 与+号面板互斥
     window.render();
     restoreScroll();
   },
-  // 🌟 修复：去掉自动获取回复的逻辑，让它像文字一样可以暂存
+  // 去掉自动获取回复的逻辑，让它像文字一样可以暂存
   sendEmoji: (url, name = '表情') => {
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     if (chat) {
@@ -320,7 +308,7 @@ window.wxActions = {
       wxState.showEmojiMenu = false; window.render(); window.wxActions.scrollToBottom();
     }
   },
-  // 🌟 新增：表情 Tab 切换与挂载库管理
+  // 表情 Tab 切换与挂载库管理
   switchEmojiTab: (idx) => { wxState.activeEmojiTab = idx; window.render(); },
   toggleEmojiMountModal: () => {
       saveScroll();
@@ -368,7 +356,7 @@ window.wxActions = {
       const char = store.contacts.find(c => c.id === wxState.activeChatId);
       if (!char.mountedWorldbooks) char.mountedWorldbooks = [];
       
-      // 🌟 核心修复：强行把字符串转回数字，防止类型不匹配！
+      // 把字符串转回数字，防止类型不匹配
       const numId = Number(wbId) || wbId; 
       
       if (char.mountedWorldbooks.includes(numId)) {
@@ -380,7 +368,7 @@ window.wxActions = {
       restoreScroll();
     },
     
-    // 🌟 禁止使用表情包切换动作
+    // 禁止使用表情包切换动作
     toggleDisableEmoji: () => {
       saveScroll();
       const char = store.contacts.find(c => c.id === wxState.activeChatId);
@@ -388,7 +376,7 @@ window.wxActions = {
       window.render();
       restoreScroll();
     },
-  // 🌟 通讯录核心引擎
+  // 通讯录核心引擎
   toggleGroup: (groupId) => {
     wxState.expandedGroups[groupId] = wxState.expandedGroups[groupId] === false ? true : false;
     window.render();
@@ -397,7 +385,7 @@ window.wxActions = {
     saveScroll();
     wxState.editingContactId = charId;
     wxState.tempAvatar = null;
-    wxState.tempBoundPersonaId = null; // 🌟 打开编辑时，清空临时身份记忆
+    wxState.tempBoundPersonaId = null; // 打开编辑时，清空临时身份记忆
     wxState.view = 'contactEdit';
     window.render();
   },
@@ -425,7 +413,6 @@ window.wxActions = {
       greeting: document.getElementById('edit-char-greeting').value.trim(),
       minimaxVoiceEnabled: document.getElementById('edit-char-voice-enabled').checked,
       minimaxVoiceId: document.getElementById('edit-char-voice-id').value.trim(),
-      // 🌟 修复：优先读取临时选中的马甲，没有的话读取旧马甲，再没有就读默认马甲
       boundPersonaId: wxState.tempBoundPersonaId || (wxState.editingContactId ? store.contacts.find(c => c.id === wxState.editingContactId)?.boundPersonaId : store.personas[0].id) || store.personas[0].id,
       groupId: document.getElementById('edit-char-group').value
     };
@@ -487,7 +474,7 @@ window.wxActions = {
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     if (!chat || chat.messages.length === 0) return;
     if (targetMsgId) {
-        // 🌟 线下剧情的精准重roll：以你点击的这条消息为界，斩断它和后面的所有时间线！
+        // 线下剧情的精准重roll：以你点击的这条消息为界，斩断它和后面的所有时间线
         const targetIndex = chat.messages.findIndex(m => m.id === targetMsgId);
         if (targetIndex > -1) {
             chat.messages = chat.messages.slice(0, targetIndex);
@@ -505,7 +492,7 @@ window.wxActions = {
     restoreScroll();
     window.wxActions.getReply(); // 召唤大模型重新续写时间线
   },
-  // 🌟 新增：发起新对话相关的动作
+  // 发起新对话相关的动作
   toggleNewChatModal: () => { 
     wxState.showNewChatModal = !wxState.showNewChatModal; 
     window.render(); 
@@ -524,9 +511,9 @@ window.wxActions = {
       }
     }
     wxState.showNewChatModal = false;
-    window.wxActions.openChat(charId); // 立刻进入聊天室！
+    window.wxActions.openChat(charId); 
   },
-  // 🌟 全新：长按菜单核心引擎 (带防滑误触机制)
+  // 按菜单核心引擎 (带防滑误触机制)
   handleTouchStart: (msgId) => {
     wxState.longPressTimer = setTimeout(() => {
       saveScroll(); 
@@ -535,7 +522,7 @@ window.wxActions = {
       restoreScroll(); 
     }, 400); // 长按 0.4 秒触发
   },
-  // 🌟 核心修复：只要手指滑动了，立马取消长按判定！
+  // 只要手指滑动了，立马取消长按判定
   handleTouchMove: () => {
     if (wxState.longPressTimer) { clearTimeout(wxState.longPressTimer); wxState.longPressTimer = null; }
   },
@@ -549,7 +536,7 @@ window.wxActions = {
     restoreScroll();
   },
 
-  // 🌟 菜单动作：删除与编辑
+  // 菜单动作：删除与编辑
   deleteMessage: (msgId) => {
     saveScroll();
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
@@ -558,7 +545,7 @@ window.wxActions = {
     window.render();
     restoreScroll();
   },
-  // 🌟 新增：高级居中编辑弹窗
+  // 高级居中编辑弹窗
   openEditMessageModal: (msgId) => {
     saveScroll();
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
@@ -585,7 +572,7 @@ window.wxActions = {
     window.render();
     restoreScroll();
   },
-  // 🌟 新增：引用动作
+  // 引用动作
   quoteMessage: (msgId) => {
     saveScroll();
     wxState.quoteMsgId = msgId;
@@ -599,7 +586,7 @@ window.wxActions = {
     window.render();
     restoreScroll();
   },
-  // 🌟 新增：用户撤回动作
+  // 用户撤回动作
   recallMessage: (msgId) => {
     saveScroll();
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
@@ -614,7 +601,7 @@ window.wxActions = {
     window.render();
     restoreScroll();
   },
-  // 🌟 新增：收藏与多选系统
+  // 收藏与多选系统
   favoriteMessage: (msgId) => {
     saveScroll();
     store.favorites = store.favorites || [];
@@ -666,7 +653,7 @@ window.wxActions = {
   },
   batchAction: (actionName) => {
     if (wxState.selectedMsgIds.length === 0) return window.actions.showToast('请至少选择一项');
-    // 🌟 实装多选收藏功能
+    // 多选收藏
     if (actionName === '收藏') {
       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
       const charName = store.contacts.find(c => c.id === chat.charId)?.name || '未知';
@@ -677,7 +664,7 @@ window.wxActions = {
       });
       window.actions.showToast(`成功收藏 ${wxState.selectedMsgIds.length} 条消息`);
     } 
-    // 🌟 新增：实装逐条与合并转发功能
+    // 逐条与合并转发
     else if (actionName === '逐条转发' || actionName === '合并转发') {
       saveScroll();
       wxState.forwardType = actionName === '逐条转发' ? 'single' : 'merge';
@@ -696,13 +683,13 @@ window.wxActions = {
     window.render(); 
     restoreScroll();
   },
-  // 🌟 专门用于安全关闭转发弹窗的动作
+  // 用于安全关闭转发弹窗的动作
   closeForwardModal: () => {
     wxState.showForwardModal = false;
     wxState.forwardMsgIds = [];
     window.render();
   },
-  // 🌟 新增：执行转发的终极确认函数
+  // 执行转发的终极确认函数
   confirmForward: (targetCharId) => {
     const sourceChat = store.chats.find(c => c.charId === wxState.activeChatId);
     let targetChat = store.chats.find(c => c.charId === targetCharId);
@@ -719,7 +706,7 @@ window.wxActions = {
         targetChat.messages.push(newMsg);
       });
     } else {
-      // 🌟 核心升级：生成微信原生的聊天记录卡片数据
+      // 生成微信原生的聊天记录卡片数据
       const sourceCharName = store.contacts.find(c => c.id === sourceChat.charId)?.name || '对方';
       const title = store.personas[0].name + '与' + sourceCharName + '的聊天记录';
       
@@ -748,7 +735,7 @@ window.wxActions = {
         isMe: true, 
         source: 'wechat', 
         isOffline: false, 
-        msgType: 'history_record', // 🌟 全新的消息类型！
+        msgType: 'history_record', // 全新的消息类型
         historyData: { title, preview: previewLines },
         time: getNowTime()
       });
@@ -757,7 +744,7 @@ window.wxActions = {
     wxState.forwardMsgIds = [];
     window.actions.showToast('已转发');
     window.render();
-    // 🌟 实装多选收藏功能
+    // 多选收藏
     if (actionName === '收藏') {
       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
       const charName = store.contacts.find(c => c.id === chat.charId)?.name || '未知';
@@ -776,7 +763,7 @@ window.wxActions = {
     window.render(); 
     restoreScroll();
   },
-  // ================= 🌟 自动提取记忆引擎 =================
+  // ================= 自动提取记忆引擎 =================
   openExtractMemoryModal: () => {
     saveScroll();
     wxState.showPlusMenu = false;
@@ -806,7 +793,7 @@ window.wxActions = {
       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
       // 过滤掉系统消息，只取真实的对话
       const validMsgs = chat.messages.filter(m => !m.isHidden && !(m.msgType || '').includes('system'));
-      // 🌟 直接精确截取指定条数的消息
+      // 直接精确截取指定条数的消息
       const msgCount = wxState.extractMemoryConfig.msgCount;
       const msgs = validMsgs.slice(-msgCount);
       const logText = msgs.map(m => `${m.sender}: ${m.msgType==='text' ? m.text : '[' + m.msgType + ']'}`).join('\n');
@@ -865,7 +852,7 @@ window.wxActions = {
     restoreScroll();
   },
 
-  // ================= 🌟 朋友圈核心引擎 (含 AI 交互) =================
+  // ================= 朋友圈核心引擎 (含 AI 交互) =================
   handleMomentBgUpload: (event) => {
     const file = event.target.files[0]; if (!file) return;
     window.actions.compressImage(file, (base64) => {
@@ -880,9 +867,9 @@ window.wxActions = {
     });
     event.target.value = '';
   },
-  // 🌟 朋友圈动作升级 (支持虚拟照片)
+  // 朋友圈支持虚拟照片
   openPublishMoment: () => { saveScroll(); wxState.tempMomentImage = null; wxState.tempMomentVirtual = null; wxState.view = 'momentPublish'; window.render(); },
-  // 🌟 新增：安全操作虚拟照片与本地图片的开关
+  // 安全操作虚拟照片与本地图片的开关
   setTempMomentVirtual: () => { wxState.tempMomentVirtual = ''; window.render(); },
   clearTempMomentVirtual: () => { wxState.tempMomentVirtual = null; window.render(); },
   clearTempMomentImage: () => { wxState.tempMomentImage = null; window.render(); },
@@ -909,11 +896,11 @@ window.wxActions = {
     let allowedChars = store.contacts;
     if (pType === 'visible') allowedChars = store.contacts.filter(c => pGroups.includes(c.groupId));
     else if (pType === 'invisible') allowedChars = store.contacts.filter(c => !pGroups.includes(c.groupId));
-    // 🌟 核心升级：导入真正的 LLM 引擎，并触发全员群嗨！
+    // 导入真正的 LLM 引擎
     const { callLLM } = await import('../utils/llm.js');   
     allowedChars.forEach((char, index) => {
        const chat = store.chats.find(c => c.charId === char.id);
-       // 将朋友圈动态作为隐形消息塞入聊天流！
+       // 将朋友圈动态作为隐形消息塞入聊天流
        if (chat) {
            chat.messages.push({
                id: Date.now() + index, 
@@ -926,7 +913,7 @@ window.wxActions = {
        setTimeout(async () => {
            try {
               const chat = store.chats.find(c => c.charId === char.id);
-              // 把他们各自的聊天记录带上，让他们拥有记忆！
+              // 把他们各自的聊天记录带上，让他们拥有记忆
               const tempHistory = [...(chat ? chat.messages.filter(m=>!m.isHidden && !m.isOffline) : [])];
               tempHistory.push({
                   isMe: true, 
@@ -978,7 +965,7 @@ window.wxActions = {
        }
     }
   },
-  // 🤖 让 AI 全员一起发朋友圈！
+  // 让 AI 全员一起发朋友圈
   triggerAIMoment: async () => {
     const chars = store.contacts; 
     if (chars.length === 0) return window.actions.showToast('通讯录还没人哦');
@@ -989,7 +976,7 @@ window.wxActions = {
     store.moments = store.moments || [];
     let successCount = 0;
 
-    // 🌟 错峰并发引擎：大家排队发，防止瞬间并发把 API 接口挤爆报错
+    // 错峰并发引擎：大家排队发，防止瞬间并发把 API 接口挤爆报错
     const promises = chars.map(async (char, index) => {
         await new Promise(resolve => setTimeout(resolve, index * 800)); 
         try {
@@ -1008,7 +995,7 @@ window.wxActions = {
     await Promise.all(promises);
     window.actions.showToast(`全员动态更新完毕！共成功发布 ${successCount} 条`);
   },
-  // 朋友圈交互 (🌟 修复了回弹顶部的 Bug)
+  // 朋友圈交互
   toggleMomentMenu: (id) => { saveScroll(); wxState.activeMomentMenuId = wxState.activeMomentMenuId === id ? null : id; window.render(); restoreScroll(); },
   likeMoment: (id) => {
     saveScroll();
@@ -1025,7 +1012,7 @@ window.wxActions = {
     m.comments.push({ id: Date.now(), senderId: my.id, senderName: my.name, replyTo: wxState.momentInput.replyTo, text: text });
     const replyTarget = wxState.momentInput.replyTo; wxState.momentInput.active = false; window.render(); restoreScroll();
     
-    // 🤖 呼叫 AI 回复逻辑保持不变
+    // 呼叫 AI 回复
     if (m.senderId !== my.id || replyTarget) {
        const charId = replyTarget ? store.contacts.find(c => c.name === replyTarget)?.id : m.senderId;
        const char = store.contacts.find(c => c.id === charId);
@@ -1059,7 +1046,7 @@ window.wxActions = {
     window.actions.showToast('已收藏'); wxState.activeMomentMenuId = null; window.render(); restoreScroll();
   },
 
-  // ================= 🌟 “我”页面核心动作库 =================
+  // ================= “我”页面核心动作库 =================
   updateMyName: (name) => { store.personas[0].name = name; window.render(); },
   handleMyAvatarUploadMain: (event) => {
     const file = event.target.files[0]; if (!file) return;
@@ -1068,7 +1055,7 @@ window.wxActions = {
     });
     event.target.value = '';
   },
-  // 🌟 全局人设弹窗化动作
+  // 全局人设弹窗化动作
   editGlobalPrompt: () => { wxState.showGlobalPromptModal = true; window.render(); },
   closeGlobalPrompt: () => { wxState.showGlobalPromptModal = false; window.render(); },
   saveGlobalPrompt: () => {
@@ -1077,7 +1064,7 @@ window.wxActions = {
     window.actions.showToast('全局人设已保存！'); window.render();
   },
   openView: (v) => { saveScroll(); wxState.view = v; window.render(); },
-  // 📦 收藏夹动作
+  // 收藏夹动作
   toggleFavManage: () => { wxState.favManageMode = !wxState.favManageMode; wxState.selectedFavIds = []; window.render(); },
   toggleSelectFav: (id) => {
     if (wxState.selectedFavIds.includes(id)) wxState.selectedFavIds = wxState.selectedFavIds.filter(i => i !== id);
@@ -1088,7 +1075,7 @@ window.wxActions = {
     wxState.favManageMode = false; wxState.selectedFavIds = []; window.render();
   },
   
-  // 🎭 身份与马甲动作
+  // 身份与马甲动作
   openPersonaEdit: (id) => { saveScroll(); wxState.editingPersonaId = id; wxState.tempPersonaAvatar = null; wxState.view = 'personaEdit'; window.render(); },
   handlePersonaAvatarUpload: (event) => {
     const file = event.target.files[0]; if (!file) return;
@@ -1118,7 +1105,7 @@ window.wxActions = {
     wxState.view = 'personaManage'; window.render();
   },
   
-  // 🤩 表情包库动作
+  // 表情包库动作
   addEmojiLib: () => { store.emojiLibs = store.emojiLibs || []; store.emojiLibs.push({ id: 'el_' + Date.now(), name: '新表情包库', emojis: [] }); window.render(); },
   renameEmojiLib: (id, name) => { const lib = store.emojiLibs.find(l => l.id === id); if (lib) lib.name = name; },
   deleteEmojiLib: (id) => { store.emojiLibs = store.emojiLibs.filter(l => l.id !== id); window.render(); },
@@ -1141,7 +1128,7 @@ window.wxActions = {
         let emojisToAdd = [];
         let libName = file.name.replace('.json', '');
 
-        // 🌟 智能解析：兼容你提供的高级带 description 结构！
+        // 智能解析：兼容你提供的高级带 description 结构
         if (data.version && data.emojis && Array.isArray(data.emojis)) {
            if (data.library && data.library.name) libName = data.library.name;
            emojisToAdd = data.emojis.map(item => ({ url: item.url, name: item.description || item.name || '表情' }));
@@ -1192,14 +1179,10 @@ window.wxActions = {
     window.actions.showToast(`成功导入 ${added} 个表情！`); window.render();
   },
 
-  // ⚙️ 全新：设置页面控制与图片上传逻辑
+  // 设置页面控制与图片上传逻辑
   openSettings: () => { saveScroll(); wxState.view = 'chatSettings'; window.render(); },
   closeSettings: () => { wxState.view = 'chatRoom'; window.render(); restoreScroll(); },
-  
-  // 触发隐藏的图片上传框
   triggerAvatarUpload: (targetId) => { document.getElementById(targetId).click(); },
-  
-  // 🌟 找回丢失的头像和通话形象上传处理函数
   handleSettingImageUpload: (event, targetType) => {
     const file = event.target.files[0]; if (!file) return;
     window.actions.compressImage(file, (base64) => {
@@ -1216,7 +1199,7 @@ window.wxActions = {
   clearSettingBg: () => {
       saveScroll();
       const char = store.contacts.find(c => c.id === wxState.activeChatId);
-      char.bgImage = null; // 🌟 存到角色个人数据里
+      char.bgImage = null; // 存到角色个人数据里
       window.actions.showToast('该角色的专属背景已清除！');
       window.render();
       restoreScroll();
@@ -1246,14 +1229,13 @@ window.wxActions = {
     const char = store.contacts.find(c => c.id === wxState.activeChatId);
     store.personas[0].name = document.getElementById('set-my-name').value.trim() || store.personas[0].name;
     char.name = document.getElementById('set-char-name').value.trim() || char.name;
-    // 🌟 删除了那行导致崩溃的 set-worldbook 代码！
     char.contextLimit = parseInt(document.getElementById('set-context-limit').value) || 25;
     
     char.autoMsgEnabled = document.getElementById('set-auto-msg').checked;
     const intervalVal = parseFloat(document.getElementById('set-auto-interval').value);
     char.autoMsgInterval = isNaN(intervalVal) ? 5 : intervalVal;
     
-    // 🌟 纯净重构：只提取名字，不再拼凑大段提示词，把拼凑工作交给 llm.js！
+    // 只提取名字，不再拼凑大段提示词，把拼凑工作交给 llm.js
     if (char.disableEmoji) {
       char.emojis = "disabled";
     } else {
@@ -1285,7 +1267,7 @@ window.wxActions = {
 
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     if (chat) {
-      // 🌟 核心：如果当前在引用状态，就把引用内容打包进这根消息里
+      //如果当前在引用状态，就把引用内容打包进这根消息里
       let quoteData = null;
       if (wxState.quoteMsgId) {
         const qMsg = chat.messages.find(m => m.id === wxState.quoteMsgId);
@@ -1298,7 +1280,7 @@ window.wxActions = {
       chat.messages.push({
         id: Date.now(), sender: store.personas[0].name, text: text,
         isMe: true, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: 'text', time: getNowTime(),
-        quote: quoteData // 🌟 把打包好的引用数据塞进气泡
+        quote: quoteData // 把打包好的引用数据塞进气泡
       });
       input.value = ''; 
       wxState.quoteMsgId = null; // 发送完立刻清空引用状态
@@ -1791,7 +1773,7 @@ window.wxActions = {
 // --- 渲染 UI ---
 export function renderWeChatApp(store) {
   // 🌟 初始化旧数据的分组字段
-  if (!store.personas || store.personas.length === 0) store.personas = [{ id: 'p_default', name: '你的名字', avatar: '', prompt: '' }];
+  if (!store.personas || store.personas.length === 0) store.personas = [{ id: 'p_default', name: '点击编辑', avatar: '', prompt: '' }];
   if (!store.contacts) store.contacts = [];
   if (!store.chats) store.chats = [];
   if (!store.groups || store.groups.length === 0) store.groups = [{ id: 'default', name: '默认分组' }];

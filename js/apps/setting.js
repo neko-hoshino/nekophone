@@ -25,7 +25,7 @@ window.settingsActions = {
   updateTempDisplay: (val) => {
     document.getElementById('temp-display').innerText = val;
   },
-  // 🌟 终极数据备份引擎
+  // 数据备份引擎
   exportData: () => {
     const dataStr = JSON.stringify(store);
     const blob = new Blob([dataStr], { type: "application/json" });
@@ -36,7 +36,7 @@ window.settingsActions = {
     a.click();
     window.actions.showToast('备份已导出！请妥善保存在手机文件里');
   },
-  // 🌟 核弹级数据清空引擎
+  // 数据清空引擎
   factoryReset: () => {
     if (confirm('⚠️ 严重警告：这将彻底清空您的所有聊天记录、角色、身份、世界书以及设定！\n\n您确定要【恢复出厂设置】吗？')) {
        if (confirm('🚨 【最终确认】此操作绝对不可逆！\n请确保您已经导出了备份！真的要全部删除吗？')) {
@@ -56,14 +56,14 @@ window.settingsActions = {
        }
     }
   },
-  // 🌟 内存探针更新
+  // 内存探针更新
   updateStorageDisplay: () => {
     const dbSize = JSON.stringify(store).length;
     const mb = (dbSize / 1024 / 1024).toFixed(2);
     const el = document.getElementById('storage-size-display');
     if (el) el.innerText = `${mb} MB`;
   },
-  // 🌟 一键瘦身与无用数据清理引擎
+  // 一键瘦身与无用数据清理引擎
   optimizeStorage: async () => {
     window.actions.showToast('正在执行深层瘦身，请勿退出页面...');
     const beforeSize = JSON.stringify(store).length;
@@ -98,7 +98,7 @@ window.settingsActions = {
     window.actions.showToast(`瘦身完成！共为您清理出 ${savedMb} MB 空间！`);
     window.render();
   },
-  // 🌟 修复：恢复数据也必须写入新的 DB 引擎
+  // 恢复数据也必须写入新的 DB 引擎
   importData: (event) => {
     const file = event.target.files[0]; if(!file) return;
     const r = new FileReader();
@@ -212,7 +212,7 @@ window.settingsActions = {
   // 最终应用：保存到全局 Store
   applySettings: () => {
     store.apiConfig = getFormValues();
-    store.minimaxConfig = getMinimaxValues(); // 🌟 保存 Minimax 设置
+    store.minimaxConfig = getMinimaxValues(); 
     window.actions.showToast('设置已生效！');
   }
 };

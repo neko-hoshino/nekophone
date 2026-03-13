@@ -1,13 +1,9 @@
 // js/store.js
-// 🌟 开局先去硬盘里找存档，找不到再用默认设置
-// js/store.js
-// 🌟 开局先去硬盘里找存档，找不到再用默认设置
 const savedStoreStr = localStorage.getItem('neko_store');
 let parsedStore = null;
 try {
   if (savedStoreStr) {
      parsedStore = JSON.parse(savedStoreStr);
-     // 🌟 核心防卡死：每次重启小手机，强制回到桌面！绝不停留在上次爆内存的子页面里！
      parsedStore.currentApp = null;
   }
 } catch (e) {
@@ -21,7 +17,7 @@ export const store = parsedStore || {
   apiConfig: {
     baseUrl: '',
     apiKey: '',
-    model: 'gemini-2.5-flash',
+    model: '',
     temperature: 0.8
   },
   minimaxConfig: {
@@ -30,11 +26,11 @@ export const store = parsedStore || {
   },
   apiPresets: [],
 
-  // 👇 新增：CSS 皮肤预设仓库
+  // CSS 皮肤预设仓库
   cssPresets: [],
-  customCSS: '', // 当前正在使用的 CSS
+  customCSS: '', 
   
-  // 👇 新增：全系统的钱包常数与账单记录
+  // 钱包常数与账单记录
   wallet: {
     balance: 8888.88, // 你的初始零花钱
     transactions: [
@@ -42,9 +38,8 @@ export const store = parsedStore || {
     ]
   },
 
-  // 👇 下面是微信模块需要用到的新数据
   personas: [
-    { id: 'p_default', name: '你的名字', avatar: '', isCurrent: true, prompt: '请在这里输入你的人设' }
+    { id: 'p_default', name: '点击编辑', avatar: '', isCurrent: true, prompt: '请在这里输入你的人设' }
   ],
   contacts: [],
   chats: [],
@@ -83,9 +78,9 @@ export const DB = {
     });
   }
 };
-// ================= 🌟 终极生命线：全系统防断层自愈引擎 =================
+// ================= 全系统防断层自愈引擎 =================
 if (!store.personas || store.personas.length === 0) {
-  store.personas = [{ id: 'p_default', name: '你的名字', avatar: '', prompt: '' }];
+  store.personas = [{ id: 'p_default', name: '点击编辑', avatar: '', prompt: '' }];
 }
 if (!store.contacts) store.contacts = [];
 if (!store.chats) store.chats = [];

@@ -13,7 +13,6 @@ window.actions = {
     render(); 
   },
   showToast: (msg) => {
-    // ... 保持你现有的 Toast 逻辑不变 ...
     const toastContainer = document.getElementById('toast-container');
     const toastMsg = document.getElementById('toast-msg');
     toastMsg.innerText = msg;
@@ -24,7 +23,7 @@ window.actions = {
       setTimeout(() => toastContainer.classList.add('hidden'), 300);
     }, 2500);
   },
-// 🌟 核心防爆引擎升级：同时支持文件和 base64 数据的极速压缩
+// 同时支持文件和 base64 数据的极速压缩
   compressImage: (source, callback) => {
      const processImage = (src) => {
         const img = new Image();
@@ -69,10 +68,8 @@ window.actions.notify = (title, text, avatarUrl) => {
   if (!banner) {
     banner = document.createElement('div');
     banner.id = 'mc-ios-banner';
-    // 🌟 改为 fixed 定位，使其悬浮于屏幕正中央顶端
     banner.className = 'fixed top-6 left-1/2 -translate-x-1/2 w-[90%] max-w-[340px] bg-white/95 backdrop-blur-xl rounded-2xl p-4 shadow-[0_20px_50px_rgba(0,0,0,0.25)] z-[999999] flex items-center transform transition-all duration-500 -translate-y-[200%] cursor-pointer border border-gray-100/50';
     banner.onclick = () => { window.actions.setCurrentApp('wechat'); banner.classList.add('-translate-y-[200%]'); };
-    // 🌟 核心：挂载到最外层的 body 上，绝对不会被 innerHTML 抹杀！
     document.body.appendChild(banner);
   }
   
@@ -132,7 +129,7 @@ function render() {
   if (focusId && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) {
       try { selStart = activeEl.selectionStart; selEnd = activeEl.selectionEnd; } catch(e){}
   }
-  // ================= 🌟 全局外观与图库引擎 =================
+  // ================= 全局外观与图库引擎 =================
   const ap = store.appearance || {};
   let fontCss = '';
   
@@ -147,7 +144,7 @@ function render() {
     fontCss += `:root { --chat-font-size: ${ap.sysFontSize}px !important; }`;
   }
 
-  // 🌟 2. 界面背景图与智能毛玻璃魔法 (降低了模糊度，提高清晰度)
+  // 2. 界面背景图与智能毛玻璃
   if (ap.interfaceBg && store.currentApp !== null) {
     fontCss += `
       /* 强制铺上背景图 */
@@ -183,7 +180,7 @@ function render() {
     `;
   }
 
-  // 🌟 2.5 全局顶栏与底栏背景强制覆盖魔法
+  // 2.5 全局顶栏与底栏背景强制覆盖
   if (ap.topBarBg && store.currentApp !== null) {
     fontCss += `
       /* 精准狙击所有 App 的顶栏 (根据排版特征提取) */
@@ -233,7 +230,7 @@ function render() {
   };
   injectCustomItems(ap.customIcons);
   injectCustomItems(ap.customButtons);
-  // 🌟 终极免疫盾：暴力隐藏所有文件上传输入框 + 修复头像被吞噬的层级问题
+  // 隐藏所有文件上传输入框 + 修复头像被吞噬的层级问题
   fontCss += `
     input[type="file"] { display: none !important; position: absolute !important; width: 0 !important; height: 0 !important; opacity: 0 !important; z-index: -9999 !important; pointer-events: none !important; }
     #wx-input, #publish-moment-text, #moment-comment-input, #edit-msg-textarea, #virtual-input, 
@@ -254,7 +251,7 @@ function render() {
   
   const container = document.getElementById('phone-container');
   
-  // 🌟 1. 先计算出当前页面该显示什么内容
+  // 1. 先计算出当前页面该显示什么内容
   let appHtml = '';
   if (store.currentApp === null) appHtml = renderHomeApp(store);
   else if (store.currentApp === 'settings') appHtml = renderSettingsApp(store);
@@ -269,7 +266,7 @@ function render() {
         <button onclick="window.actions.setCurrentApp(null)" class="mt-6 px-4 py-2 bg-blue-500 text-white font-bold rounded-xl active:scale-95 transition-transform">返回桌面</button>
       </div>`;
 
-  // 🌟 2. 跨 App 全局状态栏渲染引擎 (完美覆盖所有页面)
+  // 2. 跨 App 全局状态栏渲染引擎 (完美覆盖所有页面)
   const isHomeDark = store.currentApp === null && (ap.darkMode || false);
   const txtClass = isHomeDark ? 'text-white drop-shadow-md' : 'text-gray-800 drop-shadow-sm';
   const statusBarHtml = ap.hideStatusBar ? '' : `
@@ -283,7 +280,7 @@ function render() {
     </div>
   `;
 
-  // 🌟 3. 将状态栏永远盖在 App 界面最上方！
+  // 3. 将状态栏永远盖在 App 界面最上方！
   container.innerHTML = statusBarHtml + appHtml;
   
   if (window.lucide) window.lucide.createIcons();
@@ -313,7 +310,6 @@ function render() {
      Object.keys(window.globalScrollStates).forEach(id => {
          const el = document.getElementById(id);
          if (el) {
-             // 🌟 核心：瞬间恢复位置时关闭平滑动画，防止切屏手感变得缓慢粘滞！
              const oldBehavior = el.style.scrollBehavior;
              el.style.scrollBehavior = 'auto';
              el.scrollTop = window.globalScrollStates[id].top;
@@ -322,7 +318,7 @@ function render() {
          }
      });
   });
-  // 🌟 5. 换用海量数据库 IndexedDB 存储！
+  // 5. 换用海量数据库 IndexedDB 存储！
   if (window.DB) {
      window.DB.set(JSON.parse(JSON.stringify(store))).catch(e => console.log('DB存储失败', e));
   }
@@ -333,7 +329,7 @@ window.onload = async () => {
   updateTime();
   setInterval(updateTime, 1000); 
 
-  // 🌟 开机自检：无缝加载新数据库或迁移旧数据
+  // 开机自检：无缝加载新数据库或迁移旧数据
   try {
     const savedDB = await DB.get();
     if (savedDB) {
@@ -346,17 +342,16 @@ window.onload = async () => {
           Object.assign(store, JSON.parse(oldLocal));
           store.currentApp = null;
           await DB.set(store); // 瞬间存入新硬盘
-          localStorage.removeItem('neko_store'); // 销毁旧炸弹！
+          localStorage.removeItem('neko_store');
        }
     }
   } catch(e) { console.log('读取DB失败', e) }
 
   render(); 
 };
-// ================= 🌟 终极黑魔法：本地/网络全兼容保活引擎 =================
+// ================= 本地/网络全兼容保活引擎 =================
 window.updateAudioPlaylist = () => {
     store.customAudio = store.customAudio || [];
-    // 🌟 听你的，彻底删除了系统自带的无声音频，现在这是一个纯粹的私有曲库！
     window.audioPlaylist = [...store.customAudio];
     
     // 如果列表被删空了，或者索引越界，重置为 0
@@ -375,7 +370,6 @@ keepAliveAudio.setAttribute('webkit-playsinline', 'true');
 // 只有当有歌的时候才去设置 src
 if (window.audioPlaylist.length > 0 && !keepAliveAudio.src) keepAliveAudio.src = window.audioPlaylist[0].src;
 
-// 🌟 核心升级：局部手术刀引擎 (完美适配空列表状态)
 window.updateAudioUI = () => {
     const isPlaying = window.audioState.isPlaying;
     const hasTrack = window.audioPlaylist && window.audioPlaylist.length > 0;
@@ -396,7 +390,7 @@ window.updateAudioUI = () => {
     
     const title = document.getElementById('mc-audio-name');
     if (title) title.innerText = trackName;
-    const artist = document.getElementById('mc-audio-artist'); // 🌟 新增的歌手绑定 ID
+    const artist = document.getElementById('mc-audio-artist'); 
     if (artist) artist.innerText = artistName;
 
     const playBtnIcon = document.getElementById('mc-audio-play-icon');

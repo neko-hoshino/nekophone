@@ -13,7 +13,7 @@ if (!store.appearance) {
 
 const apState = { view: 'main' }; 
 
-// 🌟 重新定义：这叫【图标】(全都是主界面的App)
+// 主界面App
 const iconList = [
   { id: 'mc-icon-wechat', name: '桌面 - 微信', icon: 'message-circle' },
   { id: 'mc-icon-forum', name: '桌面 - 论坛', icon: 'messages-square' },
@@ -25,7 +25,7 @@ const iconList = [
   { id: 'mc-icon-settings', name: 'Dock栏 - 设置', icon: 'settings' }
 ];
 
-// 🌟 重新定义：这叫【按钮】(聊天室里的各种功能键 + 扩展菜单全家桶)
+// 聊天室里的各种功能键 + 扩展菜单
 const buttonList = [
   { id: 'mc-btn-back', name: '聊天室 - 左上返回键', icon: 'chevron-left' },
   { id: 'mc-btn-more', name: '聊天室 - 右上菜单键', icon: 'more-horizontal' },
@@ -50,7 +50,7 @@ if (!window.apActions) {
     goBack: () => { apState.view = 'main'; window.render(); },
     goView: (v) => { apState.view = v; window.render(); },
     toggleStatusBar: () => { store.appearance.hideStatusBar = !store.appearance.hideStatusBar; window.render(); },
-    toggleDarkMode: () => { store.appearance.darkMode = !store.appearance.darkMode; window.render(); }, // 🌟 触发深色模式
+    toggleDarkMode: () => { store.appearance.darkMode = !store.appearance.darkMode; window.render(); }, // 深色模式
     updateFont: (key, val) => { store.appearance[key] = val; window.render(); },
     // 静默实时更新字号（绝对不重绘页面，防止拉条回弹）
     updateFontSizeRealtime: (val) => {
@@ -72,7 +72,7 @@ if (!window.apActions) {
     
     handleImageUpload: (key, event) => {
       const file = event.target.files[0]; if (!file) return;
-      // 🌟 接入全局压缩引擎
+      // 接入全局压缩引擎
       window.actions.compressImage(file, (base64) => {
          store.appearance[key] = base64;
          window.actions.showToast('图片已极速加载！'); 

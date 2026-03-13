@@ -13,7 +13,7 @@ if (!window.homeActions) {
     },
     updateName: (val) => { store.personas[0].name = val; window.render(); },
     
-    // 🌟 音频控制基础动作
+    // 音频控制基础动作
     togglePlay: () => {
         if(window.audioPlaylist && window.audioPlaylist.length === 0) return window.homeActions.openAddAudioModal();
         if (window.audioState.isPlaying) window.audioPlayer.pause(); else window.audioPlayer.play();
@@ -22,13 +22,13 @@ if (!window.homeActions) {
     prevMusic: () => { if(window.audioPlayer) window.audioPlayer.prev(); },
     toggleLoop: () => { if(window.audioPlayer) window.audioPlayer.toggleLoop(); },
     
-    // 🌟 弹窗开关控制
+    // 弹窗开关控制
     openAddAudioModal: () => { window.homeState.showAddAudioModal = true; window.render(); },
     closeAddAudioModal: () => { window.homeState.showAddAudioModal = false; window.render(); },
     openPlaylist: () => { window.homeState.showPlaylistModal = true; window.render(); },
     closePlaylist: () => { window.homeState.showPlaylistModal = false; window.render(); },
 
-    // 🌟 加号管理：详细参数导入引擎 (支持 歌名/歌手)
+    // 加号管理：详细参数导入引擎 (支持 歌名/歌手)
     triggerLocalUpload: () => { document.getElementById('upload-bg-audio').click(); window.homeState.showAddAudioModal = false; window.render(); },
     confirmUrlAudio: () => {
         let url = document.getElementById('audio-url-input').value.trim();
@@ -52,7 +52,7 @@ if (!window.homeActions) {
         window.homeState.showAddAudioModal = false; window.render();
     },
 
-    // 🌟 本地上传管理
+    // 本地上传管理
     uploadBgAudio: (e) => {
         const file = e.target.files[0]; if (!file) return;
         if (file.size > 15 * 1024 * 1024) return window.actions.showToast('音频太大啦，请选择 15MB 以内的音乐！'); 
@@ -72,7 +72,7 @@ if (!window.homeActions) {
         reader.readAsDataURL(file); e.target.value = '';
     },
     
-    // 🌟 播放列表管理
+    // 播放列表管理
     playTrackFromList: (idx) => {
         window.audioState.currentIndex = idx;
         window.audioPlayer.loadAndPlay();
@@ -94,7 +94,7 @@ if (!window.homeActions) {
         window.render();
     },
     
-    // 🌟 动态小圆点计算引擎
+    // 动态小圆点计算引擎
     updateDots: (e) => {
       const idx = Math.round(e.target.scrollLeft / e.target.clientWidth);
       const d0 = document.getElementById('home-dot-0');
@@ -192,7 +192,7 @@ export function renderHomeApp(store) {
                    <div class="w-[4.5rem] h-[4.5rem] rounded-full overflow-hidden ${isDark?'bg-black/30 border-black/20':'bg-white/30 border-white/20'} mb-3 cursor-pointer active:scale-95 transition-transform shadow-sm border" onclick="document.getElementById('home-avatar-upload').click()">
                      ${avatarHtml}
                    </div>
-                   <input type="text" value="${my.name}" onchange="window.homeActions.updateName(this.value)" class="font-medium ${txtMain} text-2xl tracking-wide bg-transparent outline-none text-right w-full ${isDark?'placeholder-white/30':'placeholder-gray-800/40'}" placeholder="你的名字" />
+                   <input type="text" value="${my.name}" onchange="window.homeActions.updateName(this.value)" class="font-medium ${txtMain} text-2xl tracking-wide bg-transparent outline-none text-right w-full ${isDark?'placeholder-white/30':'placeholder-gray-800/40'}" placeholder="点击编辑" />
                 </div>
                 <div class="flex flex-col items-end space-y-4 mt-2 w-full shrink-0">
                    <input type="text" value="正在进入..." class="w-[70%] ${inputBg} backdrop-blur-md px-3 py-2.5 text-[11px] font-serif rounded-full outline-none text-right shadow-sm border" onclick="event.stopPropagation()" />
