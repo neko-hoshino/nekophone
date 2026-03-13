@@ -308,13 +308,17 @@ function render() {
           }
       }
   }
-  // 4.2 异步恢复所有页面的滚动条
+  // 4.2 异步恢复所有页面的滚动条 (防冲突顺滑版)
   requestAnimationFrame(() => {
      Object.keys(window.globalScrollStates).forEach(id => {
          const el = document.getElementById(id);
          if (el) {
+             // 🌟 核心：瞬间恢复位置时关闭平滑动画，防止切屏手感变得缓慢粘滞！
+             const oldBehavior = el.style.scrollBehavior;
+             el.style.scrollBehavior = 'auto';
              el.scrollTop = window.globalScrollStates[id].top;
              el.scrollLeft = window.globalScrollStates[id].left;
+             el.style.scrollBehavior = oldBehavior;
          }
      });
   });
@@ -349,68 +353,112 @@ window.onload = async () => {
 
   render(); 
 };
-// ================= 🌟 终极黑魔法：进阶有声/无声音频后台保活引擎 =================
-// 我们内置了 3 首歌：1首纯静音（用于防打扰），2首极其安静的无版权轻音乐（用于骗过苹果保活检测）
-const audioPlaylist = [
-  { name: "无声潜行.mp3 (纯静音)", src: "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA" },
-  { name: "Lo-Fi 助眠 (安静保活)", src: "https://assets.mixkit.co/music/preview/mixkit-sleepy-cat-135.mp3" },
-  { name: "夜间钢琴曲 (平稳保活)", src: "https://assets.mixkit.co/music/preview/mixkit-beautiful-dream-493.mp3" }
-];
+// ================= 🌟 终极黑魔法：本地/网络全兼容保活引擎 =================
+window.updateAudioPlaylist = () => {
+    store.customAudio = store.customAudio || [];
+    // 🌟 听你的，彻底删除了系统自带的无声音频，现在这是一个纯粹的私有曲库！
+    window.audioPlaylist = [...store.customAudio];
+    
+    // 如果列表被删空了，或者索引越界，重置为 0
+    if (window.audioPlaylist.length > 0 && window.audioState.currentIndex >= window.audioPlaylist.length) {
+        window.audioState.currentIndex = 0;
+    }
+};
 
-window.audioState = { currentIndex: 0, loopMode: 'list', isPlaying: false };
-const keepAliveAudio = new Audio();
+window.audioState = window.audioState || { currentIndex: 0, loopMode: 'list', isPlaying: false };
+window.updateAudioPlaylist();
+
+const keepAliveAudio = window.keepAliveAudio || new Audio();
 window.keepAliveAudio = keepAliveAudio; 
 keepAliveAudio.setAttribute('playsinline', 'true'); 
 keepAliveAudio.setAttribute('webkit-playsinline', 'true');
-keepAliveAudio.src = audioPlaylist[0].src;
+// 只有当有歌的时候才去设置 src
+if (window.audioPlaylist.length > 0 && !keepAliveAudio.src) keepAliveAudio.src = window.audioPlaylist[0].src;
 
-// 🌟 全新媒体控制中心
-window.audioPlayer = {
-  play: () => keepAliveAudio.play(),
-  pause: () => keepAliveAudio.pause(),
-  next: () => {
-     window.audioState.currentIndex = (window.audioState.currentIndex + 1) % audioPlaylist.length;
-     window.audioPlayer.loadAndPlay();
-  },
-  prev: () => {
-     window.audioState.currentIndex = (window.audioState.currentIndex - 1 + audioPlaylist.length) % audioPlaylist.length;
-     window.audioPlayer.loadAndPlay();
-  },
-  toggleLoop: () => {
-     window.audioState.loopMode = window.audioState.loopMode === 'list' ? 'single' : 'list';
-     if (window.render) window.render();
-  },
-  loadAndPlay: () => {
-     const track = audioPlaylist[window.audioState.currentIndex];
-     keepAliveAudio.src = track.src;
-     keepAliveAudio.play().catch(()=>{});
-     // 骗取 iOS 锁屏控制中心的显示！
-     if ('mediaSession' in navigator) {
-         navigator.mediaSession.metadata = new MediaMetadata({ title: track.name, artist: 'NekoPhone 后台保活引擎' });
-     }
-     if (window.render) window.render();
-  },
-  getTrackName: () => audioPlaylist[window.audioState.currentIndex].name
+// 🌟 核心升级：局部手术刀引擎 (完美适配空列表状态)
+window.updateAudioUI = () => {
+    const isPlaying = window.audioState.isPlaying;
+    const hasTrack = window.audioPlaylist && window.audioPlaylist.length > 0;
+    
+    // 适配空列表的 UI 显示文字
+    const trackName = hasTrack ? window.audioPlayer.getTrackName() : "暂无音乐";
+    const artistName = hasTrack ? window.audioPlayer.getArtistName() : "请点击右上角 + 添加音乐";
+    const loopMode = window.audioState.loopMode;
+    const isSilent = trackName.includes('静音');
+
+    const record = document.getElementById('mc-audio-record');
+    if (record) record.style.animationPlayState = isPlaying ? 'running' : 'paused';
+    
+    const cover = document.getElementById('mc-audio-cover');
+    if (cover) cover.style.backgroundImage = hasTrack 
+        ? `url('${isSilent ? 'https://api.dicebear.com/7.x/shapes/svg?seed=silent' : 'https://api.dicebear.com/7.x/shapes/svg?seed='+encodeURIComponent(trackName)}')`
+        : `url('https://api.dicebear.com/7.x/shapes/svg?seed=empty')`;
+    
+    const title = document.getElementById('mc-audio-name');
+    if (title) title.innerText = trackName;
+    const artist = document.getElementById('mc-audio-artist'); // 🌟 新增的歌手绑定 ID
+    if (artist) artist.innerText = artistName;
+
+    const playBtnIcon = document.getElementById('mc-audio-play-icon');
+    if (playBtnIcon) playBtnIcon.setAttribute('data-lucide', isPlaying ? 'pause' : 'play');
+    const loopBtnIcon = document.getElementById('mc-audio-loop-icon');
+    if (loopBtnIcon) loopBtnIcon.setAttribute('data-lucide', loopMode === 'list' ? 'repeat' : 'repeat-1');
+    
+    if (window.lucide) window.lucide.createIcons();
 };
 
-// 监听播放状态，实现自动循环与 UI 刷新
-keepAliveAudio.addEventListener('ended', () => {
-   if (window.audioState.loopMode === 'single') {
-       keepAliveAudio.play().catch(()=>{});
-   } else {
-       window.audioPlayer.next();
-   }
-});
-keepAliveAudio.addEventListener('play', () => { window.audioState.isPlaying = true; if(window.render) window.render(); });
-keepAliveAudio.addEventListener('pause', () => { window.audioState.isPlaying = false; if(window.render) window.render(); });
+window.audioPlayer = {
+  play: () => { 
+      if(window.audioPlaylist.length > 0) keepAliveAudio.play().catch(()=>{}); 
+      else window.actions.showToast('请先点击右上角添加音乐哦！'); 
+  },
+  pause: () => keepAliveAudio.pause(),
+  next: () => { 
+      if(window.audioPlaylist.length <= 1) return;
+      window.audioState.currentIndex = (window.audioState.currentIndex + 1) % window.audioPlaylist.length; 
+      window.audioPlayer.loadAndPlay(); 
+  },
+  prev: () => { 
+      if(window.audioPlaylist.length <= 1) return;
+      window.audioState.currentIndex = (window.audioState.currentIndex - 1 + window.audioPlaylist.length) % window.audioPlaylist.length; 
+      window.audioPlayer.loadAndPlay(); 
+  },
+  toggleLoop: () => { window.audioState.loopMode = window.audioState.loopMode === 'list' ? 'single' : 'list'; window.updateAudioUI(); },
+  loadAndPlay: () => {
+     // 如果曲库为空，彻底停播并重置
+     if(window.audioPlaylist.length === 0) {
+         keepAliveAudio.pause();
+         keepAliveAudio.removeAttribute('src');
+         window.updateAudioUI();
+         return;
+     }
+     
+     const track = window.audioPlaylist[window.audioState.currentIndex];
+     
+     // 绕过 iOS 媒体缓存 Bug
+     let safeSrc = track.src;
+     if (safeSrc.startsWith('http')) safeSrc += (safeSrc.includes('?') ? '&' : '?') + 't=' + Date.now();
+     
+     keepAliveAudio.src = safeSrc;
+     keepAliveAudio.play().catch(()=>{});
+     if ('mediaSession' in navigator) navigator.mediaSession.metadata = new MediaMetadata({ title: track.name, artist: track.artist || 'NekoPhone 保活引擎' });
+     window.updateAudioUI();
+  },
+  getTrackName: () => window.audioPlaylist[window.audioState.currentIndex].name,
+  getArtistName: () => window.audioPlaylist[window.audioState.currentIndex].artist || '未知歌手'
+};
 
-// 核心破壁动作：在你第一次触摸屏幕的瞬间，偷偷解锁音频系统并立马暂停！
+keepAliveAudio.onended = () => { if (window.audioState.loopMode === 'single') keepAliveAudio.play().catch(()=>{}); else window.audioPlayer.next(); };
+keepAliveAudio.onplay = () => { window.audioState.isPlaying = true; window.updateAudioUI(); };
+keepAliveAudio.onpause = () => { window.audioState.isPlaying = false; window.updateAudioUI(); };
+keepAliveAudio.onerror = () => { 
+    if (window.audioPlaylist.length > 0) window.actions.showToast('音频链接已失效或受跨域限制，请在列表中删除'); 
+    window.audioState.isPlaying = false; window.updateAudioUI();
+};
+
 document.addEventListener('touchstart', function unlockAudio() {
-    keepAliveAudio.play().then(() => {
-        keepAliveAudio.pause(); 
-        if ('mediaSession' in navigator) {
-            navigator.mediaSession.metadata = new MediaMetadata({ title: 'NekoPhone 准备就绪', artist: '后台接收引擎' });
-        }
-    }).catch(()=>{});
+    if(window.audioPlaylist.length > 0 && keepAliveAudio.src) {
+        keepAliveAudio.play().then(() => keepAliveAudio.pause()).catch(()=>{});
+    }
     document.removeEventListener('touchstart', unlockAudio);
 }, { once: true });
