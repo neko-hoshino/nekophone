@@ -39,7 +39,7 @@ export const store = parsedStore || {
   },
 
   personas: [
-    { id: 'p_default', name: '点击编辑', avatar: '', isCurrent: true, prompt: '请在这里输入你的人设' }
+    { id: 'p_default', name: '点击编辑', avatar: '', isCurrent: true, prompt: '' }
   ],
   contacts: [],
   chats: [],
