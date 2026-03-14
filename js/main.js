@@ -23,29 +23,49 @@ window.actions = {
       setTimeout(() => toastContainer.classList.add('hidden'), 300);
     }, 2500);
   },
-// 同时支持文件和 base64 数据的极速压缩
-  compressImage: (source, callback) => {
-     const processImage = (src) => {
+// 智能无损与高画质压缩 (5MB内原图直出，壁纸免压)
+  compressImage: (source, callback, forceCompress = false) => {
+     const processImage = (src, skipCompress = false) => {
+        if (skipCompress) {
+           callback(src); 
+           return;
+        }
         const img = new Image();
         img.onload = () => {
            const canvas = document.createElement('canvas');
            let w = img.width, h = img.height;
-           const maxSize = 800; // 限制最大分辨率
+           // 头像强制压缩时限制为 800px，壁纸/照片放宽到 2560px (2K画质)
+           const maxSize = forceCompress ? 800 : 2560; 
            if (w > h && w > maxSize) { h *= maxSize / w; w = maxSize; }
            else if (h > maxSize) { w *= maxSize / h; h = maxSize; }
            canvas.width = w; canvas.height = h;
            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-           callback(canvas.toDataURL('image/webp', 0.6)); // 极限压缩
+           
+           // 头像用 0.7 压缩率，壁纸用 0.95 的无损级高画质 WebP
+           const quality = forceCompress ? 0.7 : 0.95;
+           callback(canvas.toDataURL('image/webp', quality)); 
         };
         img.src = src;
      };
-     // 判断是新上传的文件，还是已存在的历史 Base64 数据
+
      if (source instanceof File || source instanceof Blob) {
          const reader = new FileReader();
-         reader.onload = (e) => processImage(e.target.result);
+         reader.onload = (e) => {
+             // 小于 5MB (5242880 bytes) 且不是强制要求压缩时，直接原图无损保存！保留所有画质和透明度！
+             if (source.size < 5 * 1024 * 1024 && !forceCompress) {
+                 processImage(e.target.result, true); 
+             } else {
+                 processImage(e.target.result, false);
+             }
+         };
          reader.readAsDataURL(source);
      } else if (typeof source === 'string') {
-         processImage(source);
+         // 对于一键瘦身传入的 Base64 字符串处理 (5MB 原图转 Base64 约等于 6.6M 字符)
+         if (source.length < 6.5 * 1024 * 1024 && !forceCompress) {
+             processImage(source, true);
+         } else {
+             processImage(source, false);
+         }
      }
   }
 };
@@ -98,7 +118,7 @@ window.actions.notify = (title, text, avatarUrl) => {
   setTimeout(() => banner.classList.remove('-translate-y-[200%]'), 50);
   setTimeout(() => banner.classList.add('-translate-y-[200%]'), 4000);
 };
-// 👈 核心：将 render 函数挂载到 window 上，方便各种内部 App 触发重绘
+// 将 render 函数挂载到 window 上，方便各种内部 App 触发重绘
 window.render = render; 
 
 function updateTime() {
@@ -154,7 +174,7 @@ function render() {
       
       /* 降低最底层的模糊度和白雾感，让背景图更加清晰透亮 */
       #phone-container > div:not(#mc-chat-screen) {
-         background-color: rgba(255, 255, 255, 0.3) !important; 
+         background-color: rgba(255, 255, 255, 0.1) !important; 
          background-image: none !important;
          backdrop-filter: blur(5px) !important; 
          -webkit-backdrop-filter: blur(5px) !important;
