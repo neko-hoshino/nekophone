@@ -186,14 +186,13 @@ window.settingsActions = {
         userVisibleOnly: true,
         applicationServerKey: keyArray
       });
-
-      // 你的隧道地址
-      const serverUrl = 'https://olive-points-cross.loca.lt/subscribe'; 
-      
-      window.actions.showToast('权限获取成功，正在绑定纽约机房...');
+      // 🌟 抛弃隧道，直接向你的纽约 IP 发起强连接！
+      const serverUrl = 'http://23.94.87.171:3000/subscribe'; 
+      window.actions.showToast('权限获取成功，正在直连纽约机房...');
+      // 删掉了之前那个 Bypass 的魔法头，现在就是纯粹的 JSON 请求
       const res = await fetch(serverUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sub)
       });
       
@@ -207,9 +206,8 @@ window.settingsActions = {
 
   // 🌟 发送测试命令
   testPushServer: async () => {
-     // 3. 测试广播地址也填好了！
-     const serverUrl = 'https://olive-points-cross.loca.lt/test-push';
-     fetch(serverUrl, { method: 'POST', headers: {'Bypass-Tunnel-Reminder': 'true'} });
+     const serverUrl = 'http://23.94.87.171:3000/test-push';
+     fetch(serverUrl, { method: 'POST' });
      window.actions.showToast('已向云端发射测试指令！');
   },
   // 读取预设并填入表单
