@@ -91,7 +91,6 @@ window.settingsActions = {
           }));
        }
     };
-    
     // 明确指定谁是头像，谁是壁纸
     store.personas.forEach(p => compressIfNeed(p, 'avatar', true));
     store.contacts.forEach(c => { 
@@ -162,7 +161,51 @@ window.settingsActions = {
       window.render();
     }
   },
+  // 🌟 云端推送绑定引擎
+  connectPushServer: async () => {
+    try {
+      const reg = await navigator.serviceWorker.ready;
+      const publicVapidKey = 'BHrrXkaw9VrEtv1g2XcykgbQPsFrSL8WwsxqoZ2Qg3tZGWXr1bHln5LUMUZmiYwLr7RwX7OW9HSAA5EiSA3g3QY'; 
+      
+      // 把你的公钥转化为浏览器能看懂的安全数组
+      const padding = '='.repeat((4 - publicVapidKey.length % 4) % 4);
+      const base64 = (publicVapidKey + padding).replace(/\-/g, '+').replace(/_/g, '/');
+      const rawData = window.atob(base64);
+      const keyArray = new Uint8Array(rawData.length);
+      for (let i = 0; i < rawData.length; ++i) keyArray[i] = rawData.charCodeAt(i);
 
+      window.actions.showToast('正在向系统请求通知权限...');
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: keyArray
+      });
+
+      // 你的专属纽约隧道地址已经填好了！只要能访问这个地址，就能收到推送了！
+      const serverUrl = 'https://olive-points-cross.loca.lt/subscribe'; 
+      
+      window.actions.showToast('权限获取成功，正在绑定纽约机房...');
+      // 发送给服务器进行绑定登记，加入了防拦截魔法头
+      const res = await fetch(serverUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' },
+        body: JSON.stringify(sub)
+      });
+      
+      if(res.ok) window.actions.showToast('纽约机房绑定成功！');
+      else window.actions.showToast('绑定失败了，检查下网络');
+    } catch(e) {
+      console.error(e);
+      window.actions.showToast('推送权限被拒绝或失败了');
+    }
+  },
+
+  // 🌟 发送测试命令
+  testPushServer: async () => {
+     // 3. 测试广播地址也填好了！
+     const serverUrl = 'https://olive-points-cross.loca.lt/test-push';
+     fetch(serverUrl, { method: 'POST', headers: {'Bypass-Tunnel-Reminder': 'true'} });
+     window.actions.showToast('已向云端发射测试指令！');
+  },
   // 读取预设并填入表单
   loadPreset: (index) => {
     if (index === "") return;
@@ -365,6 +408,18 @@ export function renderSettingsApp(store) {
               <span class="text-[13px] font-bold text-gray-700">恢复本地数据</span>
               <i data-lucide="upload-cloud" class="w-4.5 h-4.5 text-gray-400"></i>
             </div>
+        </div>
+        
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mt-4">
+            <h3 class="font-bold text-gray-800 text-sm flex items-center mb-3">
+               <i data-lucide="cloud-lightning" class="w-4 h-4 mr-1 text-purple-500"></i>云端推送中枢 (纽约)
+            </h3>
+            <button onclick="window.settingsActions.connectPushServer()" class="w-full bg-purple-500 text-white font-bold py-3.5 rounded-xl active:bg-purple-600 transition-colors text-[13px] mb-2 shadow-sm flex items-center justify-center">
+                <i data-lucide="satellite" class="w-4 h-4 mr-2"></i>1. 绑定当前设备到云端
+            </button>
+            <button onclick="window.settingsActions.testPushServer()" class="w-full bg-gray-100 text-gray-800 font-bold py-3.5 rounded-xl active:bg-gray-200 transition-colors text-[13px] flex items-center justify-center">
+                <i data-lucide="rocket" class="w-4 h-4 mr-2"></i>2. 发射测试广播 (需先绑定)
+            </button>
         </div>
 
       </div>
