@@ -186,10 +186,10 @@ window.settingsActions = {
         userVisibleOnly: true,
         applicationServerKey: keyArray
       });
-      // 🌟 抛弃隧道，直接向你的纽约 IP 发起强连接！
-      const serverUrl = 'http://23.94.87.171:3000/subscribe'; 
+      // 🌟 终极 HTTPS 域名！
+      const serverUrl = 'https://neko-hoshino.duckdns.org/subscribe'; 
+      
       window.actions.showToast('权限获取成功，正在直连纽约机房...');
-      // 删掉了之前那个 Bypass 的魔法头，现在就是纯粹的 JSON 请求
       const res = await fetch(serverUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -204,9 +204,8 @@ window.settingsActions = {
     }
   },
 
-  // 🌟 发送测试命令
   testPushServer: async () => {
-     const serverUrl = 'http://23.94.87.171:3000/test-push';
+     const serverUrl = 'https://neko-hoshino.duckdns.org/test-push';
      fetch(serverUrl, { method: 'POST' });
      window.actions.showToast('已向云端发射测试指令！');
   },
