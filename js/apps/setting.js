@@ -164,27 +164,33 @@ window.settingsActions = {
   // 🌟 云端推送绑定引擎
   connectPushServer: async () => {
     try {
+      // 🌟 1. 把 Toast 放在最前面，只要按钮能按，就一定会弹！
+      window.actions.showToast('正在启动天线并请求权限...');
+      
+      // 🌟 2. 强行把天线文件安装进浏览器 (假设 sw.js 和 index.html 在同一个文件夹)
+      // 如果你的 sw.js 在 js 文件夹里，请改成 './js/sw.js'
+      await navigator.serviceWorker.register('./sw.js'); 
+      
       const reg = await navigator.serviceWorker.ready;
+      
+      // 把你的乱码 Public Key 填在这里 (保留单引号)
       const publicVapidKey = 'BHrrXkaw9VrEtv1g2XcykgbQPsFrSL8WwsxqoZ2Qg3tZGWXr1bHln5LUMUZmiYwLr7RwX7OW9HSAA5EiSA3g3QY'; 
       
-      // 把你的公钥转化为浏览器能看懂的安全数组
       const padding = '='.repeat((4 - publicVapidKey.length % 4) % 4);
       const base64 = (publicVapidKey + padding).replace(/\-/g, '+').replace(/_/g, '/');
       const rawData = window.atob(base64);
       const keyArray = new Uint8Array(rawData.length);
       for (let i = 0; i < rawData.length; ++i) keyArray[i] = rawData.charCodeAt(i);
 
-      window.actions.showToast('正在向系统请求通知权限...');
       const sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
         applicationServerKey: keyArray
       });
 
-      // 你的专属纽约隧道地址已经填好了！只要能访问这个地址，就能收到推送了！
+      // 你的隧道地址
       const serverUrl = 'https://olive-points-cross.loca.lt/subscribe'; 
       
       window.actions.showToast('权限获取成功，正在绑定纽约机房...');
-      // 发送给服务器进行绑定登记，加入了防拦截魔法头
       const res = await fetch(serverUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Bypass-Tunnel-Reminder': 'true' },
@@ -194,8 +200,8 @@ window.settingsActions = {
       if(res.ok) window.actions.showToast('纽约机房绑定成功！');
       else window.actions.showToast('绑定失败了，检查下网络');
     } catch(e) {
-      console.error(e);
-      window.actions.showToast('推送权限被拒绝或失败了');
+      console.error('推送错误详情:', e);
+      window.actions.showToast('推送权限被拒绝或天线安装失败，请按 F12 查看控制台');
     }
   },
 
@@ -409,7 +415,7 @@ export function renderSettingsApp(store) {
               <i data-lucide="upload-cloud" class="w-4.5 h-4.5 text-gray-400"></i>
             </div>
         </div>
-        
+
         <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mt-4">
             <h3 class="font-bold text-gray-800 text-sm flex items-center mb-3">
                <i data-lucide="cloud-lightning" class="w-4 h-4 mr-1 text-purple-500"></i>云端推送中枢 (纽约)
