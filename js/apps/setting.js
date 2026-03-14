@@ -76,22 +76,43 @@ window.settingsActions = {
     store.moments = (store.moments || []).filter(m => m.id >= threeDaysAgo);
     const deletedCount = oldMomentsCount - store.moments.length;
     if (deletedCount > 0) console.log(`[系统] 已物理销毁 ${deletedCount} 条过期朋友圈数据`);
-    // 2. 将历史积压的庞大 Base64 原图全部重度压缩
+    // 🌟 2. 将历史积压的庞大 Base64 原图进行智能分级瘦身
     const compressPromises = [];
-    const compressIfNeed = (obj, key) => {
-       if (obj[key] && obj[key].length > 100000 && obj[key].startsWith('data:image')) {
+    const compressIfNeed = (obj, key, isAvatar = false) => {
+       // 头像：只要大于 500KB (约 650000 字符) 就强制触发压缩
+       // 其他图片(壁纸/照片)：大于 5MB (约 6500000 字符) 才执行压缩
+       const threshold = isAvatar ? 650000 : 6500000;
+       if (obj[key] && obj[key].length > threshold && obj[key].startsWith('data:image')) {
           compressPromises.push(new Promise(res => {
+             // 第三个参数传 isAvatar，决定是否进行 800px 的重度压缩
              window.actions.compressImage(obj[key], (newBase64) => {
                 obj[key] = newBase64; res();
-             });
+             }, isAvatar);
           }));
        }
     };
-    store.personas.forEach(p => compressIfNeed(p, 'avatar'));
-    store.contacts.forEach(c => { compressIfNeed(c, 'avatar'); compressIfNeed(c, 'bgImage'); });
-    if (store.momentBg) compressIfNeed(store, 'momentBg');
-    store.chats.forEach(chat => chat.messages.forEach(m => { if (m.imageUrl) compressIfNeed(m, 'imageUrl'); }));
-    store.moments?.forEach(m => { if (m.imageUrl) compressIfNeed(m, 'imageUrl'); });
+    
+    // 明确指定谁是头像，谁是壁纸
+    store.personas.forEach(p => compressIfNeed(p, 'avatar', true));
+    store.contacts.forEach(c => { 
+       compressIfNeed(c, 'avatar', true); 
+       compressIfNeed(c, 'videoAvatar', true); 
+       compressIfNeed(c, 'bgImage', false); // 聊天背景属于大图
+    });
+    // 全局外观里的背景全部免死（只按5MB触发轻度压缩）
+    if (store.appearance) {
+       compressIfNeed(store.appearance, 'wallpaper', false);
+       compressIfNeed(store.appearance, 'topBarBg', false);
+       compressIfNeed(store.appearance, 'bottomBarBg', false);
+       compressIfNeed(store.appearance, 'interfaceBg', false);
+    }
+    if (store.momentBg) compressIfNeed(store, 'momentBg', false);
+    store.chats.forEach(chat => chat.messages.forEach(m => { 
+       if (m.imageUrl) compressIfNeed(m, 'imageUrl', false); 
+    }));
+    store.moments?.forEach(m => { 
+       if (m.imageUrl) compressIfNeed(m, 'imageUrl', false); 
+    });
     await Promise.all(compressPromises);
     const afterSize = JSON.stringify(store).length;
     const savedMb = ((beforeSize - afterSize) / 1024 / 1024).toFixed(2);
