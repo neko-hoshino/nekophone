@@ -1480,19 +1480,15 @@ window.wxActions = {
     if (!chat || !char) return;
 
     const isActive = wxState.activeChatId === charId;
-    // 🌟 核心修复：补上缺失的全局场景判定变量，防止底层渲染引擎崩溃！
     const isOffline = wxState.view === 'offlineStory' && isActive;
     const isCall = wxState.view === 'call' && isActive;
 
-    if (isActive && !isAuto) { wxState.isTyping = true; window.render(); window.wxActions.scrollToBottom(); }
-
-    // 🌟 核心：自动记忆触发器 (满20条自动总结)
+    // 🌟 自动记忆触发器
     const validMsgs = chat.messages.filter(m => !m.isHidden && !(m.msgType || '').includes('system'));
     const lastSumIndex = chat.lastSummarizedIndex || 0;
     if (validMsgs.length - lastSumIndex >= 20) {
        chat.lastSummarizedIndex = validMsgs.length;
-       const msgsToSum = validMsgs.slice(lastSumIndex, validMsgs.length);
-       triggerAutoMemory(charId, msgsToSum);
+       triggerAutoMemory(charId, validMsgs.slice(lastSumIndex, validMsgs.length));
     }
 
     let hiddenMsgId = null;
@@ -1500,24 +1496,46 @@ window.wxActions = {
       hiddenMsgId = Date.now();
       chat.messages.push({ 
         id: hiddenMsgId, sender: store.personas[0].name, 
-        text: customPrompt || "(系统自动触发：时间已过去很久，请主动搭话。⚠️你必须严格遵守：1. 长句必须用换行符拆分；2. 绝不可输出系统时间标签或动作括号；3. 只能使用已授权词典内的表情包名字，绝对禁止瞎编！)", 
+        text: customPrompt || "(系统自动触发：请主动搭话)", 
         isMe: true, source: 'wechat', isOffline: false, msgType: 'text', isHidden: true 
       });
     }
 
     try {
       let replyText = '';
+
       if (preGeneratedText) {
-          // 🌟 核心：如果云端信箱里有生成好的文字，直接白嫖，跳过本地大模型请求！
+          // 🚀 场景 A：云端信箱拿回了信件，直接开始解析！
           replyText = preGeneratedText;
           if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
       } else {
-          // 正常的本地打字逻辑
-          const { callLLM } = await import('../utils/llm.js');
-          const llmPromise = callLLM(charId, chat.messages, isActive ? wxState.view === 'offlineStory' : false);
-          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('请求超时（网络波动或被系统掐断）')), 200000));
-          replyText = await Promise.race([llmPromise, timeoutPromise]);
+          // 🚀 场景 B：这是用户刚点发送，我们要把活儿扔给云端代跑！
+          const { buildLLMPayload } = await import('../utils/llm.js');
+          const llmMessages = await buildLLMPayload(charId, chat.messages, isActive ? wxState.view === 'offlineStory' : false);
+          
           if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
+
+          if (isActive) {
+              window.actions.showToast('消息已送往云端，等待回复中...');
+              wxState.isTyping = true;
+              window.render();
+              window.wxActions.scrollToBottom();
+          }
+
+          // delayMinutes = 0 代表立即执行！
+          planCloudBrain(0, char, llmMessages);
+
+          // 开启高频轮询（每 3 秒看一眼信箱），拿到信件就关掉
+          if (window._fastSyncInterval) clearInterval(window._fastSyncInterval);
+          window._fastSyncInterval = setInterval(() => {
+              if (wxState.isTyping) {
+                  window.syncCloudMailbox();
+              } else {
+                  clearInterval(window._fastSyncInterval);
+              }
+          }, 3000);
+          
+          return; // 🌟 核心拦截：交出代跑权后立刻终止本次执行，等待信箱里的 preGeneratedText 唤醒我们！
       }
 
       // 🌟 终极净化：强行剥离大模型发癫模仿的所有系统标签！
@@ -3507,17 +3525,14 @@ const planCloudBrain = async (delayMinutes, char, llmMessages) => {
 
       await fetch('https://neko-hoshino.duckdns.org/auto-plan', {
           method: 'POST',
-          headers: {
-              'Content-Type': 'application/json',
-              'x-secret-token': localStorage.getItem('neko_server_pwd') || ''
-          },
+          headers: { 'Content-Type': 'application/json', 'x-secret-token': localStorage.getItem('neko_server_pwd') || '' },
           body: JSON.stringify({
               delayMinutes: delayMinutes,
               title: char.name,
               charId: char.id,
               endpoint: sub.endpoint,
-              apiConfig: store.apiConfig, // 把你的配置全传过去让服务器代跑！
-              llmMessages: llmMessages    // 组装好的弹药
+              apiConfig: store.apiConfig, 
+              llmMessages: llmMessages    
           })
       });
   } catch (e) { console.error('云端大脑连接失败:', e); }
@@ -3539,8 +3554,10 @@ window.syncCloudMailbox = async () => {
       for (const m of data.messages) {
           const char = store.contacts.find(c => c.id === m.charId);
           if (char) {
-              window.actions.showToast('✨ 同步云端大脑，消息秒开！');
-              // 🌟 灵魂注入：直接把代跑好的文字塞给 getReply 进行解析和语音播放！
+              if (m.text.includes('[系统] 云端请求失败')) window.actions.showToast('⚠️ 云端遇到了错误');
+              else window.actions.showToast('✨ 同步云端大脑，消息秒开！');
+              
+              // 让解析器立刻处理从信箱拿回来的成品文本！
               window.wxActions.getReply(true, m.charId, null, m.text);
           }
       }
@@ -3559,12 +3576,26 @@ window.checkAutoMsg = async () => {
     const lastMsg = chat.messages[chat.messages.length - 1];
     if (lastMsg.isHidden) continue; 
     
+    // 🌟 极其精准的“闹钟触发计次”算法：时间断层大于 2 分钟才算一次独立的闹钟发癫！
     let aiConsecutiveCount = 0;
+    let lastAiTime = null;
+    
     for (let i = chat.messages.length - 1; i >= 0; i--) {
         const m = chat.messages[i];
         if (m.isHidden || m.msgType === 'system' || m.msgType === 'recall_system') continue;
         if (m.isMe) break; 
-        aiConsecutiveCount++;
+        
+        const currentMsgTime = Number(m.id);
+        if (!lastAiTime) {
+            aiConsecutiveCount = 1;
+            lastAiTime = currentMsgTime;
+        } else {
+            // 两条 AI 的消息如果相隔超过 2 分钟，说明这是服务器发起的又一次独立警报
+            if (lastAiTime - currentMsgTime > 2 * 60 * 1000) {
+                aiConsecutiveCount++;
+            }
+            lastAiTime = currentMsgTime;
+        }
     }
 
     const currentHour = new Date().getHours();
@@ -3584,12 +3615,10 @@ window.checkAutoMsg = async () => {
              ? `(系统自动触发：你目前处于被用户【拉黑】的状态！距离上次试图挽回客观上过去了真实的 ${realTimeStr}。请继续试图挽回，绝对不许夸大等待的时间！)`
              : `(系统自动触发：距离上次对话客观流逝了 ${realTimeStr}。请结合这个真实时间主动搭话。⚠️绝对不允许夸大时间！你只等待了客观的 ${realTimeStr}。自然一点。)`;
 
-         // 临时构建一个加上 Prompt 的聊天记录发给组装器
          const tempHistory = [...chat.messages, { id: Date.now(), sender: store.personas[0].name, text: customPrompt, isMe: true, isHidden: true, msgType: 'text' }];
 
          try {
              const { buildLLMPayload } = await import('../utils/llm.js');
-             // 🌟 完美复用 llm.js 的组装逻辑！
              const llmMessages = await buildLLMPayload(char.id, tempHistory, false);
              planCloudBrain(nextDelay, char, llmMessages);
          } catch(e) { console.error('打包记忆失败:', e); }
