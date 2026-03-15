@@ -6,68 +6,6 @@ if (!window.homeState) window.homeState = { showAddAudioModal: false, showPlayli
 
 if (!window.homeActions) {
   window.homeActions = {
-    // ================= 🌟 极简密码锁引擎 (全平台兼容+粘贴版) =================
-    onLockInput: (index, el) => {
-        el.value = el.value.toUpperCase(); // 强制大写
-        
-        // 自动跳到下一个框
-        if (el.value.length === 1 && index < 5) {
-            const nextInput = document.getElementById(`lock-input-${index + 1}`);
-            if (nextInput) nextInput.focus();
-        }
-        
-        window.homeActions.checkLock();
-    },
-    
-    onLockKeydown: (index, e) => {
-        // 按退格键时自动跳到上一个框
-        if (e.key === 'Backspace' && e.target.value === '' && index > 0) {
-            const prevInput = document.getElementById(`lock-input-${index - 1}`);
-            if (prevInput) prevInput.focus();
-        }
-    },
-    
-    onLockPaste: (e) => {
-        e.preventDefault();
-        const text = (e.clipboardData || window.clipboardData).getData('text').toUpperCase().trim().slice(0, 6);
-        for(let i = 0; i < text.length; i++) {
-            const input = document.getElementById(`lock-input-${i}`);
-            if(input) {
-                input.value = text[i];
-                if(i < 5) document.getElementById(`lock-input-${i+1}`).focus();
-            }
-        }
-        window.homeActions.checkLock();
-    },
-
-    checkLock: () => {
-        let val = '';
-        for(let i = 0; i < 6; i++) {
-            const input = document.getElementById(`lock-input-${i}`);
-            if(input) val += input.value;
-        }
-        
-        if(val.length === 6) {
-            if(val === 'EAAF99') {
-                localStorage.setItem('neko_server_pwd', 'EAAF99');
-                window.actions.showToast('欢迎回来，Eve');
-                window.render();
-            } else {
-                // 密码错误：左右摇晃并清空
-                const container = document.getElementById('lock-slots');
-                if(container) container.style.animation = 'shake 0.4s ease-in-out';
-                setTimeout(() => {
-                    if(container) container.style.animation = '';
-                    for(let i = 0; i < 6; i++) {
-                        const input = document.getElementById(`lock-input-${i}`);
-                        if(input) input.value = '';
-                    }
-                    document.getElementById('lock-input-0').focus();
-                }, 400);
-            }
-        }
-    },
-
     updateAvatar: (e) => {
       const file = e.target.files[0]; if(!file) return;
       window.actions.compressImage(file, (base64) => { store.personas[0].avatar = base64; window.render(); });
@@ -90,7 +28,7 @@ if (!window.homeActions) {
     openPlaylist: () => { window.homeState.showPlaylistModal = true; window.render(); },
     closePlaylist: () => { window.homeState.showPlaylistModal = false; window.render(); },
 
-    // 加号管理：详细参数导入引擎
+    // 加号管理
     triggerLocalUpload: () => { document.getElementById('upload-bg-audio').click(); window.homeState.showAddAudioModal = false; window.render(); },
     confirmUrlAudio: () => {
         let url = document.getElementById('audio-url-input').value.trim();
@@ -199,69 +137,16 @@ function createDockIcon(iconName, label, actionStr, mcClass, isDark) {
 }
 
 export function renderHomeApp(store) {
-  const ap = store.appearance || {};
-  const activeBg = ap.wallpaper || store.wallpaper;
-  const isDark = ap.darkMode || false; 
-  const bgStyle = activeBg ? `background-image: url('${activeBg}'); background-size: cover; background-position: center;` : `background-color: #dbeafe;`;
-
-  // ================= 🌟 极简密码锁屏拦截 =================
-  const isLocked = localStorage.getItem('neko_server_pwd') !== 'EAAF99';
-  
-  if (isLocked) {
-      const now = new Date();
-      const hours = String(now.getHours()).padStart(2, '0');
-      const minutes = String(now.getMinutes()).padStart(2, '0');
-      const timeStr = `${hours}:${minutes}`;
-      const month = now.getMonth() + 1;
-      const date = now.getDate();
-      const weekDays = ['日', '一', '二', '三', '四', '五', '六'];
-      const dateStr = `${month}月${date}日 星期${weekDays[now.getDay()]}`;
-      const lockBgStyle = activeBg ? `background-image: url('${activeBg}'); background-size: cover; background-position: center;` : `background-color: #1a1a1a;`;
-
-      return `
-        <style>
-          @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            20%, 60% { transform: translateX(-15px); }
-            40%, 80% { transform: translateX(15px); }
-          }
-        </style>
-        <div class="w-full h-full relative flex flex-col items-center select-none overflow-hidden animate-in fade-in duration-500" style="${lockBgStyle}">
-          
-          <div class="absolute inset-0 bg-black/40 backdrop-blur-2xl"></div>
-          
-          <div class="relative z-10 flex flex-col items-center w-full pt-[12vh] animate-in slide-in-from-top-4 duration-500 delay-100 pointer-events-none">
-             <i data-lucide="lock" class="text-white mb-3 drop-shadow-md" style="width: 22px; height: 22px;"></i>
-             <div class="text-white text-[5.5rem] font-light tracking-tight leading-none mb-2 drop-shadow-lg font-sans">${timeStr}</div>
-             <div class="text-white/90 text-[17px] font-medium tracking-wide drop-shadow-md">${dateStr}</div>
-          </div>
-
-          <div class="relative z-10 flex flex-col items-center mt-auto pb-[30vh] w-full">
-             <span class="text-white text-[15px] mb-6 font-medium tracking-widest drop-shadow-md">输入系统口令</span>
-             
-             <div class="flex space-x-2 relative px-4 justify-center" id="lock-slots">
-                ${[0, 1, 2, 3, 4, 5].map(i => `
-                  <input id="lock-input-${i}" type="text" maxlength="1"
-                         class="w-12 h-14 bg-white/20 border border-white/50 rounded-xl text-center text-white text-2xl font-bold outline-none focus:border-white focus:bg-white/30 transition-all shadow-sm uppercase placeholder-transparent"
-                         oninput="window.homeActions.onLockInput(${i}, this)"
-                         onkeydown="window.homeActions.onLockKeydown(${i}, event)"
-                         onpaste="window.homeActions.onLockPaste(event)"
-                         ${i === 0 ? 'autofocus' : ''} />
-                `).join('')}
-             </div>
-          </div>
-          
-          <div class="absolute bottom-2 left-1/2 -translate-x-1/2 w-1/3 h-1 bg-white/80 rounded-full z-10 shadow-sm pointer-events-none"></div>
-        </div>
-      `;
-  }
-
-  // ================= 正常的主桌面渲染 =================
   const my = (store.personas && store.personas.length > 0) ? store.personas[0] : { name: '', avatar: '' };
   let avatarHtml = `<div class="w-full h-full flex items-center justify-center text-4xl">${my.avatar}</div>`;
   if (my.avatar && (my.avatar.startsWith('http') || my.avatar.startsWith('data:'))) {
     avatarHtml = `<img src="${my.avatar}" class="w-full h-full object-cover" />`;
   }
+
+  const ap = store.appearance || {};
+  const activeBg = ap.wallpaper || store.wallpaper;
+  const isDark = ap.darkMode || false; 
+  const bgStyle = activeBg ? `background-image: url('${activeBg}'); background-size: cover; background-position: center;` : `background-color: #dbeafe;`;
 
   const txtMain = isDark ? 'text-white drop-shadow-md' : 'text-gray-800';
   const txtSub = isDark ? 'text-white/70' : 'text-gray-500';

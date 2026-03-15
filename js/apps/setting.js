@@ -424,16 +424,25 @@ export function renderSettingsApp(store) {
             </div>
         </div>
 
-        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mt-4">
-            <h3 class="font-bold text-gray-800 text-sm flex items-center mb-3">
-               <i data-lucide="cloud-lightning" class="w-4 h-4 mr-1 text-purple-500"></i>云端推送中枢 (纽约)
-            </h3>
-            <button onclick="window.settingsActions.connectPushServer()" class="w-full bg-purple-500 text-white font-bold py-3.5 rounded-xl active:bg-purple-600 transition-colors text-[13px] mb-2 shadow-sm flex items-center justify-center">
-                <i data-lucide="satellite" class="w-4 h-4 mr-2"></i>1. 绑定当前设备到云端
-            </button>
-            <button onclick="window.settingsActions.testPushServer()" class="w-full bg-gray-100 text-gray-800 font-bold py-3.5 rounded-xl active:bg-gray-200 transition-colors text-[13px] flex items-center justify-center">
-                <i data-lucide="rocket" class="w-4 h-4 mr-2"></i>2. 发射测试广播 (需先绑定)
-            </button>
+        <div class="bg-white p-4 rounded-[16px] shadow-sm border border-gray-100 mt-4">
+          <h3 class="font-bold text-gray-800 text-[15px] flex items-center mb-3">
+            <i data-lucide="cloud-lightning" class="w-4 h-4 mr-2 text-purple-500"></i>云端跨国通道
+          </h3>
+    
+          <div class="mb-4">
+            <input type="password" placeholder="请输入服务器访问密钥" 
+              value="${localStorage.getItem('neko_server_pwd') || ''}" 
+              onchange="localStorage.setItem('neko_server_pwd', this.value.trim()); window.actions.showToast('密钥已安全存入本地');"
+              class="w-full bg-gray-50 border border-gray-100 rounded-[12px] p-3 outline-none text-[13px] font-mono text-gray-800 focus:border-purple-300 transition-colors" />
+            <p class="text-[10px] text-gray-400 mt-1 pl-1">密钥仅保存在您的本地浏览器缓存中。</p>
+          </div>
+
+          <button onclick="window.settingsActions.connectPushServer()" class="w-full bg-purple-500 text-white font-bold py-3.5 rounded-[12px] active:scale-95 transition-transform text-[14px] mb-2 shadow-[0_4px_12px_rgba(168,85,247,0.2)] flex items-center justify-center">
+            1. 绑定当前设备接收推送
+          </button>
+          <button onclick="window.settingsActions.testPushServer()" class="w-full bg-gray-100 text-gray-800 font-bold py-3.5 rounded-[12px] active:bg-gray-200 transition-colors text-[14px] flex items-center justify-center">
+            2. 发射云端测试广播
+          </button>
         </div>
 
       </div>
