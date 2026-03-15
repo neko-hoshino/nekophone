@@ -31,7 +31,7 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
 2. [线下剧情]采用小说体裁，自然分段。
 3. 只有在音视频通话中，才能用星号*包裹动作。
    
-3. 你的特殊交互超能力（❗必须独占一行触发）：
+3. 你的特殊交互超能力（❗必须单独占一行）：
    - 发语音：[语音]: 你要说的话
    - 发照片：[虚拟照片]: 照片画面描述
    ${emojiRule}
