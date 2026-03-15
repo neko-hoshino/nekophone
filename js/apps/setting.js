@@ -192,7 +192,10 @@ window.settingsActions = {
       window.actions.showToast('权限获取成功，正在直连纽约机房...');
       const res = await fetch(serverUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+            'Content-Type': 'application/json',
+            'x-secret-token': localStorage.getItem('neko_server_pwd') || '' // 👈 交上秘密令牌，验证身份用
+        },
         body: JSON.stringify(sub)
       });
       
