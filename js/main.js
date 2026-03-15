@@ -173,18 +173,18 @@ function render() {
       }
       
       /* 降低最底层的模糊度和白雾感，让背景图更加清晰透亮 */
-      #phone-container > div:not(#mc-chat-screen) {
-         background-color: rgba(255, 255, 255, 0.1) !important; 
+      #phone-container > div:not(#mc-chat-screen):not(#mc-status-bar) {
+         background-color: rgba(255, 255, 255, 0.3) !important; 
          background-image: none !important;
-         backdrop-filter: blur(5px) !important; 
-         -webkit-backdrop-filter: blur(5px) !important;
+         backdrop-filter:  !important; 
+         -webkit-backdrop-filter:  !important;
       }
 
       /* 把所有白色卡片的透明度调高，并降低模糊度 */
       #phone-container > div:not(#mc-chat-screen) .bg-white {
          background-color: rgba(255, 255, 255, 0.5) !important;
-         backdrop-filter: blur(6px) !important;
-         -webkit-backdrop-filter: blur(6px) !important;
+         backdrop-filter: blur(15px) !important;
+         -webkit-backdrop-filter: blur(15px) !important;
          border-color: rgba(255, 255, 255, 0.5) !important;
       }
 
@@ -194,8 +194,8 @@ function render() {
       #phone-container > div:not(#mc-chat-screen) .bg-gray-50,
       #phone-container > div:not(#mc-chat-screen) .bg-gray-100 { 
          background-color: rgba(255, 255, 255, 0.5) !important; 
-         backdrop-filter: blur(6px) !important; 
-         -webkit-backdrop-filter: blur(6px) !important;
+         backdrop-filter: blur(15px) !important; 
+         -webkit-backdrop-filter: blur(15px) !important;
       }
     `;
   }
@@ -290,7 +290,7 @@ function render() {
   const isHomeDark = store.currentApp === null && (ap.darkMode || false);
   const txtClass = isHomeDark ? 'text-white drop-shadow-md' : 'text-gray-800 drop-shadow-sm';
   const statusBarHtml = ap.hideStatusBar ? '' : `
-    <div class="absolute top-0 left-0 right-0 flex justify-between items-center px-6 pt-3 pb-2 text-[11px] font-bold z-[9999] pointer-events-none ${txtClass}">
+    <div id="mc-status-bar" class="absolute top-0 left-0 right-0 flex bg-transparent justify-between items-center px-6 pt-3 pb-2 text-[11px] font-bold z-[9999] pointer-events-none ${txtClass}">
       <span id="status-time" class="tracking-wider">${store.currentTime || '12:00'}</span>
       <div class="flex items-center space-x-1.5 opacity-80">
         <i data-lucide="signal" style="width: 14px; height: 14px;"></i>
