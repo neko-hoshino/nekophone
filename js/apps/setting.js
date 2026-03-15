@@ -205,9 +205,20 @@ window.settingsActions = {
   },
 
   testPushServer: async () => {
+     const reg = await navigator.serviceWorker.ready;
+     const sub = await reg.pushManager.getSubscription();
+     if (!sub) return window.actions.showToast('请先绑定设备哦');
+
      const serverUrl = 'https://neko-hoshino.duckdns.org/test-push';
-     fetch(serverUrl, { method: 'POST' });
-     window.actions.showToast('已向云端发射测试指令！');
+     fetch(serverUrl, { 
+        method: 'POST', 
+        headers: { 
+            'Content-Type': 'application/json',
+            'x-secret-token': localStorage.getItem('neko_server_pwd') || '' // 👈 交上秘密令牌，验证身份用
+        },
+        body: JSON.stringify({ endpoint: sub.endpoint }) // 👈 同样交上设备号
+     });
+     window.actions.showToast('已向云端发射专属测试指令！');
   },
   // 读取预设并填入表单
   loadPreset: (index) => {

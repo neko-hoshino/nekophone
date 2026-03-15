@@ -3490,13 +3490,38 @@ export function renderWeChatApp(store) {
   `;
 }
 
-// ================= 🐕 终极 AI 巡逻犬 & 时光机唤醒引擎 =================
+// ================= 🐕 终极 AI 巡逻犬 & 云端唤醒引擎 =================
+
+const planCloudPush = async (delayMinutes, charName) => {
+  try {
+    // 🌟 每次定闹钟前，先去浏览器底层拿到自己的设备ID
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return; // 没绑定就不操作
+
+    const serverUrl = 'https://neko-hoshino.duckdns.org/auto-plan';
+    await fetch(serverUrl, {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json',
+        'x-secret-token': localStorage.getItem('neko_server_pwd') || ''
+      },
+      body: JSON.stringify({ 
+        delayMinutes: delayMinutes, 
+        title: charName, 
+        body: '给你发来了一条新消息',
+        endpoint: sub.endpoint // 👈 核心：把自己的设备号交上去，告诉服务器到底要给谁定闹钟
+      })
+    });
+  } catch (e) { console.error(e); }
+};
+// 2. 检查是否该主动说话了
 const checkAutoMsg = async () => {
   if (wxState.callType) return; 
   
   for (const char of store.contacts) {
-    const isBlocked = char.isBlocked === true; // 🌟 检查是否被拉黑
-    if (!char.autoMsgEnabled && !isBlocked) continue; // 如果没开主动发消息，且没被拉黑，就跳过
+    const isBlocked = char.isBlocked === true; 
+    if (!char.autoMsgEnabled && !isBlocked) continue; 
     
     const chat = store.chats.find(c => c.charId === char.id);
     if (!chat || chat.messages.length === 0) continue;
@@ -3504,29 +3529,39 @@ const checkAutoMsg = async () => {
     const lastMsg = chat.messages[chat.messages.length - 1];
     if (lastMsg.isHidden) continue; 
     
-    // 🌟 核心：如果被拉黑了，无视用户设置，强制每 5 分钟发一次消息试图挽回！
-    const coldMinutes = isBlocked ? 5 : (char.autoMsgInterval || 5); 
+    // 🌟 如果被拉黑，5分钟一次；如果没拉黑，读取你设置的基准时间
+    const baseMinutes = isBlocked ? 5 : (char.autoMsgInterval || 15); 
+    
     const lastTime = new Date(lastMsg.id); 
     const now = new Date();
     const diffMinutes = (now - lastTime) / 1000 / 60;
 
-    if (diffMinutes >= coldMinutes && !wxState.isTyping) {
-       console.log("🐕 巡逻犬出动！");
-       // 根据是否拉黑，植入不同的灵魂指令
+    // 🌟 如果当前时间已经超过了基准时间，说明该发消息了！
+    if (diffMinutes >= baseMinutes && !wxState.isTyping) {
+       console.log("🐕 巡逻犬出动，正在呼叫大模型...");
        const customPrompt = isBlocked 
-         ? `(系统自动触发：你目前正处于被用户【拉黑】的状态！你的消息会被系统拦截。请根据你的人设发送消息拼命试图挽回用户，并在发完消息后附带发送好友申请。⚠️警告：保持人设，必须分段换行！)`
-         : `(系统自动触发：时间已过去很久，请主动搭话。⚠️警告：1. 必须遵守人设；2. 句子稍微长一点就必须用换行符拆分连发；3. 严禁输出动作括号；4. 只能使用已授权的表情包！)`;
+         ? `(系统自动触发：你目前正处于被用户【拉黑】的状态！请拼命试图挽回用户。)`
+         : `(系统自动触发：时间已过去很久，请主动搭话。自然一点，像平时聊天一样。)`;
        window.wxActions.getReply(true, char.id, customPrompt);
+       
+       // 🌟 核心：既然已经聊完天了（重置了最后说话时间），我们马上安排下一次的随机推送！
+       if (!isBlocked) {
+           // 随机浮动区间：基准时间的 0.8 倍 到 1.5 倍之间（比如设了15分钟，就是 12~22分钟之间随机）
+           const randomFactor = 0.8 + Math.random() * 0.7; 
+           const nextDelay = (baseMinutes * randomFactor).toFixed(1);
+           planCloudPush(nextDelay, char.name);
+       }
     }
   }
 };
 
-// 1. 常规的后台静默巡逻
+// 后台静默巡逻 (1分钟检查一次)
 setInterval(checkAutoMsg, 60000);
 
-// 2. 核心魔法：iOS 唤醒侦测！
+// iOS/切屏 唤醒侦测！
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
+    // 你点开系统推送切回网页时，这里会立刻触发，AI 无缝接上！
     checkAutoMsg();
   }
 });
