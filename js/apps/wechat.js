@@ -1473,7 +1473,7 @@ window.wxActions = {
       window.render();
   },
   // 🧠 大脑中枢解析器 (支持被动回复、主动出击、自动记忆、通话自动播放)
-  getReply: async (isAuto = false, targetCharId = null, customPrompt = null) => {
+  getReply: async (isAuto = false, targetCharId = null, customPrompt = null, preGeneratedText = null) => {
     const charId = targetCharId || wxState.activeChatId;
     const chat = store.chats.find(c => c.charId === charId);
     const char = store.contacts.find(c => c.id === charId);
@@ -1506,12 +1506,19 @@ window.wxActions = {
     }
 
     try {
-      const { callLLM } = await import('../utils/llm.js');
-      // 🌟 核心修复：加入 200秒 强制超时机制！防止苹果杀后台导致无限“正在输入”
-      const llmPromise = callLLM(charId, chat.messages, isActive ? wxState.view === 'offlineStory' : false);
-      const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('请求超时（网络波动或被系统掐断）')), 200000));
-      const replyText = await Promise.race([llmPromise, timeoutPromise]);
-      if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
+      let replyText = '';
+      if (preGeneratedText) {
+          // 🌟 核心：如果云端信箱里有生成好的文字，直接白嫖，跳过本地大模型请求！
+          replyText = preGeneratedText;
+          if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
+      } else {
+          // 正常的本地打字逻辑
+          const { callLLM } = await import('../utils/llm.js');
+          const llmPromise = callLLM(charId, chat.messages, isActive ? wxState.view === 'offlineStory' : false);
+          const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('请求超时（网络波动或被系统掐断）')), 200000));
+          replyText = await Promise.race([llmPromise, timeoutPromise]);
+          if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
+      }
 
       // 🌟 终极净化：强行剥离大模型发癫模仿的所有系统标签！
       let remainingText = replyText
@@ -3490,114 +3497,110 @@ export function renderWeChatApp(store) {
   `;
 }
 
-// ================= 🐕 终极 AI 巡逻犬 & 云端唤醒引擎 =================
+// ================= 🧠 云端通用大脑 & 信箱同步引擎 =================
 
-// 1. 向纽约服务器发送专属云端闹钟
-const planCloudPush = async (delayMinutes, charName) => {
+const planCloudBrain = async (delayMinutes, char, llmMessages) => {
   try {
-    const reg = await navigator.serviceWorker.ready;
-    const sub = await reg.pushManager.getSubscription();
-    if (!sub) return; // 没绑定接收天线就不管
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (!sub || !store.apiConfig?.apiKey) return;
 
-    const serverUrl = 'https://neko-hoshino.duckdns.org/auto-plan';
-    await fetch(serverUrl, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'x-secret-token': localStorage.getItem('neko_server_pwd') || '' 
-      },
-      body: JSON.stringify({ 
-        delayMinutes: delayMinutes, 
-        title: charName, 
-        body: '给你发来了一条新消息',
-        endpoint: sub.endpoint 
-      })
-    });
-    console.log(`☁️ 已向纽约云端预定了 ${delayMinutes.toFixed(1)} 分钟后的推送唤醒`);
-  } catch (e) { console.error('推送预定失败:', e); }
+      await fetch('https://neko-hoshino.duckdns.org/auto-plan', {
+          method: 'POST',
+          headers: {
+              'Content-Type': 'application/json',
+              'x-secret-token': localStorage.getItem('neko_server_pwd') || ''
+          },
+          body: JSON.stringify({
+              delayMinutes: delayMinutes,
+              title: char.name,
+              charId: char.id,
+              endpoint: sub.endpoint,
+              apiConfig: store.apiConfig, // 把你的配置全传过去让服务器代跑！
+              llmMessages: llmMessages    // 组装好的弹药
+          })
+      });
+  } catch (e) { console.error('云端大脑连接失败:', e); }
 };
 
-// 2. 核心大脑：检查是否该主动说话了
+window.syncCloudMailbox = async () => {
+  try {
+      const reg = await navigator.serviceWorker.ready;
+      const sub = await reg.pushManager.getSubscription();
+      if (!sub) return;
+
+      const res = await fetch('https://neko-hoshino.duckdns.org/sync-mailbox', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-secret-token': localStorage.getItem('neko_server_pwd') || '' },
+          body: JSON.stringify({ endpoint: sub.endpoint })
+      });
+      const data = await res.json();
+
+      for (const m of data.messages) {
+          const char = store.contacts.find(c => c.id === m.charId);
+          if (char) {
+              window.actions.showToast('✨ 同步云端大脑，消息秒开！');
+              // 🌟 灵魂注入：直接把代跑好的文字塞给 getReply 进行解析和语音播放！
+              window.wxActions.getReply(true, m.charId, null, m.text);
+          }
+      }
+  } catch(e) { console.error('同步信箱失败:', e); }
+};
+
 window.checkAutoMsg = async () => {
   if (wxState.callType) return; 
-  
+
   for (const char of store.contacts) {
     const isBlocked = char.isBlocked === true; 
     if (!char.autoMsgEnabled && !isBlocked) continue; 
     
     const chat = store.chats.find(c => c.charId === char.id);
     if (!chat || chat.messages.length === 0) continue;
-    
     const lastMsg = chat.messages[chat.messages.length - 1];
     if (lastMsg.isHidden) continue; 
     
-    // 🌟 核心模块 1：统计 AI 连续主动发了多少条（打破砂锅问到底计数器）
     let aiConsecutiveCount = 0;
     for (let i = chat.messages.length - 1; i >= 0; i--) {
         const m = chat.messages[i];
-        if (m.isHidden || m.msgType === 'system' || m.msgType === 'recall_system' || m.msgType === 'friend_request') continue;
-        if (m.isMe) break; // 只要你回了一句话，连发计数立刻清零！
+        if (m.isHidden || m.msgType === 'system' || m.msgType === 'recall_system') continue;
+        if (m.isMe) break; 
         aiConsecutiveCount++;
     }
 
-    // 🌟 核心模块 2：半夜静音免扰 (0:00 - 8:00)
-    const now = new Date();
-    const currentHour = now.getHours();
-    // 如果已经是 AI 在连发（说明你没理他），且在半夜，直接让他闭嘴睡觉
-    if (aiConsecutiveCount > 0 && currentHour >= 0 && currentHour < 8) {
-        continue; 
-    }
+    const currentHour = new Date().getHours();
+    if (aiConsecutiveCount > 0 && currentHour >= 0 && currentHour < 8) continue; 
 
-    // 🌟 核心模块 3：计算高冷退避倍数
     let multiplier = 1;
-    if (aiConsecutiveCount >= 4) {
-        // 算法：第4次变成2倍，第5次4倍，第6次8倍... 完全符合你的要求！
-        multiplier = Math.pow(2, aiConsecutiveCount - 3);
-    }
-    
-    const baseMinutes = isBlocked ? 5 : (char.autoMsgInterval || 5); 
-    const targetColdMinutes = baseMinutes * multiplier;
+    if (aiConsecutiveCount >= 4) multiplier = Math.pow(2, aiConsecutiveCount - 3);
+    const targetColdMinutes = (isBlocked ? 5 : (char.autoMsgInterval || 5)) * multiplier;
 
-    const lastTime = new Date(lastMsg.id); 
-    const diffMinutes = (now - lastTime) / 1000 / 60;
-
-    // 🌟 核心模块 4：每次 AI 说完话，立刻给纽约机房定下一次的闹钟
-    // 利用 lastCloudPushMsgId 确保每条消息只定一次闹钟
     if (!lastMsg.isMe && chat.lastCloudPushMsgId !== lastMsg.id) {
          chat.lastCloudPushMsgId = lastMsg.id;
-         // 加上 0.8 ~ 1.2 的随机浮动，让时间不那么机械
          const randomFactor = 0.8 + Math.random() * 0.4;
          const nextDelay = targetColdMinutes * randomFactor;
-         planCloudPush(nextDelay, char.name);
-    }
-
-    // 🌟 核心模块 5：时间到了，触发发消息！
-    if (diffMinutes >= targetColdMinutes && !wxState.isTyping) {
-       console.log(`🐕 巡逻犬触发！连发:${aiConsecutiveCount}次，本次阈值:${targetColdMinutes}分`);
-       
-       // 把真实的客观时间算出来，准备喂给大模型
-       const realTimeStr = Math.floor(diffMinutes) < 60 
-            ? `${Math.floor(diffMinutes)}分钟` 
-            : `${Math.floor(diffMinutes / 60)}小时${Math.floor(diffMinutes % 60)}分钟`;
-
-       const customPrompt = isBlocked 
-         ? `(系统自动触发：你目前正处于被用户【拉黑】的状态！距离你上次试图挽回，客观上仅仅过去了真实的 ${realTimeStr}。请继续试图挽回，绝对不许夸大等待的时间！⚠️警告：必须分段换行！)`
-         : `(系统自动触发：距离你们上次对话在现实中客观流逝了 ${realTimeStr}。请结合这个真实的客观时间跨度来主动搭话。⚠️极其严格的警告：绝对不允许出现“等了你几个小时”这种夸大时间的废话！你只等待了客观的 ${realTimeStr}。自然一点，可以找个借口或分享日常。)`;
          
-       // 召唤大模型！
-       window.wxActions.getReply(true, char.id, customPrompt);
+         const realTimeStr = Math.floor(nextDelay) < 60 ? `${Math.floor(nextDelay)}分钟` : `${Math.floor(nextDelay / 60)}小时${Math.floor(nextDelay % 60)}分钟`;
+         const customPrompt = isBlocked 
+             ? `(系统自动触发：你目前处于被用户【拉黑】的状态！距离上次试图挽回客观上过去了真实的 ${realTimeStr}。请继续试图挽回，绝对不许夸大等待的时间！)`
+             : `(系统自动触发：距离上次对话客观流逝了 ${realTimeStr}。请结合这个真实时间主动搭话。⚠️绝对不允许夸大时间！你只等待了客观的 ${realTimeStr}。自然一点。)`;
+
+         // 临时构建一个加上 Prompt 的聊天记录发给组装器
+         const tempHistory = [...chat.messages, { id: Date.now(), sender: store.personas[0].name, text: customPrompt, isMe: true, isHidden: true, msgType: 'text' }];
+
+         try {
+             const { buildLLMPayload } = await import('../utils/llm.js');
+             // 🌟 完美复用 llm.js 的组装逻辑！
+             const llmMessages = await buildLLMPayload(char.id, tempHistory, false);
+             planCloudBrain(nextDelay, char, llmMessages);
+         } catch(e) { console.error('打包记忆失败:', e); }
     }
   }
 };
 
-// 开启 1 分钟后台静默巡逻
-setInterval(window.checkAutoMsg, 60000);
-// 刚打开网页时也立刻检查一次有没有遗漏的消息
-setTimeout(window.checkAutoMsg, 3000); 
-
-// 核心魔法：iOS 切回网页时的瞬间唤醒侦测！
+setInterval(window.syncCloudMailbox, 15000); 
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
+    window.syncCloudMailbox();
     window.checkAutoMsg();
   }
 });
