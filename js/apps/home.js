@@ -6,37 +6,63 @@ if (!window.homeState) window.homeState = { showAddAudioModal: false, showPlayli
 
 if (!window.homeActions) {
   window.homeActions = {
-    // ================= 🌟 极简密码锁引擎 =================
-    onLockInput: (el) => {
-        // 强制转大写，方便匹配 EAAF99
-        const val = el.value.toUpperCase();
+    // ================= 🌟 极简密码锁引擎 (全平台兼容+粘贴版) =================
+    onLockInput: (index, el) => {
+        el.value = el.value.toUpperCase(); // 强制大写
         
-        // 动态渲染 6 个小圆点
-        for(let i = 0; i < 6; i++) {
-            const circle = document.getElementById('lock-dot-' + i);
-            if (circle) {
-                if (i < val.length) {
-                    circle.className = 'w-3.5 h-3.5 rounded-full bg-white transition-all duration-150 shadow-sm scale-110';
-                } else {
-                    circle.className = 'w-3.5 h-3.5 rounded-full border-[1.5px] border-white/50 transition-all duration-150';
-                }
-            }
+        // 自动跳到下一个框
+        if (el.value.length === 1 && index < 5) {
+            const nextInput = document.getElementById(`lock-input-${index + 1}`);
+            if (nextInput) nextInput.focus();
         }
         
-        // 满 6 位开始校验
+        window.homeActions.checkLock();
+    },
+    
+    onLockKeydown: (index, e) => {
+        // 按退格键时自动跳到上一个框
+        if (e.key === 'Backspace' && e.target.value === '' && index > 0) {
+            const prevInput = document.getElementById(`lock-input-${index - 1}`);
+            if (prevInput) prevInput.focus();
+        }
+    },
+    
+    onLockPaste: (e) => {
+        e.preventDefault();
+        const text = (e.clipboardData || window.clipboardData).getData('text').toUpperCase().trim().slice(0, 6);
+        for(let i = 0; i < text.length; i++) {
+            const input = document.getElementById(`lock-input-${i}`);
+            if(input) {
+                input.value = text[i];
+                if(i < 5) document.getElementById(`lock-input-${i+1}`).focus();
+            }
+        }
+        window.homeActions.checkLock();
+    },
+
+    checkLock: () => {
+        let val = '';
+        for(let i = 0; i < 6; i++) {
+            const input = document.getElementById(`lock-input-${i}`);
+            if(input) val += input.value;
+        }
+        
         if(val.length === 6) {
             if(val === 'EAAF99') {
                 localStorage.setItem('neko_server_pwd', 'EAAF99');
-                window.actions.showToast('欢迎回来');
+                window.actions.showToast('欢迎回来，Eve');
                 window.render();
             } else {
-                // 密码错误：触发左右摇晃动画并清空
-                const container = document.getElementById('lock-container');
+                // 密码错误：左右摇晃并清空
+                const container = document.getElementById('lock-slots');
                 if(container) container.style.animation = 'shake 0.4s ease-in-out';
                 setTimeout(() => {
                     if(container) container.style.animation = '';
-                    el.value = '';
-                    window.homeActions.onLockInput(el); // 重置圆点
+                    for(let i = 0; i < 6; i++) {
+                        const input = document.getElementById(`lock-input-${i}`);
+                        if(input) input.value = '';
+                    }
+                    document.getElementById('lock-input-0').focus();
                 }, 400);
             }
         }
@@ -64,7 +90,7 @@ if (!window.homeActions) {
     openPlaylist: () => { window.homeState.showPlaylistModal = true; window.render(); },
     closePlaylist: () => { window.homeState.showPlaylistModal = false; window.render(); },
 
-    // 加号管理：详细参数导入引擎 (支持 歌名/歌手)
+    // 加号管理：详细参数导入引擎
     triggerLocalUpload: () => { document.getElementById('upload-bg-audio').click(); window.homeState.showAddAudioModal = false; window.render(); },
     confirmUrlAudio: () => {
         let url = document.getElementById('audio-url-input').value.trim();
@@ -74,7 +100,6 @@ if (!window.homeActions) {
         if (!url) return window.actions.showToast('请输入有效的音频直链 URL');
         if (!url.startsWith('http')) return window.actions.showToast('URL必须以 http(s) 开头');
         
-        // GitHub 加速转换
         if (url.includes('raw.githubusercontent.com')) url = url.replace('https://raw.githubusercontent.com/', 'https://cdn.jsdelivr.net/gh/').replace('/main/', '@main/').replace('/master/', '@master/');
         else if (url.includes('github.com') && url.includes('/blob/')) url = url.replace('https://github.com/', 'https://cdn.jsdelivr.net/gh/').replace('/blob/main/', '@main/').replace('/blob/master/', '@master/');
 
@@ -122,7 +147,7 @@ if (!window.homeActions) {
         
         if (window.audioPlaylist.length === 0) {
             window.audioState.isPlaying = false;
-            window.audioPlayer.loadAndPlay(); // 内部判断会执行清空和停播
+            window.audioPlayer.loadAndPlay();
         } else {
             if (window.audioState.currentIndex >= window.audioPlaylist.length) window.audioState.currentIndex = 0;
             window.audioPlayer.loadAndPlay();
@@ -183,7 +208,6 @@ export function renderHomeApp(store) {
   const isLocked = localStorage.getItem('neko_server_pwd') !== 'EAAF99';
   
   if (isLocked) {
-      // 动态获取当前时间，打造逼真的 iOS 锁屏
       const now = new Date();
       const hours = String(now.getHours()).padStart(2, '0');
       const minutes = String(now.getMinutes()).padStart(2, '0');
@@ -202,35 +226,32 @@ export function renderHomeApp(store) {
             40%, 80% { transform: translateX(15px); }
           }
         </style>
-        <div class="w-full h-full relative flex flex-col items-center select-none overflow-hidden animate-in fade-in duration-500" style="${lockBgStyle}" onclick="document.getElementById('lock-input').focus()">
+        <div class="w-full h-full relative flex flex-col items-center select-none overflow-hidden animate-in fade-in duration-500" style="${lockBgStyle}">
           
           <div class="absolute inset-0 bg-black/40 backdrop-blur-2xl"></div>
           
-          <div class="relative z-10 flex flex-col items-center w-full pt-[12vh] animate-in slide-in-from-top-4 duration-500 delay-100">
+          <div class="relative z-10 flex flex-col items-center w-full pt-[12vh] animate-in slide-in-from-top-4 duration-500 delay-100 pointer-events-none">
              <i data-lucide="lock" class="text-white mb-3 drop-shadow-md" style="width: 22px; height: 22px;"></i>
              <div class="text-white text-[5.5rem] font-light tracking-tight leading-none mb-2 drop-shadow-lg font-sans">${timeStr}</div>
              <div class="text-white/90 text-[17px] font-medium tracking-wide drop-shadow-md">${dateStr}</div>
           </div>
 
-          <div class="relative z-10 flex flex-col items-center mt-auto pb-[30vh] w-full" id="lock-container">
-             <span class="text-white text-[15px] mb-6 font-medium tracking-widest drop-shadow-md">输入密码</span>
+          <div class="relative z-10 flex flex-col items-center mt-auto pb-[30vh] w-full">
+             <span class="text-white text-[15px] mb-6 font-medium tracking-widest drop-shadow-md">输入系统口令</span>
              
-             <div class="flex space-x-6 relative px-4" id="lock-slots">
-                <input id="lock-input" type="text" maxlength="6" 
-                       class="absolute inset-0 w-full h-full opacity-0 text-[1px] text-transparent cursor-text caret-transparent z-50" 
-                       oninput="window.homeActions.onLockInput(this)" 
-                       autofocus autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" />
-                
-                <div id="lock-dot-0" class="w-3.5 h-3.5 rounded-full border-[1.5px] border-white/50 transition-all duration-150"></div>
-                <div id="lock-dot-1" class="w-3.5 h-3.5 rounded-full border-[1.5px] border-white/50 transition-all duration-150"></div>
-                <div id="lock-dot-2" class="w-3.5 h-3.5 rounded-full border-[1.5px] border-white/50 transition-all duration-150"></div>
-                <div id="lock-dot-3" class="w-3.5 h-3.5 rounded-full border-[1.5px] border-white/50 transition-all duration-150"></div>
-                <div id="lock-dot-4" class="w-3.5 h-3.5 rounded-full border-[1.5px] border-white/50 transition-all duration-150"></div>
-                <div id="lock-dot-5" class="w-3.5 h-3.5 rounded-full border-[1.5px] border-white/50 transition-all duration-150"></div>
+             <div class="flex space-x-2 relative px-4 justify-center" id="lock-slots">
+                ${[0, 1, 2, 3, 4, 5].map(i => `
+                  <input id="lock-input-${i}" type="text" maxlength="1"
+                         class="w-12 h-14 bg-white/20 border border-white/50 rounded-xl text-center text-white text-2xl font-bold outline-none focus:border-white focus:bg-white/30 transition-all shadow-sm uppercase placeholder-transparent"
+                         oninput="window.homeActions.onLockInput(${i}, this)"
+                         onkeydown="window.homeActions.onLockKeydown(${i}, event)"
+                         onpaste="window.homeActions.onLockPaste(event)"
+                         ${i === 0 ? 'autofocus' : ''} />
+                `).join('')}
              </div>
           </div>
           
-          <div class="absolute bottom-2 left-1/2 -translate-x-1/2 w-1/3 h-1 bg-white/80 rounded-full z-10 shadow-sm"></div>
+          <div class="absolute bottom-2 left-1/2 -translate-x-1/2 w-1/3 h-1 bg-white/80 rounded-full z-10 shadow-sm pointer-events-none"></div>
         </div>
       `;
   }
