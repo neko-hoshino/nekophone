@@ -3492,31 +3492,33 @@ export function renderWeChatApp(store) {
 
 // ================= 🐕 终极 AI 巡逻犬 & 云端唤醒引擎 =================
 
+// 1. 向纽约服务器发送专属云端闹钟
 const planCloudPush = async (delayMinutes, charName) => {
   try {
-    // 🌟 每次定闹钟前，先去浏览器底层拿到自己的设备ID
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.getSubscription();
-    if (!sub) return; // 没绑定就不操作
+    if (!sub) return; // 没绑定接收天线就不管
 
     const serverUrl = 'https://neko-hoshino.duckdns.org/auto-plan';
     await fetch(serverUrl, {
       method: 'POST',
       headers: { 
         'Content-Type': 'application/json',
-        'x-secret-token': localStorage.getItem('neko_server_pwd') || ''
+        'x-secret-token': localStorage.getItem('neko_server_pwd') || '' 
       },
       body: JSON.stringify({ 
         delayMinutes: delayMinutes, 
         title: charName, 
         body: '给你发来了一条新消息',
-        endpoint: sub.endpoint // 👈 核心：把自己的设备号交上去，告诉服务器到底要给谁定闹钟
+        endpoint: sub.endpoint 
       })
     });
-  } catch (e) { console.error(e); }
+    console.log(`☁️ 已向纽约云端预定了 ${delayMinutes.toFixed(1)} 分钟后的推送唤醒`);
+  } catch (e) { console.error('推送预定失败:', e); }
 };
-// 2. 检查是否该主动说话了
-const checkAutoMsg = async () => {
+
+// 2. 核心大脑：检查是否该主动说话了
+window.checkAutoMsg = async () => {
   if (wxState.callType) return; 
   
   for (const char of store.contacts) {
@@ -3529,39 +3531,73 @@ const checkAutoMsg = async () => {
     const lastMsg = chat.messages[chat.messages.length - 1];
     if (lastMsg.isHidden) continue; 
     
-    // 🌟 如果被拉黑，5分钟一次；如果没拉黑，读取你设置的基准时间
-    const baseMinutes = isBlocked ? 5 : (char.autoMsgInterval || 15); 
-    
-    const lastTime = new Date(lastMsg.id); 
+    // 🌟 核心模块 1：统计 AI 连续主动发了多少条（打破砂锅问到底计数器）
+    let aiConsecutiveCount = 0;
+    for (let i = chat.messages.length - 1; i >= 0; i--) {
+        const m = chat.messages[i];
+        if (m.isHidden || m.msgType === 'system' || m.msgType === 'recall_system' || m.msgType === 'friend_request') continue;
+        if (m.isMe) break; // 只要你回了一句话，连发计数立刻清零！
+        aiConsecutiveCount++;
+    }
+
+    // 🌟 核心模块 2：半夜静音免扰 (0:00 - 8:00)
     const now = new Date();
+    const currentHour = now.getHours();
+    // 如果已经是 AI 在连发（说明你没理他），且在半夜，直接让他闭嘴睡觉
+    if (aiConsecutiveCount > 0 && currentHour >= 0 && currentHour < 8) {
+        continue; 
+    }
+
+    // 🌟 核心模块 3：计算高冷退避倍数
+    let multiplier = 1;
+    if (aiConsecutiveCount >= 4) {
+        // 算法：第4次变成2倍，第5次4倍，第6次8倍... 完全符合你的要求！
+        multiplier = Math.pow(2, aiConsecutiveCount - 3);
+    }
+    
+    const baseMinutes = isBlocked ? 5 : (char.autoMsgInterval || 5); 
+    const targetColdMinutes = baseMinutes * multiplier;
+
+    const lastTime = new Date(lastMsg.id); 
     const diffMinutes = (now - lastTime) / 1000 / 60;
 
-    // 🌟 如果当前时间已经超过了基准时间，说明该发消息了！
-    if (diffMinutes >= baseMinutes && !wxState.isTyping) {
-       console.log("🐕 巡逻犬出动，正在呼叫大模型...");
-       const customPrompt = isBlocked 
-         ? `(系统自动触发：你目前正处于被用户【拉黑】的状态！请拼命试图挽回用户。)`
-         : `(系统自动触发：时间已过去很久，请主动搭话。自然一点，像平时聊天一样。)`;
-       window.wxActions.getReply(true, char.id, customPrompt);
+    // 🌟 核心模块 4：每次 AI 说完话，立刻给纽约机房定下一次的闹钟
+    // 利用 lastCloudPushMsgId 确保每条消息只定一次闹钟
+    if (!lastMsg.isMe && chat.lastCloudPushMsgId !== lastMsg.id) {
+         chat.lastCloudPushMsgId = lastMsg.id;
+         // 加上 0.8 ~ 1.2 的随机浮动，让时间不那么机械
+         const randomFactor = 0.8 + Math.random() * 0.4;
+         const nextDelay = targetColdMinutes * randomFactor;
+         planCloudPush(nextDelay, char.name);
+    }
+
+    // 🌟 核心模块 5：时间到了，触发发消息！
+    if (diffMinutes >= targetColdMinutes && !wxState.isTyping) {
+       console.log(`🐕 巡逻犬触发！连发:${aiConsecutiveCount}次，本次阈值:${targetColdMinutes}分`);
        
-       // 🌟 核心：既然已经聊完天了（重置了最后说话时间），我们马上安排下一次的随机推送！
-       if (!isBlocked) {
-           // 随机浮动区间：基准时间的 0.8 倍 到 1.5 倍之间（比如设了15分钟，就是 12~22分钟之间随机）
-           const randomFactor = 0.8 + Math.random() * 0.7; 
-           const nextDelay = (baseMinutes * randomFactor).toFixed(1);
-           planCloudPush(nextDelay, char.name);
-       }
+       // 把真实的客观时间算出来，准备喂给大模型
+       const realTimeStr = Math.floor(diffMinutes) < 60 
+            ? `${Math.floor(diffMinutes)}分钟` 
+            : `${Math.floor(diffMinutes / 60)}小时${Math.floor(diffMinutes % 60)}分钟`;
+
+       const customPrompt = isBlocked 
+         ? `(系统自动触发：你目前正处于被用户【拉黑】的状态！距离你上次试图挽回，客观上仅仅过去了真实的 ${realTimeStr}。请继续试图挽回，绝对不许夸大等待的时间！⚠️警告：必须分段换行！)`
+         : `(系统自动触发：距离你们上次对话在现实中客观流逝了 ${realTimeStr}。请结合这个真实的客观时间跨度来主动搭话。⚠️极其严格的警告：绝对不允许出现“等了你几个小时”这种夸大时间的废话！你只等待了客观的 ${realTimeStr}。自然一点，可以找个借口或分享日常。)`;
+         
+       // 召唤大模型！
+       window.wxActions.getReply(true, char.id, customPrompt);
     }
   }
 };
 
-// 后台静默巡逻 (1分钟检查一次)
-setInterval(checkAutoMsg, 60000);
+// 开启 1 分钟后台静默巡逻
+setInterval(window.checkAutoMsg, 60000);
+// 刚打开网页时也立刻检查一次有没有遗漏的消息
+setTimeout(window.checkAutoMsg, 3000); 
 
-// iOS/切屏 唤醒侦测！
+// 核心魔法：iOS 切回网页时的瞬间唤醒侦测！
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') {
-    // 你点开系统推送切回网页时，这里会立刻触发，AI 无缝接上！
-    checkAutoMsg();
+    window.checkAutoMsg();
   }
 });
