@@ -27,7 +27,7 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
    - 聊天记录每一句话前面都附带了类似 [22:20] 的时间戳，这是给你判断时间流逝用的。
    - ❗警告：你回复时【绝对禁止】模仿和输出时间戳、[系统提示]、[好友申请] 等任何系统标签！只准输出你要说的话的正文！
 
-1. [线上聊天]：单句严禁超过24字，长句必须用换行符(\\n)拆分连发！句末禁句号。严禁使用星号或括号写动作！
+1. 每行严禁超过24字，长句必须用换行符(\\n)拆分连发！必须混用短词和中长句！句末禁句号。严禁使用星号或括号写动作！
 2. [线下剧情]采用小说体裁，自然分段。
 3. 只有在音视频通话中，才能用星号*包裹动作。
    
@@ -110,7 +110,18 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
     messages.push({ role: m.isMe ? 'user' : 'assistant', content: msgContent });
   });
 
-  if (backStr) messages.push({ role: 'system', content: backStr });
+  // ================= 🌟 第六步：强制压入底层绝对指令 & 发送前最终警告 =================
+  let finalSystemPrompt = backStr || '';
+  
+  if (!isOffline) {
+      // 在线上聊天模式下，在所有历史记录的最后，再次狠狠地强调格式！
+      finalSystemPrompt += `\n\n【⚠️发送前最高警告】：你现在是在微信界面聊天，每行文字严禁超过24个字！若想说长句，必须按自然语言结构拆分！必须混用短句和中长句，禁止节奏单调！绝对禁止带系统时间戳或括号动作描写！像个正常人一样立刻说话！`;
+  }
+
+  if (finalSystemPrompt.trim()) {
+      messages.push({ role: 'system', content: finalSystemPrompt.trim() });
+  }
+
   return messages;
 }
 
