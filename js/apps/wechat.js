@@ -1734,7 +1734,108 @@ window.wxActions = {
       let msgsToPush = [];
       let delayedActions = [];
       let hasSystemAction = false;
+      // ================= 🌟 找回的超能力拦截引擎 =================
       
+      if (/\[发起(语音|视频)?通话\]/.test(remainingText)) {
+        if (wxState.view === 'call') {
+          remainingText = remainingText.replace(/\[发起(语音|视频)?通话\][:：]?\s*/g, '').trim();
+        } else {
+          const match = remainingText.match(/\[发起(语音|视频)?通话\]/);
+          let parts = remainingText.split(/\[发起(语音|视频)?通话\][:：]?\s*/);
+          if (parts[0].trim()) { chat.messages.push({ id: Date.now(), sender: char.name, text: parts[0].trim(), isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'text', time: getNowTime() }); }
+          wxState.pendingCallMsg = parts[2] ? parts[2].trim() : '';
+          wxState.view = 'incomingCall'; wxState.callType = match[1] === '视频' ? 'video' : 'voice'; wxState.isTyping = false; 
+          try { 
+            const ap = store.appearance || {};
+            wxState.ringtone.src = ap.callSound || 'https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3';
+            wxState.ringtone.play(); 
+          } catch(e){}
+          return window.render(); 
+        }
+      }
+      
+      if (/\[(语音|视频)?通话(已)?结束\]/.test(remainingText)) { delayedActions.push('end_call'); remainingText = remainingText.replace(/\[(语音|视频)?通话(已)?结束\][:：]?\s*/g, '').trim(); }
+      if (/\[(点击收款|接收转账)\]/.test(remainingText)) { delayedActions.push('accept_transfer'); remainingText = remainingText.replace(/\[(点击收款|接收转账)\][:：]?\s*/g, '').trim(); }
+      
+      if (/\[(?:发朋友圈|发布朋友圈)\]/.test(remainingText)) {
+        const match = remainingText.match(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*([^\n\[\]]+)/);
+        if (match) {
+          store.moments = store.moments || [];
+          store.moments.push({ id: Date.now(), senderId: char.id, senderName: char.name, avatar: char.avatar, text: match[1].trim(), imageUrl: null, time: '刚刚', likes: [], comments: [] });
+          hasSystemAction = true;
+        }
+        remainingText = remainingText.replace(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*[^\n\[\]]+/, '').trim();
+      }
+      
+      if (/\[更换头像\]/.test(remainingText)) {
+        const match = remainingText.match(/\[更换头像\][:：]?\s*([^\n\[\]]+)/);
+        if (match) {
+          let newAvatar = match[1].trim();
+          if (newAvatar.includes('最新图片')) {
+            const lastImgMsg = chat.messages.slice().reverse().find(m => m.msgType === 'real_image');
+            newAvatar = (lastImgMsg && lastImgMsg.imageUrl) ? lastImgMsg.imageUrl : '❓';
+          }
+          char.avatar = newAvatar;
+          chat.messages.push({ id: Date.now() + 150, sender: 'system', text: `${char.name} 更改了TA的头像`, isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'system', time: getNowTime() });
+          hasSystemAction = true;
+        }
+        remainingText = remainingText.replace(/\[更换头像\][:：]?\s*[^\n\[\]]+/, '').trim();
+      }
+
+      // 🌟 核心：表情包拦截器！
+      if (/\[(?:发送表情|表情包)\]/.test(remainingText)) {
+        const match = remainingText.match(/\[(?:发送表情|表情包)\][:：]?\s*([^\n\[\]]+)/);
+        if (match) {
+          const emojiName = match[1].trim();
+          let foundUrl = '';
+          for (let libId of (char.mountedEmojis || [])) {
+             const lib = (store.emojiLibs || []).find(l => l.id === libId);
+             if (lib) {
+                 const ep = lib.emojis.find(e => (typeof e === 'object' ? e.name : '') === emojiName);
+                 if (ep) { foundUrl = ep.url; break; }
+             }
+          }
+          if (foundUrl) {
+              // 匹配到了表情包，直接推入消息队列渲染！
+              chat.messages.push({ id: Date.now() + 150, sender: char.name, text: `[表情包] ${emojiName}`, imageUrl: foundUrl, isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'emoji', time: getNowTime() });
+              hasSystemAction = true;
+          }
+        }
+        remainingText = remainingText.replace(/\[(?:发送表情|表情包)\][:：]?\s*[^\n\[\]]*/, '').trim();
+      }
+
+      if (/\[修改备注\]/.test(remainingText)) {
+        const match = remainingText.match(/\[修改备注\][:：]?\s*([^\n\[\]]+)/);
+        if (match) {
+          store.personas[0].name = match[1].trim().substring(0, 15);
+          chat.messages.push({ id: Date.now() + 160, sender: 'system', text: `${char.name} 将你的备注修改为“${store.personas[0].name}”`, isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'system', time: getNowTime() });
+          hasSystemAction = true;
+        }
+        remainingText = remainingText.replace(/\[修改备注\][:：]?\s*[^\n\[\]]+/, '').trim();
+      }
+
+      if (/\[撤回上一条消息\]/.test(remainingText)) {
+        const aiMsgs = chat.messages.filter(m => !m.isMe && m.msgType !== 'system' && m.msgType !== 'recall_system');
+        if (aiMsgs.length > 0) {
+          const lastAiMsg = aiMsgs[aiMsgs.length - 1];
+          lastAiMsg.recalledText = lastAiMsg.text; 
+          lastAiMsg.text = `${char.name} 撤回了一条消息`;
+          lastAiMsg.msgType = 'recall_system'; 
+          lastAiMsg.quote = null;
+        }
+        remainingText = remainingText.replace(/\[撤回上一条消息\][:：]?\s*/, '').trim();
+        hasSystemAction = true;
+      }
+
+      if (/\[戳一戳\]/.test(remainingText)) {
+        const verb = char.nudgeAIVerb || '拍了拍';
+        const suffix = char.nudgeAISuffix || '';
+        chat.messages.push({ id: Date.now() + 50, sender: 'system', text: `${char.name}${verb}了我${suffix}`, isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'system', time: getNowTime() });
+        remainingText = remainingText.replace(/\[戳一戳\][:：]?\s*/g, '').trim();
+        hasSystemAction = true;
+      }
+      
+      // =======================================================
       if (wxState.view === 'chatRoom') remainingText = remainingText.replace(/\*[^*]*\*/g, '').replace(/[(（][^)）]*[)）]/g, '').trim();
 
       if (/\[发起转账\]/.test(remainingText)) {
@@ -1798,6 +1899,7 @@ window.wxActions = {
           }
         }
       }
+      //一条一条推送，模拟打字效果
       const finalMsgs = [];
       msgsToPush.forEach((m, index) => {
         finalMsgs.push({ 
@@ -1806,7 +1908,7 @@ window.wxActions = {
           isIntercepted: char.isBlocked ? true : false 
         });
       });
-
+      // 🌟 核心修复 2：如果角色被封禁了，强行在最后追加一个好友申请的系统消息，提示用户去处理好友关系
       if (char.isBlocked && msgsToPush.length > 0) {
          finalMsgs.push({ id: Date.now() + 999, sender: 'system', text: '好友申请', msgType: 'friend_request', isMe: false, time: getNowTime() });
       }
@@ -1814,7 +1916,7 @@ window.wxActions = {
       for (let i = 0; i < finalMsgs.length; i++) {
          const newMsg = finalMsgs[i];
          chat.messages.push(newMsg);
-
+         
          if (!isCall && newMsg.msgType !== 'system') {
              try { const ap = store.appearance || {}; new Audio(ap.newMsgSound || 'https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3').play().catch(()=>{}); } catch(e) {}
          }
