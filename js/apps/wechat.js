@@ -185,6 +185,32 @@ window.wxActions = {
     window.render();
     restoreScroll();
   },
+  // ================= 🎵 终极语音播放引擎 =================
+  playVoiceMsg: (msgId) => {
+      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+      if (!chat) return;
+      const msg = chat.messages.find(m => m.id === msgId);
+      if (!msg) return;
+
+      if (msg.audioUrl) {
+          if (wxState.playingAudio) {
+              wxState.playingAudio.pause();
+              if (wxState.playingMsgId === msgId) { 
+                  wxState.playingMsgId = null; wxState.playingAudio = null; window.render(); return; 
+              }
+          }
+          // 因为现在是 Base64，所以即使不用强制交互，浏览器也大概率会乖乖出声
+          const audio = new Audio(msg.audioUrl);
+          wxState.playingAudio = audio; 
+          wxState.playingMsgId = msgId; 
+          window.render();
+          
+          audio.play().catch(e => window.actions.showToast('播放被浏览器拦截，请再点一次'));
+          audio.onended = () => { wxState.playingMsgId = null; wxState.playingAudio = null; window.render(); };
+      } else {
+          window.actions.showToast('后台正在生成语音，请稍等两秒再点...');
+      }
+  },
   clearChatHistory: () => {
       if(!confirm('⚠️ 确定要清空当前窗口的聊天记录吗？此操作不会删除角色或其记忆设定。')) return;
       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
@@ -1395,7 +1421,6 @@ window.wxActions = {
     window.actions.showToast('设置已生效！');
     wxState.view = 'chatRoom'; window.render(); restoreScroll();
   },
-
   sendMessage: () => {
     const isOffline = wxState.view === 'offlineStory';
     const isCall = wxState.view === 'call';
@@ -1497,7 +1522,11 @@ window.wxActions = {
     chat.messages.push({ id: Date.now(), sender: 'system', text: `你发起了${type === 'video' ? '视频' : '语音'}通话`, isMe: true, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
     wxState.view = 'call'; wxState.callType = type; wxState.callStartTime = Date.now(); wxState.showPlusMenu = false; 
 
-    // 🌟 修复：你主动打电话也装上秒表
+    // 🌟 核心防御：趁着你点拨打的瞬间，给全局播放器喂一口静音，抢占浏览器白名单！
+    if (!window.wxCallPlayer) window.wxCallPlayer = new Audio();
+    window.wxCallPlayer.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+    window.wxCallPlayer.play().catch(()=>{});
+
     wxState.callDurationSeconds = 0;
     if(wxState.callTimerId) clearInterval(wxState.callTimerId);
     wxState.callTimerId = setInterval(() => {
@@ -1509,7 +1538,6 @@ window.wxActions = {
         el.innerText = `${m}:${s}`;
       }
     }, 1000);
-
     window.render(); window.wxActions.scrollToBottom();
   },
   
@@ -1519,21 +1547,19 @@ window.wxActions = {
     chat.messages.push({ id: Date.now(), sender: 'system', text: `已接通${wxState.callType === 'video' ? '视频' : '语音'}通话`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
     wxState.view = 'call'; wxState.callStartTime = Date.now(); 
     
-    // 🌟 新增：开启独立秒表
+    // 🌟 核心防御：趁着接听的瞬间，抢占白名单！
+    if (!window.wxCallPlayer) window.wxCallPlayer = new Audio();
+    window.wxCallPlayer.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+    window.wxCallPlayer.play().catch(()=>{});
+
     wxState.callDurationSeconds = 0;
     if(wxState.callTimerId) clearInterval(wxState.callTimerId);
     wxState.callTimerId = setInterval(() => {
       wxState.callDurationSeconds++;
       const el = document.getElementById('call-duration-display');
-      if(el) {
-        const m = String(Math.floor(wxState.callDurationSeconds / 60)).padStart(2, '0');
-        const s = String(wxState.callDurationSeconds % 60).padStart(2, '0');
-        el.innerText = `${m}:${s}`;
-      }
+      if(el) el.innerText = `${String(Math.floor(wxState.callDurationSeconds / 60)).padStart(2, '0')}:${String(wxState.callDurationSeconds % 60).padStart(2, '0')}`;
     }, 1000);
-
     window.render();
-    
     if (wxState.pendingCallMsg) {
       setTimeout(() => {
         chat.messages.push({ id: Date.now() + 1, sender: store.contacts.find(c=>c.id===wxState.activeChatId).name, text: wxState.pendingCallMsg, isMe: false, source: 'wechat', isOffline: false, isCallMsg: true, msgType: 'text', time: getNowTime() });
@@ -1545,14 +1571,14 @@ window.wxActions = {
     try { wxState.ringtone.pause(); wxState.ringtone.currentTime = 0; } catch(e){}
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     chat.messages.push({ id: Date.now(), sender: 'system', text: `已拒绝通话`, isMe: true, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
-    // 🌟 新增：销毁秒表
     if(wxState.callTimerId) { clearInterval(wxState.callTimerId); wxState.callTimerId = null; }
     wxState.view = 'chatRoom'; wxState.callType = null; window.render(); window.wxActions.scrollToBottom();
   },
   endCall: () => {
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     chat.messages.push({ id: Date.now(), sender: 'system', text: `通话已挂断`, isMe: true, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
-    // 🌟 新增：销毁秒表
+    // 🌟 挂断时释放播放器
+    if (window.wxCallPlayer) { window.wxCallPlayer.pause(); window.wxCallPlayer.src = ''; }
     if(wxState.callTimerId) { clearInterval(wxState.callTimerId); wxState.callTimerId = null; }
     wxState.view = 'chatRoom'; wxState.callType = null; wxState.callStartTime = null; window.render(); window.wxActions.scrollToBottom();
   },
@@ -1734,15 +1760,15 @@ window.wxActions = {
       let msgsToPush = [];
       let delayedActions = [];
       let hasSystemAction = false;
-      // ================= 🌟 找回的超能力拦截引擎 =================
       
+      // 拦截电话指令
       if (/\[发起(语音|视频)?通话\]/.test(remainingText)) {
         if (wxState.view === 'call') {
           remainingText = remainingText.replace(/\[发起(语音|视频)?通话\][:：]?\s*/g, '').trim();
         } else {
           const match = remainingText.match(/\[发起(语音|视频)?通话\]/);
           let parts = remainingText.split(/\[发起(语音|视频)?通话\][:：]?\s*/);
-          if (parts[0].trim()) { chat.messages.push({ id: Date.now(), sender: char.name, text: parts[0].trim(), isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'text', time: getNowTime() }); }
+          if (parts[0].trim()) { chat.messages.push({ id: Date.now(), sender: char.name, text: parts[0].trim(), isMe: false, source: 'wechat', isOffline: false, msgType: 'text', time: getNowTime() }); }
           wxState.pendingCallMsg = parts[2] ? parts[2].trim() : '';
           wxState.view = 'incomingCall'; wxState.callType = match[1] === '视频' ? 'video' : 'voice'; wxState.isTyping = false; 
           try { 
@@ -1757,6 +1783,7 @@ window.wxActions = {
       if (/\[(语音|视频)?通话(已)?结束\]/.test(remainingText)) { delayedActions.push('end_call'); remainingText = remainingText.replace(/\[(语音|视频)?通话(已)?结束\][:：]?\s*/g, '').trim(); }
       if (/\[(点击收款|接收转账)\]/.test(remainingText)) { delayedActions.push('accept_transfer'); remainingText = remainingText.replace(/\[(点击收款|接收转账)\][:：]?\s*/g, '').trim(); }
       
+      // 拦截朋友圈
       if (/\[(?:发朋友圈|发布朋友圈)\]/.test(remainingText)) {
         const match = remainingText.match(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*([^\n\[\]]+)/);
         if (match) {
@@ -1767,6 +1794,7 @@ window.wxActions = {
         remainingText = remainingText.replace(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*[^\n\[\]]+/, '').trim();
       }
       
+      // 拦截换头像
       if (/\[更换头像\]/.test(remainingText)) {
         const match = remainingText.match(/\[更换头像\][:：]?\s*([^\n\[\]]+)/);
         if (match) {
@@ -1776,13 +1804,13 @@ window.wxActions = {
             newAvatar = (lastImgMsg && lastImgMsg.imageUrl) ? lastImgMsg.imageUrl : '❓';
           }
           char.avatar = newAvatar;
-          chat.messages.push({ id: Date.now() + 150, sender: 'system', text: `${char.name} 更改了TA的头像`, isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'system', time: getNowTime() });
+          chat.messages.push({ id: Date.now() + 150, sender: 'system', text: `${char.name} 更改了TA的头像`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
           hasSystemAction = true;
         }
         remainingText = remainingText.replace(/\[更换头像\][:：]?\s*[^\n\[\]]+/, '').trim();
       }
 
-      // 🌟 核心：表情包拦截器！
+      // 拦截表情包
       if (/\[(?:发送表情|表情包)\]/.test(remainingText)) {
         const match = remainingText.match(/\[(?:发送表情|表情包)\][:：]?\s*([^\n\[\]]+)/);
         if (match) {
@@ -1796,24 +1824,26 @@ window.wxActions = {
              }
           }
           if (foundUrl) {
-              // 匹配到了表情包，直接推入消息队列渲染！
-              chat.messages.push({ id: Date.now() + 150, sender: char.name, text: `[表情包] ${emojiName}`, imageUrl: foundUrl, isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'emoji', time: getNowTime() });
+              chat.messages.push({ id: Date.now() + 150, sender: char.name, text: `[表情包] ${emojiName}`, imageUrl: foundUrl, isMe: false, source: 'wechat', isOffline: false, msgType: 'emoji', time: getNowTime() });
               hasSystemAction = true;
           }
         }
+        // 🌟 核心修复：只精准抹除这一行的指令，不再吃掉后面的连发文字！
         remainingText = remainingText.replace(/\[(?:发送表情|表情包)\][:：]?\s*[^\n\[\]]*/, '').trim();
       }
 
+      // 拦截改备注
       if (/\[修改备注\]/.test(remainingText)) {
         const match = remainingText.match(/\[修改备注\][:：]?\s*([^\n\[\]]+)/);
         if (match) {
           store.personas[0].name = match[1].trim().substring(0, 15);
-          chat.messages.push({ id: Date.now() + 160, sender: 'system', text: `${char.name} 将你的备注修改为“${store.personas[0].name}”`, isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'system', time: getNowTime() });
+          chat.messages.push({ id: Date.now() + 160, sender: 'system', text: `${char.name} 将你的备注修改为“${store.personas[0].name}”`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
           hasSystemAction = true;
         }
         remainingText = remainingText.replace(/\[修改备注\][:：]?\s*[^\n\[\]]+/, '').trim();
       }
 
+      // 拦截撤回
       if (/\[撤回上一条消息\]/.test(remainingText)) {
         const aiMsgs = chat.messages.filter(m => !m.isMe && m.msgType !== 'system' && m.msgType !== 'recall_system');
         if (aiMsgs.length > 0) {
@@ -1827,15 +1857,15 @@ window.wxActions = {
         hasSystemAction = true;
       }
 
+      // 拦截对方反击的戳一戳
       if (/\[戳一戳\]/.test(remainingText)) {
         const verb = char.nudgeAIVerb || '拍了拍';
         const suffix = char.nudgeAISuffix || '';
-        chat.messages.push({ id: Date.now() + 50, sender: 'system', text: `${char.name}${verb}了我${suffix}`, isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'system', time: getNowTime() });
+        chat.messages.push({ id: Date.now() + 50, sender: 'system', text: `${char.name}${verb}了我${suffix}`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
         remainingText = remainingText.replace(/\[戳一戳\][:：]?\s*/g, '').trim();
         hasSystemAction = true;
       }
-      
-      // =======================================================
+
       if (wxState.view === 'chatRoom') remainingText = remainingText.replace(/\*[^*]*\*/g, '').replace(/[(（][^)）]*[)）]/g, '').trim();
 
       if (/\[发起转账\]/.test(remainingText)) {
@@ -1871,7 +1901,7 @@ window.wxActions = {
         if (restText) msgsToPush.push({ msgType: 'text', text: restText });
       } else {
         if (remainingText.trim()) {
-          if (wxState.view === 'offlineStory' || wxState.view === 'sideStory') { 
+          if (wxState.view === 'offlineStory') { 
             let finalOfflineText = remainingText.trim();
             codeBlocks.forEach((code, idx) => {
                 finalOfflineText = finalOfflineText.replace(`__CODE_BLOCK_${idx}__`, `<br/><div class="mc-html-card my-2 w-full overflow-hidden">${code}</div><br/>`);
@@ -1899,13 +1929,13 @@ window.wxActions = {
           }
         }
       }
-      //一条一条推送，模拟打字效果
+      // 🌟 核心升级：模拟真人“一条一条发”的拟真节奏
       const finalMsgs = [];
       msgsToPush.forEach((m, index) => {
         finalMsgs.push({ 
           id: Date.now() + index, sender: m.msgType === 'system' ? 'system' : char.name, text: m.text, isMe: false, source: 'wechat', 
-          isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime(),
-          isIntercepted: char.isBlocked ? true : false 
+          isOffline: wxState.view === 'offlineStory', isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime(),
+          isIntercepted: char.isBlocked ? true : false // 🌟 打上拦截标记
         });
       });
       // 🌟 核心修复 2：如果角色被封禁了，强行在最后追加一个好友申请的系统消息，提示用户去处理好友关系
@@ -1916,13 +1946,44 @@ window.wxActions = {
       for (let i = 0; i < finalMsgs.length; i++) {
          const newMsg = finalMsgs[i];
          chat.messages.push(newMsg);
-         
+
+         // 气泡第一时间上屏，绝不卡 UI
+         if (isActive) { window.render(); setTimeout(() => window.wxActions.scrollToBottom(), 50); }
+
+         let callAudioPlayed = false;
+
+         if (char.minimaxVoiceId && store.minimaxConfig?.enabled !== false && store.minimaxConfig?.apiKey) {
+             if (isCall && newMsg.msgType === 'text') {
+                 // 📞 电话模式：强行死等下载，并且只用那个拥有金牌的播放器念出来！
+                 const url = await fetchMinimaxVoice(newMsg.text, char.minimaxVoiceId);
+                 if (url && wxState.view === 'call') { 
+                    newMsg.audioUrl = url; 
+                    await new Promise(resolve => { 
+                        if (!window.wxCallPlayer) window.wxCallPlayer = new Audio();
+                        window.wxCallPlayer.src = url;
+                        window.wxCallPlayer.onended = resolve;
+                        window.wxCallPlayer.onerror = resolve;
+                        window.wxCallPlayer.play().catch(() => resolve()); // 即便被拦截也立刻放行下一句
+                    });
+                    callAudioPlayed = true;
+                 }
+             } else if (newMsg.msgType === 'voice') {
+                 // 🎵 语音条模式：直接派一只野狗去后台下载，下载完了给气泡亮个绿灯
+                 (async () => {
+                    const url = await fetchMinimaxVoice(newMsg.text, char.minimaxVoiceId);
+                    if (url) { newMsg.audioUrl = url; if(isActive) window.render(); }
+                 })();
+             }
+         }
+
          if (!isCall && newMsg.msgType !== 'system') {
              try { const ap = store.appearance || {}; new Audio(ap.newMsgSound || 'https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3').play().catch(()=>{}); } catch(e) {}
          }
 
-         if (isActive) { window.render(); setTimeout(() => window.wxActions.scrollToBottom(), 50); }
-         if (i < finalMsgs.length - 1) await new Promise(resolve => setTimeout(resolve, Math.min(Math.max(newMsg.text.length * 60, 600), 2500)));
+         // 只有当电话没有发声时（或者普通文字聊天），才需要模拟人打字的时间间隔
+         if (i < finalMsgs.length - 1 && !callAudioPlayed) {
+             await new Promise(resolve => setTimeout(resolve, Math.min(Math.max(newMsg.text.length * 60, 600), 2500)));
+         }
       }
 
       if (msgsToPush.length === 0 && !hasSystemAction) {
@@ -3051,10 +3112,11 @@ export function renderWeChatApp(store) {
         bubbleStyle = '';
         const duration = Math.min(Math.max(Math.round(msg.text.length / 4), 2), 60); const numBars = Math.min(8 + Math.floor(duration * 1.8), 45); 
         let barsHtml = ''; for (let i = 0; i < numBars; i++) barsHtml += `<div class="w-[2px] ${['h-2', 'h-4', 'h-3', 'h-5', 'h-2', 'h-6', 'h-3', 'h-4'][i % 8]} bg-current rounded-full animate-pulse opacity-80" style="animation-delay: ${(i * 100) % 1000}ms"></div>`;        
-        const playScript = msg.audioUrl ? `new Audio('${msg.audioUrl}').play().catch(e=>console.log(e));` : `window.actions.showToast('正在生成语音或未开启配置');`;        
         
-        // 🌟 语音文字提取到外部 (带有小三角气泡的全新样式)
-        contentHtml = `<div class="flex flex-col cursor-pointer" onclick="this.closest('.relative').querySelector('.mc-voice-text').classList.toggle('hidden'); window.wxActions.scrollToBottom(); ${playScript}"><div class="flex items-center space-x-3 ${msg.isMe ? 'flex-row-reverse space-x-reverse' : ''}"><div class="flex items-center gap-[2px] ${msg.isMe ? 'text-green-800' : 'text-gray-800'}">${barsHtml}</div><span class="text-[13px] opacity-80">${duration}"</span></div></div>`;      
+        // 🌟 回退到最原始、最粗暴、绝不被拦截的行内播放！
+        const playScript = msg.audioUrl ? `new Audio('${msg.audioUrl}').play().catch(e=>window.actions.showToast('生成中或被浏览器拦截'));` : `window.actions.showToast('正在生成语音...');`;        
+        
+        contentHtml = `<div class="flex flex-col cursor-pointer" onclick="const textOut = this.closest('.relative').querySelector('.mc-voice-text-out'); if(textOut) textOut.classList.toggle('hidden'); window.wxActions.scrollToBottom(); ${playScript}"><div class="flex items-center space-x-3 ${msg.isMe ? 'flex-row-reverse space-x-reverse' : ''}"><div class="flex items-center gap-[2px] ${msg.isMe ? 'text-green-800' : 'text-gray-800'}">${barsHtml}</div><span class="text-[13px] opacity-80">${duration}"</span></div></div>`;      
         voiceTextOut = `<div class="mc-voice-text-out hidden mt-1.5 text-[14px] text-gray-600 bg-gray-100/90 rounded-[10px] px-3 py-2 max-w-full break-words shadow-sm border border-gray-200/50 relative before:content-[''] before:absolute before:border-[6px] before:border-transparent before:border-b-gray-100 ${msg.isMe ? 'before:right-4 before:-top-[11px]' : 'before:left-4 before:-top-[11px]'}">${msg.text}</div>`;
       } else if (msg.msgType === 'html_card') {
         maxWidthClass = 'max-w-[85%]';

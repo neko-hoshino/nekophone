@@ -1,12 +1,13 @@
 // js/utils/llm.js
 import { store } from '../store.js';
 
-export async function buildLLMPayload(charId, history, isOffline = false) {
+export async function buildLLMPayload(charId, history, isOffline = false, isCall = false) {
   const char = store.contacts.find(c => c.id === charId);
   const userPersona = store.personas.find(p => p.id === char.boundPersonaId) || store.personas[0];
   const now = new Date();
   const timeString = now.toLocaleString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
+  // 🌟 修复：把被我弄丢的世界书和表情包设定全找回来！
   const wb = char.worldbook ? `\n【附加设定补充】\n${char.worldbook}` : '';
   let emo = '', emojiRule = '';
   if (char.emojis === 'disabled') {
@@ -16,9 +17,21 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
      emojiRule = `\n   - 发表情包：[表情包] 名字`;
   }
 
-  // 🌟 核心修复：根据宇宙模式动态彻底切换核心规则，避免大模型“精神分裂”
   let systemRules = '';
-  if (isOffline) {
+  // 🌟 核心修复：增加语音通话的专属系统规则
+  if (isCall) {
+      systemRules = `
+【最高指令：语音/视频通话协议】
+当前状态：你与用户正在进行实时音视频通话。
+【当前系统实时时间】：${timeString}。
+
+❗通话格式红线（非常重要）：
+1. 语言必须高度口语化、自然，包含语气词。
+2. 允许且鼓励使用星号*包裹动作描写（例如：*轻笑*、*凑近麦克风*），这些动作不会被读出来，但能增加画面感。
+3. 单句严禁超过24字！长句必须按照正常的断句逻辑换行拆分。
+4. 绝不可输出任何时间标签！
+`;
+  } else if (isOffline) {
       systemRules = `
 【最高指令：线下剧情模式协议】
 当前状态：你与用户正在“线下”见面或处于某个剧情场景中。
@@ -26,11 +39,10 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
 
 ❗体裁与格式红线（非常重要）：
 1. 必须采用【轻小说体裁】进行自然、连贯的长段落描写。
-2. 绝对禁止像线上聊天那样每说十几个字就频繁换行！请自然地合并段落！
-3. 人物的对话必须用双引号“”包裹。
-4. 人物内心的想法必须用全角括号（）包裹。
-5. 旁白与动作描写直接作为正文输出，不要用任何星号或其他符号包裹。
-6. 绝不可在回复中输出时间标签！
+2. 绝对禁止像线上聊天那样频繁换行！请自然地合并段落！
+3. 人物的对话必须用双引号“”包裹，内心的想法用全角括号（）包裹。
+4. 旁白与动作描写直接作为正文输出，不要用任何星号或其他符号包裹。
+5. 绝不可在回复中输出时间标签！
 `;
   } else {
       systemRules = `
@@ -42,15 +54,11 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
 1. 单句严禁超过24字！长句必须按照正常的断句逻辑，用换行符(\\n)拆分连发！
 2. 句末禁句号。
 3. 纯文本对话，严禁使用星号*或括号()写动作！
-4. 聊天记录中带有 [22:20] 的时间戳是给你判断时间流逝用的，你回复时【绝对禁止】模仿和输出时间戳、[系统提示]、[好友申请] 等任何系统标签！
-`;
-  }
+4. 你回复时【绝对禁止】模仿和输出时间戳、[系统提示]、[好友申请] 等任何系统标签！
 
-  systemRules += `
-【你的特殊交互超能力】（❗必须独占一行触发，若想同时附带普通文字，必须换行另起一行！换行后的普通文字也要按照要求断句！）：
+【你的特殊交互超能力】（❗必须独占一行触发，若想附带普通文字，必须换行另起一行！）：
    - 发语音：[语音]: 你要说的话
    - 发照片：[虚拟照片]: 照片画面描述
-   ${emojiRule}
    - 发送虚拟定位：[发送定位]: 具体的地点名称 (❗必须独占一行)
    - 转账：[发起转账] 金额：xx，备注：必须写明转账原因
    - 收款：[点击收款]
@@ -60,6 +68,7 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
    - 发朋友圈：当情绪波动较大时，可在最末尾另起一行加指令 [发朋友圈]: 动态内容。
    - 戳一戳用户：[戳一戳]
 `;
+  }
 
   let turnsCount = 0; let lastSender = null; let startIndex = 0;
   const limit = char.contextLimit || 25; 
@@ -108,7 +117,7 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
   const globalP = store.globalPrompt ? `\n【通用用户人设】\n${store.globalPrompt}` : '';
   const userPrompt = userPersona.prompt ? `\n【当前用户身份设定】\n${userPersona.prompt}` : '';
 
-  const systemPrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${coreMemStr}${wb}${emo}${globalP}\n【用户】\n当前化名/备注：${userPersona.name}${userPrompt}\n\n${systemRules}${frontStr}${middleStr}${fragMemStr}`;
+  const systemPrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${coreMemStr}${wb}${globalP}\n【用户】\n当前化名/备注：${userPersona.name}${userPrompt}\n\n${systemRules}${frontStr}${middleStr}${fragMemStr}`;
   let messages = [{ role: 'system', content: systemPrompt }];
 
   recentHistory.forEach(m => {
@@ -117,42 +126,43 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
     else if (m.msgType === 'real_image' && m.imageUrl) msgContent = [{ type: "text", text: m.text }, { type: "image_url", image_url: { url: m.imageUrl } }];
     else {
       msgContent = `[${m.time || '刚刚'}] ${m.text}`;
-      if (m.isIntercepted) msgContent += `\n[系统提示：该消息发送失败，已被用户拒收（显示红色感叹号）！]`;
+      if (m.isIntercepted) msgContent += `\n[系统提示：该消息发送失败，已被用户拒收！]`;
     }
     messages.push({ role: m.isMe ? 'user' : 'assistant', content: msgContent });
   });
 
   let finalSystemPrompt = backStr || '';
 
-  // 🌟 这里也彻底切割，不再用通用的话术糊弄
-  if (!isOffline) {
-      finalSystemPrompt += `\n\n【⚠️发送前最高警告】：你现在是在微信界面聊天，普通对话每行严禁超过24个字！必须按自然语言习惯断句换行！严禁输出任何时间戳！\n❗特殊红线：如果你要发送 网页/HTML代码/小程序卡片，必须将其完整包裹在 \`\`\`html 和 \`\`\` 之间！在代码块内部【绝对禁止】为了字数限制而随意换行，必须保持代码结构完整！`;
+  // 🌟 针对三种情况给出不同的结尾警告
+  if (isCall) {
+      finalSystemPrompt += `\n\n【⚠️发送前最高警告】：当前为实时通话！每句话必须简短自然，可用*动作*增加互动感，绝不可带任何系统前缀或时间戳！长句必须按语气换行！`;
+  } else if (!isOffline) {
+      finalSystemPrompt += `\n\n【⚠️发送前最高警告】：你现在是在微信界面聊天，普通对话每行严禁超过24个字！若想说长句，必须按自然语言习惯断句换行！严禁输出任何时间戳或系统标签！\n❗特殊红线：如果你要发送 网页/HTML代码/小程序卡片，必须将其完整包裹在 \`\`\`html 和 \`\`\` 之间！在代码块内部【绝对禁止】为了字数限制而随意换行！`;
   } else {
-      finalSystemPrompt += `\n\n【⚠️发送前最高警告】：当前为线下剧情模式！必须采用轻小说体裁的长段落描写，绝对禁止像线上聊天那样每说十几个字就强行换行！对话务必用“”包裹，动作直接描写！`;
+      finalSystemPrompt += `\n\n【⚠️发送前最高警告】：当前为线下剧情模式！必须采用轻小说体裁的长段落描写，绝对禁止像线上聊天那样频繁换行！对话务必用“”包裹，动作直接描写！`;
   }
 
-  // 🌟 心声状态继承
+  // 心声状态继承
   const chat = store.chats.find(c => c.charId === charId);
   if (chat && chat.latestInnerThought && chat.latestInnerThoughtTime) {
       const diffHours = (now.getTime() - chat.latestInnerThoughtTime) / (1000 * 60 * 60);
       if (diffHours <= 1) {
           const pt = chat.latestInnerThought;
-          finalSystemPrompt += `\n\n【状态继承指示】：距离你上次回复不到1小时。你刚才的内心状态是：心情 ${pt.mood}/100，情绪 [${pt.emotion}]，当前动作 [${pt.status}]。请注意客观事实的连贯性（如无特殊原因，不要发生场景瞬移或性格突变）。`;
+          finalSystemPrompt += `\n\n【状态继承指示】：距离上次不到1小时。你刚才的内心状态是：心情 ${pt.mood}/100，情绪 [${pt.emotion}]，动作 [${pt.status}]。请注意客观事实连贯性。`;
       }
   }
-  // 🌟 一起看书状态继承与阅读引擎
+
+  // 一起看书状态继承与阅读引擎
   if (store.activeReading && store.activeReading.active) {
-      finalSystemPrompt += `\n\n【正在一起看书】\n你们目前正在一起阅读书籍《${store.activeReading.bookName}》。\n下面是当前你们正在看的这一页的内容：\n\`\`\`text\n${store.activeReading.text}\n\`\`\`\n❗请你结合上述书本内容，自然地与用户进行探讨、吐槽或共情。`;
+      finalSystemPrompt += `\n\n【正在一起看书】\n你们目前正在一起阅读《${store.activeReading.bookName}》。\n下面是当前你们正在看的这一页的内容：\n\`\`\`text\n${store.activeReading.text}\n\`\`\`\n❗请你结合上述书本内容，自然地与用户进行探讨或共情。`;
   }
 
   finalSystemPrompt += `\n\n【绝密指令：心声面板同步】
-在你的所有回复的最末尾（必须另起一行），你必须附带当前这一刻你的真实内心状态数据！
+在你的所有回复的最末尾（必须另起一行），附带当前真实内心状态数据！
 格式必须为严格的 JSON，并用 [心声] 标签包裹。
 格式示范：
-[心声] {"mood": 85, "emotion": "开心/吃醋/平静/兴奋", "lust": 60, "status": "正在喝咖啡看手机", "os": "Eve今天好可爱，想立刻见到她", "hidden": "想把她关在房间里哪里也不准去（仅当lust>50时输出此项，否则留空）"}
-注意：
-1. mood(心情值) 和 lust(情欲值) 必须是 0-100 的整数。
-2. 必须且只能放在整段回复的最末尾！`;
+[心声] {"mood": 85, "emotion": "开心/吃醋", "lust": 60, "status": "正在看手机", "os": "Eve今天好可爱", "hidden": "（仅当lust>50时输出）"}
+注意：必须且只能放在整段回复的最末尾！`;
 
   if (finalSystemPrompt.trim()) {
       messages.push({ role: 'system', content: finalSystemPrompt.trim() });
