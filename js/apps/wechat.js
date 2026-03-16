@@ -156,16 +156,36 @@ wxState.ringtone.loop = true;
 const saveScroll = () => {};
 const restoreScroll = () => {};
 window.wxActions = {
-// 全平台兼容的“300毫秒连击”戳一戳判定器
-  lastAvatarClickTime: 0,
+// 更加无敌的“计次型”双击判定器
+  avatarClickCount: 0,
+  avatarClickTimer: null,
   handleAvatarClick: (charId) => {
-    const now = Date.now();
-    if (now - window.wxActions.lastAvatarClickTime < 300) { 
-       window.wxActions.sendNudge(charId); // 触发戳一戳
-       window.wxActions.lastAvatarClickTime = 0; // 重置
-    } else {
-       window.wxActions.lastAvatarClickTime = now;
+    // 每次点击，计数器 +1
+    window.wxActions.avatarClickCount++;
+    
+    if (window.wxActions.avatarClickCount === 1) {
+        // 第一次点击，开启一个 300ms 的倒计时
+        window.wxActions.avatarClickTimer = setTimeout(() => {
+            // 如果 300ms 过去了，计数器还是 1，说明用户没有点第二下，是纯纯的【单击】！
+            window.wxActions.avatarClickCount = 0; // 及时清零
+            saveScroll();
+            wxState.showInnerThoughtModal = charId;
+            window.render();
+            restoreScroll();
+        }, 300); // 300ms 是人类双击的黄金间隔，觉得快了可以改 350
+        
+    } else if (window.wxActions.avatarClickCount === 2) {
+        // 在 300ms 内点下了第二下，触发【双击】！
+        clearTimeout(window.wxActions.avatarClickTimer); // 赶紧拦截住单击的弹窗
+        window.wxActions.avatarClickCount = 0;           // 计数器清零
+        window.wxActions.sendNudge(charId);              // 触发戳一戳！
     }
+  },
+  closeInnerThoughtModal: () => {
+    saveScroll();
+    wxState.showInnerThoughtModal = null;
+    window.render();
+    restoreScroll();
   },
   clearChatHistory: () => {
       if(!confirm('⚠️ 确定要清空当前窗口的聊天记录吗？此操作不会删除角色或其记忆设定。')) return;
@@ -196,7 +216,6 @@ window.wxActions = {
       const char = store.contacts.find(c => c.id === wxState.activeChatId);
       const msg = chat.messages.find(m => m.id === msgId);
       if (!msg) return;
-
       msg.reqState = isAccept ? 'accepted' : 'rejected';
       if (isAccept) {
           char.isBlocked = false;
@@ -1544,6 +1563,19 @@ window.wxActions = {
           
           return; // 🌟 退出执行，此时 finally 依然会跑！
       }
+      // 🌟 绝密安检机：剥离并保存心声数据
+      const thoughtRegex = /\[心声\]\s*(\{.*?\})/s;
+      const thoughtMatch = replyText.match(thoughtRegex);
+      if (thoughtMatch) {
+          try {
+              const innerThought = JSON.parse(thoughtMatch[1]);
+              chat.latestInnerThought = innerThought;
+              chat.latestInnerThoughtTime = Date.now(); // 🌟 新增：记住偷听心声的时间！
+              console.log("偷听心声成功：", innerThought);
+          } catch(e) { console.error("解析心声失败", e); }
+          // 把心声从要展示的文本里剔除，做到无痕！
+          replyText = replyText.replace(thoughtRegex, '').trim();
+      }
 
       let remainingText = replyText
           .replace(/\[\d{1,2}:\d{2}\][:：]?\s*/g, '')
@@ -1790,12 +1822,15 @@ window.wxActions = {
       }
 
     } catch (error) { 
-      const errMsg = error ? (error.message || error.toString()) : "未知网络错误";
+      // 🌟 核心修复：强行转义报错里的 HTML 标签，防止撑碎微信 UI 结构！
+      let rawErr = error ? (error.message || error.toString()) : "未知网络错误";
+      const errMsg = rawErr.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      
       wxState.showPlusMenu = false; 
       wxState.showEmojiMenu = false;
       if (document.hidden) {
          chat.messages.push({ 
-           id: Date.now(), sender: 'system', text: `你切出了页面，导致与大模型的连接被系统强行中断。请长按重roll。`, 
+           id: Date.now(), sender: 'system', text: `连接被系统强行中断。请长按重roll。`, 
            isMe: true, source: 'wechat', isOffline: isOffline, msgType: 'system', time: getNowTime() 
          });
       } else {
@@ -2901,10 +2936,10 @@ export function renderWeChatApp(store) {
         }
         contentHtml = msg.text;
       } else if (msg.msgType === 'real_image') {
-        maxWidthClass = 'max-w-[70%]';
+        maxWidthClass = 'max-w-[40%]';
         bubbleClass = 'mc-bubble-img bg-white p-1 rounded-xl shadow-sm border border-gray-100'; 
         bubbleStyle = ''; 
-        contentHtml = `<img src="${msg.imageUrl}" class="w-full h-auto rounded-lg object-cover max-h-[300px] cursor-pointer" onclick="window.actions.showToast('查看大图')" alt="照片" />`;
+        contentHtml = `<img src="${msg.imageUrl}" class="w-full h-auto rounded-lg object-cover max-h-[200px] cursor-pointer" onclick="window.actions.showToast('查看大图')" alt="照片" />`;
       } else if (msg.msgType === 'transfer') {
         maxWidthClass = ''; 
         bubbleClass = 'mc-bubble-transfer w-[230px] h-[95px] rounded-xl shadow-sm overflow-hidden flex flex-col cursor-pointer active:scale-95 transition-transform'; 
@@ -2957,8 +2992,12 @@ export function renderWeChatApp(store) {
           </div>
           <div class="border-t border-gray-100 mx-3 py-1.5 flex justify-between items-center text-[10px] text-gray-400"><span>聊天记录</span></div>
         `;
+      } else if (msg.msgType === 'emoji') {
+        maxWidthClass = 'max-w-[25%]';
+        bubbleClass = 'bg-transparent shadow-none'; 
+        bubbleStyle = ''; 
+        contentHtml = `<img src="${msg.imageUrl}" class="w-full h-auto object-contain cursor-pointer drop-shadow-md" />`;
       } else {
-        // 🌟 将默认颜色写死在 Class 里，不再依赖变量！
         bubbleClass = `mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-wrap break-words text-[15px] ${msg.isMe ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`;
         bubbleStyle = '';
         const quoteHtml = msg.quote ? `<div class="text-[11px] bg-black/5 rounded-md px-2 py-1.5 mb-1.5 border-l-2 border-black/20 break-words whitespace-pre-wrap leading-relaxed" style="color: inherit; opacity: 0.75;">${msg.quote.sender}：${msg.quote.text}</div>` : '';
@@ -3241,9 +3280,80 @@ export function renderWeChatApp(store) {
           </div>
         ` : ''}
         
+      ${wxState.showExtractMemoryModal ? `
+          <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeExtractMemoryModal()">
+             ... (略过，你保留原来的提取记忆代码即可) ...
+          </div>
+        ` : ''}
+
+        ${wxState.showInnerThoughtModal ? (() => {
+            const charId = wxState.showInnerThoughtModal;
+            const chat = store.chats.find(c => c.charId === charId);
+            const char = store.contacts.find(c => c.id === charId);
+            const thought = chat?.latestInnerThought || { mood: 50, emotion: '平静', lust: 10, status: '正在看着手机', os: '暂时没有什么特别的想法...', hidden: '' };
+            
+            return `
+            <div class="mc-modal-overlay absolute inset-0 z-[200] bg-black/30 backdrop-blur-md flex items-center justify-center p-6 animate-in fade-in duration-300" onclick="window.wxActions.closeInnerThoughtModal()">
+                <div class="mc-modal-content bg-white/95 backdrop-blur-2xl w-full rounded-[32px] shadow-[0_20px_40px_rgba(0,0,0,0.1)] overflow-hidden animate-in zoom-in-95 duration-300 border border-white/60 flex flex-col" onclick="event.stopPropagation()">
+                    
+                    <div class="px-6 pt-8 pb-4 flex flex-col items-center relative">
+                        <div class="w-16 h-16 rounded-full overflow-hidden shadow-sm mb-3 border-2 border-white ring-4 ring-gray-50/50">
+                            ${getVidHtml(char.avatar, char.avatar, false)}
+                        </div>
+                        <h3 class="text-[19px] font-extrabold text-gray-800 tracking-wide">${char.name}</h3>
+                        <span class="text-[11px] text-gray-400 font-bold tracking-widest uppercase mt-0.5">Inner Thoughts</span>
+                    </div>
+                    
+                    <div class="px-6 pb-6 space-y-5">
+                        <div class="flex justify-between items-center bg-[#f8f9fa] p-4 rounded-[20px] shadow-inner border border-gray-100/50">
+                            <div class="flex flex-col w-[45%]">
+                               <span class="text-[10px] text-gray-400 font-bold mb-1 uppercase tracking-wider flex items-center"><i data-lucide="smile" class="w-3 h-3 mr-1"></i>当前情绪</span>
+                               <span class="text-[15px] font-bold text-gray-800 truncate">${thought.emotion}</span>
+                            </div>
+                            <div class="w-px h-8 bg-gray-200"></div>
+                            <div class="flex flex-col text-right w-[45%]">
+                               <span class="text-[10px] text-gray-400 font-bold mb-1 uppercase tracking-wider flex items-center justify-end">当前状态<i data-lucide="activity" class="w-3 h-3 ml-1"></i></span>
+                               <span class="text-[14px] font-bold text-gray-700 truncate">${thought.status}</span>
+                            </div>
+                        </div>
+                        
+                        <div class="space-y-4 px-1">
+                            <div>
+                                <div class="flex justify-between text-[11px] font-extrabold mb-1.5"><span class="text-blue-500 tracking-wider">心情指数</span><span class="text-gray-500">${thought.mood}/100</span></div>
+                                <div class="w-full h-2 bg-gray-100 rounded-full overflow-hidden"><div class="h-full bg-gradient-to-r from-blue-300 to-blue-500 rounded-full transition-all duration-1000 ease-out" style="width: ${thought.mood}%"></div></div>
+                            </div>
+                            <div>
+                                <div class="flex justify-between text-[11px] font-extrabold mb-1.5"><span class="text-pink-500 tracking-wider">情欲 / 占有欲</span><span class="text-gray-500">${thought.lust}/100</span></div>
+                                <div class="w-full h-2 bg-gray-100 rounded-full overflow-hidden shadow-inner"><div class="h-full bg-gradient-to-r from-pink-300 to-pink-500 rounded-full transition-all duration-1000 ease-out" style="width: ${thought.lust}%"></div></div>
+                            </div>
+                        </div>
+                        
+                        <div class="bg-blue-50/60 p-4 rounded-[20px] relative mt-2 border border-blue-100/50">
+                            <i data-lucide="message-circle-heart" class="absolute top-4 right-4 text-blue-200 w-5 h-5"></i>
+                            <span class="text-[11px] text-blue-500 font-extrabold mb-1.5 block tracking-wider">内心 OS</span>
+                            <p class="text-[14px] text-gray-700 leading-relaxed font-serif italic pr-4">"${thought.os}"</p>
+                        </div>
+                        
+                        ${thought.lust > 50 && thought.hidden ? `
+                        <div class="bg-[#1c1c1e] p-4 rounded-[20px] relative mt-3 shadow-lg border border-[#2c2c2e] animate-in slide-in-from-bottom-2 fade-in duration-300">
+                            <i data-lucide="lock-open" class="absolute top-4 right-4 text-red-500/20 w-5 h-5"></i>
+                            <span class="text-[11px] text-red-400 font-extrabold mb-1.5 tracking-wider flex items-center"><i data-lucide="flame" class="w-3.5 h-3.5 mr-1 text-red-500 animate-pulse"></i>阴暗面 / 隐藏冲动</span>
+                            <p class="text-[14px] text-gray-200 leading-relaxed font-serif italic shadow-sm pr-4">"${thought.hidden}"</p>
+                        </div>
+                        ` : ''}
+                    </div>
+                    
+                    <div class="border-t border-gray-100/80 p-4 bg-gray-50/30">
+                        <button class="w-full py-3.5 bg-white text-gray-800 text-[15px] font-extrabold rounded-[16px] shadow-sm border border-gray-200 active:scale-[0.98] active:bg-gray-50 transition-all" onclick="window.wxActions.closeInnerThoughtModal()">我知道了</button>
+                    </div>
+                </div>
+            </div>
+            `;
+        })() : ''}
+
       </div>
     `;
-  }
+}
   // ================= 2. 渲染主界面 (四大标签页) =================
   const chatsHtml = store.chats.map(chat => {
     const char = store.contacts.find(c => c.id === chat.charId); // 🌟 修复：叫 char，不叫 chatChar
@@ -3583,8 +3693,13 @@ window.syncCloudMailbox = async () => {
       for (const m of data.messages) {
           const char = store.contacts.find(c => c.id === m.charId);
           if (char) {
-              if (m.text.includes('[系统] 云端请求失败')) window.actions.showToast('⚠️ 云端遇到了错误');
-              window.wxActions.getReply(true, m.charId, null, m.text);
+              let safeText = m.text;
+              // 🌟 终极防碎屏：在拿到信件的第一时间，把报错里的 HTML 全部转义，当做纯文本显示！
+              if (safeText.includes('[系统] 云端请求失败')) {
+                  safeText = safeText.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                  window.actions.showToast('⚠️ 云端遇到了错误');
+              }
+              window.wxActions.getReply(true, m.charId, null, safeText);
           }
       }
   } catch(e) { console.error('同步信箱失败:', e); }

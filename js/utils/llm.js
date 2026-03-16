@@ -118,28 +118,29 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
       finalSystemPrompt += `\n\n【⚠️发送前最高警告】：你现在是在微信界面聊天，每行文字严禁超过24个字！若想说长句，必须按自然语言结构拆分！必须混用短句和中长句，禁止节奏单调！绝对禁止带系统时间戳或括号动作描写！像个正常人一样立刻说话！`;
   }
 
+  // 🌟 核心升级：心声状态继承与时效判定（防瞬移）
+  const chat = store.chats.find(c => c.charId === charId);
+  if (chat && chat.latestInnerThought && chat.latestInnerThoughtTime) {
+      const diffHours = (now.getTime() - chat.latestInnerThoughtTime) / (1000 * 60 * 60);
+      if (diffHours <= 1) {
+          const pt = chat.latestInnerThought;
+          finalSystemPrompt += `\n\n【状态继承指示】：距离你上次回复不到1小时。你刚才的内心状态是：心情 ${pt.mood}/100，情绪 [${pt.emotion}]，当前动作 [${pt.status}]。请注意客观事实的连贯性（如无特殊原因，不要发生场景瞬移或性格突变）。`;
+      }
+  }
+
+  // 🌟 新增：绝密心声夹带协议！
+  finalSystemPrompt += `\n\n【绝密指令：心声面板同步】
+在你的所有回复的最末尾（必须另起一行），你必须附带当前这一刻你的真实内心状态数据！
+格式必须为严格的 JSON，并用 [心声] 标签包裹。
+格式示范：
+[心声] {"mood": 85, "emotion": "开心/吃醋/平静/兴奋", "lust": 60, "status": "正在喝咖啡看手机", "os": "Eve今天好可爱，想立刻见到她", "hidden": "想把她关在房间里哪里也不准去（仅当lust>50时输出此项，否则留空）"}
+注意：
+1. mood(心情值) 和 lust(情欲值) 必须是 0-100 的整数。
+2. 必须且只能放在整段回复的最末尾！`;
+
   if (finalSystemPrompt.trim()) {
       messages.push({ role: 'system', content: finalSystemPrompt.trim() });
   }
 
   return messages;
-}
-
-// 🌟 重构后的极致清爽 callLLM
-export async function callLLM(charId, history, isOffline = false) {
-  const config = store.apiConfig;
-  if (!config.apiKey) throw new Error("API Key 未配置，请先去设置页面填写！");
-  
-  // 直接调用上面的组装器！
-  const messages = await buildLLMPayload(charId, history, isOffline);
-
-  try {
-    const response = await fetch(`${config.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${config.apiKey}` },
-      body: JSON.stringify({ model: config.model, messages: messages, temperature: parseFloat(config.temperature) })
-    });
-    const data = await response.json();
-    if (data.error) throw new Error(data.error.message || "API 报错了");
-    return data.choices[0].message.content;
-  } catch (error) { throw new Error(error.message); }
 }
