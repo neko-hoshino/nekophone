@@ -92,9 +92,13 @@ ${logText}`;
         kws = kwData.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
     }
     
+    // 🌟 在存入 store 之前，给内容打上时间戳
+    const dateStr = new Date().toLocaleDateString('zh-CN'); // 例如：2026/3/16
+    const finalSummary = `[${dateStr}] ${summary}`;
+    
     store.memories = store.memories || [];
-    store.memories.push({ id: Date.now(), charId: charId, type: memType, content: summary, keywords: kws, createdAt: Date.now() });
-    console.log(`[系统] 提取到高价值 ${memType === 'core' ? '❤️核心' : '🧩碎片'} 记忆:`, summary);
+    store.memories.push({ id: Date.now(), charId: charId, type: memType, content: finalSummary, keywords: kws, createdAt: Date.now() });
+    console.log(`[系统] 提取到高价值 ${memType === 'core' ? '❤️核心' : '🧩碎片'} 记忆:`, finalSummary);
   } catch (e) {}
 }
 
@@ -805,7 +809,12 @@ window.wxActions = {
           body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.3 })
       });
       const data = await res.json();
-      wxState.extractMemoryContent = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+      const rawContent = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+      
+      // 🌟 给手动提取的记忆也打上时间戳
+      const dateStr = new Date().toLocaleDateString('zh-CN');
+      wxState.extractMemoryContent = `[${dateStr}] ${rawContent}`;
+      
       wxState.isExtracting = false;
       wxState.extractMemoryStep = 2;
       
@@ -1085,7 +1094,8 @@ window.wxActions = {
     event.target.value = '';
   },
   savePersona: () => {
-    const name = document.getElementById('edit-persona-name').value.trim() || '新身份';
+    // 🌟 修复：如果留空，默认使用主身份的真名，而不是“新身份”
+    const name = document.getElementById('edit-persona-name').value.trim() || store.personas[0].name;
     const promptStr = document.getElementById('edit-persona-prompt').value.trim();
     if (wxState.editingPersonaId) {
       const p = store.personas.find(p => p.id === wxState.editingPersonaId);
@@ -1097,12 +1107,6 @@ window.wxActions = {
       store.personas.push({ id: 'p_' + Date.now(), name, prompt: promptStr, avatar: wxState.tempPersonaAvatar }); 
     }
     window.actions.showToast('身份保存成功'); wxState.view = 'personaManage'; window.render(); restoreScroll();
-  },
-  deletePersona: (id) => {
-    if (id === store.personas[0].id) return window.actions.showToast('默认身份不可被删除哦');
-    if (!confirm('确定删除该身份吗？')) return;
-    store.personas = store.personas.filter(p => p.id !== id); 
-    wxState.view = 'personaManage'; window.render();
   },
   
   // 表情包库动作
@@ -1187,9 +1191,13 @@ window.wxActions = {
     const file = event.target.files[0]; if (!file) return;
     window.actions.compressImage(file, (base64) => {
       const char = store.contacts.find(c => c.id === wxState.activeChatId);
-      if (targetType === 'myAvatar') store.personas[0].avatar = base64;
+      // 🌟 优化：聊天设置里修改“我的头像”时，精准修改当前绑定的马甲头像！
+      if (targetType === 'myAvatar') {
+         const boundPersona = store.personas.find(p => p.id === char.boundPersonaId) || store.personas[0];
+         boundPersona.avatar = base64;
+      }
       if (targetType === 'charAvatar') char.avatar = base64;
-      if (targetType === 'myVideo') store.personas[0].videoAvatar = base64;
+      if (targetType === 'myVideo') store.personas[0].videoAvatar = base64; // 视频暂时用全局的
       if (targetType === 'charVideo') char.videoAvatar = base64;
       window.actions.showToast('图片已加载！'); window.render();
     });
@@ -1227,7 +1235,9 @@ window.wxActions = {
 
   saveSettings: () => {
     const char = store.contacts.find(c => c.id === wxState.activeChatId);
-    store.personas[0].name = document.getElementById('set-my-name').value.trim() || store.personas[0].name;
+    const boundPersona = store.personas.find(p => p.id === char.boundPersonaId) || store.personas[0];
+    // 🌟 优化：保存时绑定到独立马甲
+    boundPersona.name = document.getElementById('set-my-name').value.trim() || boundPersona.name;
     char.name = document.getElementById('set-char-name').value.trim() || char.name;
     char.contextLimit = parseInt(document.getElementById('set-context-limit').value) || 25;
     
@@ -1483,7 +1493,6 @@ window.wxActions = {
     const isOffline = wxState.view === 'offlineStory' && isActive;
     const isCall = wxState.view === 'call' && isActive;
 
-    // 🌟 自动记忆触发器
     const validMsgs = chat.messages.filter(m => !m.isHidden && !(m.msgType || '').includes('system'));
     const lastSumIndex = chat.lastSummarizedIndex || 0;
     if (validMsgs.length - lastSumIndex >= 20) {
@@ -1501,31 +1510,29 @@ window.wxActions = {
       });
     }
 
+    let delegatedToCloud = false; // 🌟 核心：新增标志位！
+
     try {
       let replyText = '';
 
       if (preGeneratedText) {
-          // 🚀 场景 A：云端信箱拿回了信件，直接开始解析！
           replyText = preGeneratedText;
           if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
       } else {
-          // 🚀 场景 B：这是用户刚点发送，我们要把活儿扔给云端代跑！
+          delegatedToCloud = true; // 🌟 告诉系统：任务已交出！
+          if (isActive) {
+              wxState.isTyping = true;
+              window.render();
+              window.wxActions.scrollToBottom();
+          }
+          
           const { buildLLMPayload } = await import('../utils/llm.js');
           const llmMessages = await buildLLMPayload(charId, chat.messages, isActive ? wxState.view === 'offlineStory' : false);
           
           if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
 
-          if (isActive) {
-              window.actions.showToast('消息已送往云端，等待回复中...');
-              wxState.isTyping = true;
-              window.render();
-              window.wxActions.scrollToBottom();
-          }
-
-          // delayMinutes = 0 代表立即执行！
           planCloudBrain(0, char, llmMessages);
 
-          // 开启高频轮询（每 3 秒看一眼信箱），拿到信件就关掉
           if (window._fastSyncInterval) clearInterval(window._fastSyncInterval);
           window._fastSyncInterval = setInterval(() => {
               if (wxState.isTyping) {
@@ -1535,10 +1542,9 @@ window.wxActions = {
               }
           }, 3000);
           
-          return; // 🌟 核心拦截：交出代跑权后立刻终止本次执行，等待信箱里的 preGeneratedText 唤醒我们！
+          return; // 🌟 退出执行，此时 finally 依然会跑！
       }
 
-      // 🌟 终极净化：强行剥离大模型发癫模仿的所有系统标签！
       let remainingText = replyText
           .replace(/\[\d{1,2}:\d{2}\][:：]?\s*/g, '')
           .replace(/\[(线上聊天|线下剧情)\][:：]?\s*/g, '')
@@ -1656,21 +1662,32 @@ window.wxActions = {
 
       if (wxState.view === 'chatRoom') remainingText = remainingText.replace(/\*[^*]*\*/g, '').replace(/[(（][^)）]*[)）]/g, '').trim();
 
+      // 🌟 核心修复：防止图片/语音把后面的普通聊天吞噬
       if (/\[发起转账\]/.test(remainingText)) {
         let parts = remainingText.split(/\[发起转账\][:：]?\s*/);
         if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-        const tStr = parts[1] || '';
+        let nextLines = parts[1].split('\n');
+        const tStr = nextLines[0] || '';
         const amount = (tStr.match(/金额[:：]?\s*(\d+(\.\d+)?)/) || [])[1] || '520.00';
         const note = (tStr.match(/备注[:：]?\s*([^，,。\]\n]+)/) || [])[1] || '转账给你';
         msgsToPush.push({ msgType: 'transfer', text: `[收到转账] 金额：${amount}元，备注：${note}`, transferData: { amount, note }, transferState: 'pending' });
+        // 把剩余的行再推回去当做普通文字
+        let restText = nextLines.slice(1).join('\n').trim();
+        if (restText) msgsToPush.push({ msgType: 'text', text: restText });
       } else if (/\[语音\]/.test(remainingText)) {
         let parts = remainingText.split(/\[语音\][:：]?\s*/);
         if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-        if (parts[1].trim()) msgsToPush.push({ msgType: 'voice', text: parts[1].trim() });
+        let nextLines = parts[1].split('\n');
+        if (nextLines[0].trim()) msgsToPush.push({ msgType: 'voice', text: nextLines[0].trim() });
+        let restText = nextLines.slice(1).join('\n').trim();
+        if (restText) msgsToPush.push({ msgType: 'text', text: restText });
       } else if (/\[虚拟照片\]/.test(remainingText)) {
         let parts = remainingText.split(/\[虚拟照片\][:：]?\s*/);
         if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-        if (parts[1].trim()) msgsToPush.push({ msgType: 'virtual_image', text: parts[1].trim() });
+        let nextLines = parts[1].split('\n');
+        if (nextLines[0].trim()) msgsToPush.push({ msgType: 'virtual_image', text: nextLines[0].trim() });
+        let restText = nextLines.slice(1).join('\n').trim();
+        if (restText) msgsToPush.push({ msgType: 'text', text: restText });
       } else {
         if (remainingText.trim()) {
           if (wxState.view === 'offlineStory') { 
@@ -1682,7 +1699,6 @@ window.wxActions = {
               fragments.forEach(frag => {
                 const t = frag.trim();
                 if (!t) return;
-                // 只有 * 包裹的才是动作，其他的都是文本
                 if (t.startsWith('*') && t.endsWith('*') && wxState.view === 'call') msgsToPush.push({ msgType: 'action', text: t.slice(1, -1) });
                 else msgsToPush.push({ msgType: 'text', text: t });
               });
@@ -1774,9 +1790,9 @@ window.wxActions = {
       }
 
     } catch (error) { 
-      // 确保 error.message 是安全的，防止读取报错导致二次崩溃
       const errMsg = error ? (error.message || error.toString()) : "未知网络错误";
-      // 🌟 核心修复：把写死的 false 替换为我们最上面定义的 isOffline 变量！
+      wxState.showPlusMenu = false; 
+      wxState.showEmojiMenu = false;
       if (document.hidden) {
          chat.messages.push({ 
            id: Date.now(), sender: 'system', text: `你切出了页面，导致与大模型的连接被系统强行中断。请长按重roll。`, 
@@ -1789,8 +1805,11 @@ window.wxActions = {
          });
       }
     } finally {
-      if (isActive) { wxState.isTyping = false; window.render(); window.wxActions.scrollToBottom(); }
-      else { window.render(); }
+      // 🌟 终极拦截：只有在【没有交出代跑权】（即拿回了信件正常执行完解析）的情况下，才允许关掉 isTyping！
+      if (!delegatedToCloud) {
+          if (isActive) { wxState.isTyping = false; window.render(); window.wxActions.scrollToBottom(); }
+          else { window.render(); }
+      }
     }
   },
 };
@@ -1812,7 +1831,9 @@ export function renderWeChatApp(store) {
 
   const char = store.contacts.find(c => c.id === wxState.activeChatId);
   const chatData = store.chats.find(c => c.charId === wxState.activeChatId) || { messages: [] };
-  const myAvatar = store.personas[0].avatar;
+  const boundPersona = char ? (store.personas.find(p => p.id === char.boundPersonaId) || store.personas[0]) : store.personas[0];
+  const myAvatar = boundPersona.avatar;
+
 
   // 📷 头像渲染辅助函数：修复了强制圆形导致视频也变圆的问题
   const getVidHtml = (val, defaultVal, isBg) => {
@@ -1986,8 +2007,8 @@ export function renderWeChatApp(store) {
             </div>
          </div>
          ${wxState.showEmojiMountModal ? `
-          <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in backdrop-blur-sm p-4" onclick="window.wxActions.toggleEmojiMountModal()">
-            <div class="bg-[#f6f6f6] w-[90%] max-h-[70vh] rounded-[24px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+          <div class="mc-modal-overlay absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in backdrop-blur-sm p-4" onclick="window.wxActions.toggleEmojiMountModal()">
+            <div class="mc-modal-content bg-[#f6f6f6] w-[90%] max-h-[70vh] rounded-[24px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
               <div class="bg-white px-5 py-4 flex justify-between items-center border-b border-gray-100 shadow-sm shrink-0">
                 <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="smile" class="text-[#07c160] mr-2 w-5 h-5"></i>管理挂载的表情包</span>
                 <i data-lucide="x" class="text-gray-400 cursor-pointer active:scale-90 transition-transform bg-gray-50 p-1 rounded-full w-6 h-6" onclick="window.wxActions.toggleEmojiMountModal()"></i>
@@ -2011,7 +2032,7 @@ export function renderWeChatApp(store) {
         ` : ''}
 
         ${wxState.showWbMountModal ? `
-          <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in backdrop-blur-sm p-4" onclick="window.wxActions.toggleWbMountModal()">
+          <div class="mc-modal-overlay flex items-center justify-center animate-in fade-in backdrop-blur-sm p-4" onclick="window.wxActions.toggleWbMountModal()">
             <div class="bg-[#f6f6f6] w-[90%] max-h-[75vh] rounded-[24px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
               <div class="bg-white px-5 py-4 flex justify-between items-center border-b border-gray-100 shadow-sm shrink-0">
                  <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="book-open" class="text-purple-500 mr-2 w-5 h-5"></i>挂载局部世界书</span>
@@ -2637,8 +2658,8 @@ export function renderWeChatApp(store) {
         `}
 
         ${wxState.showOfflineSettingsModal ? `
-          <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in backdrop-blur-sm p-4 pb-8" onclick="window.wxActions.closeOfflineSettings()">
-             <div class="bg-[#f6f6f6] w-full max-h-[75vh] rounded-[24px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+          <div class="mc-modal-overlay absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in backdrop-blur-sm p-4 pb-8" onclick="window.wxActions.closeOfflineSettings()">
+             <div class="mc-modal-content bg-[#f6f6f6] w-full max-h-[75vh] rounded-[24px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
                 <div class="bg-white px-5 py-4 flex justify-between items-center border-b border-gray-100 shadow-sm shrink-0">
                    <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="settings" class="text-gray-800 mr-2 w-5 h-5"></i>线下模式专属设置</span>
                    <i data-lucide="x" class="text-gray-400 cursor-pointer active:scale-90 transition-transform bg-gray-50 p-1 rounded-full w-6 h-6" onclick="window.wxActions.closeOfflineSettings()"></i>
@@ -2723,8 +2744,8 @@ export function renderWeChatApp(store) {
         ` : ''}
 
         ${wxState.editMsgData ? `
-          <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeEditMessageModal()">
-            <div class="bg-[#f6f6f6] w-full rounded-[24px] overflow-hidden shadow-2xl flex flex-col" onclick="event.stopPropagation()">
+          <div class="mc-modal-overlay absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeEditMessageModal()">
+            <div class="mc-modal-content bg-[#f6f6f6] w-full rounded-[24px] overflow-hidden shadow-2xl flex flex-col" onclick="event.stopPropagation()">
                <div class="bg-white px-5 py-4 flex justify-between items-center border-b border-gray-100 shadow-sm">
                  <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="edit-3" class="text-blue-500 mr-2 w-5 h-5"></i>编辑文字</span>
                  <i data-lucide="x" class="text-gray-400 cursor-pointer active:scale-90 transition-transform bg-gray-50 p-1 rounded-full w-6 h-6" onclick="window.wxActions.closeEditMessageModal()"></i>
@@ -2849,6 +2870,7 @@ export function renderWeChatApp(store) {
       }
       
       let contentHtml = '', bubbleClass = '', bubbleStyle = '', maxWidthClass = 'max-w-[75%]';
+      let quoteHtmlOut = '', voiceTextOut = ''; // 🌟 新增：独立在外层的框
       
       if (msg.msgType === 'action') {
         bubbleClass = 'mc-bubble-action px-4 py-1.5 text-[14px]'; 
@@ -2860,18 +2882,24 @@ export function renderWeChatApp(store) {
         bubbleStyle = ''; 
         contentHtml = `<div class="relative w-48 min-h-[12rem] bg-white cursor-pointer select-none" onclick="const overlay = this.querySelector('.img-overlay'); overlay.classList.toggle('opacity-0'); overlay.classList.toggle('pointer-events-none');"><div class="absolute inset-0 p-4 overflow-y-auto text-[13px] text-gray-700 leading-relaxed text-left bg-white"><span class="font-bold text-gray-400 block mb-1 flex items-center"><i data-lucide="image" class="mr-1" style="width:14px; height:14px;"></i>照片内容：</span>${msg.text}</div><div class="img-overlay absolute inset-0 bg-gray-100 flex flex-col items-center justify-center text-gray-400 transition-opacity duration-300 z-10"><i data-lucide="image" class="mb-2 text-gray-300" style="width: 36px; height: 36px;"></i><span class="text-[11px] font-bold tracking-widest animate-pulse">图片加载中...</span></div></div>`;
       } else if (msg.msgType === 'voice') {
-        // 🌟 将默认颜色写死在 Class 里，不再依赖变量！
         bubbleClass = `mc-bubble-voice px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-hidden text-[15px] ${msg.isMe ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`; 
         bubbleStyle = '';
         const duration = Math.min(Math.max(Math.round(msg.text.length / 4), 2), 60); const numBars = Math.min(8 + Math.floor(duration * 1.8), 45); 
         let barsHtml = ''; for (let i = 0; i < numBars; i++) barsHtml += `<div class="w-[2px] ${['h-2', 'h-4', 'h-3', 'h-5', 'h-2', 'h-6', 'h-3', 'h-4'][i % 8]} bg-current rounded-full animate-pulse opacity-80" style="animation-delay: ${(i * 100) % 1000}ms"></div>`;        
-        // 🌟 点击展开文字时，带上播放音频的代码！
         const playScript = msg.audioUrl ? `new Audio('${msg.audioUrl}').play().catch(e=>console.log(e));` : `window.actions.showToast('正在生成语音或未开启配置');`;        
-        contentHtml = `<div class="flex flex-col cursor-pointer" onclick="this.querySelector('.mc-voice-text').classList.toggle('hidden'); window.wxActions.scrollToBottom(); ${playScript}"><div class="flex items-center space-x-3 ${msg.isMe ? 'flex-row-reverse space-x-reverse' : ''}"><div class="flex items-center gap-[2px] ${msg.isMe ? 'text-green-800' : 'text-gray-800'}">${barsHtml}</div><span class="text-[13px] opacity-80">${duration}"</span></div><div class="mc-voice-text hidden mt-2 pt-2 border-t ${msg.isMe ? 'border-green-600/30' : 'border-gray-200'} text-[14px] opacity-90 leading-relaxed text-left">${msg.text}</div></div>`;      } else if (msg.msgType === 'emoji') {
-        maxWidthClass = 'max-w-[25%]';
-        bubbleClass = 'mc-bubble-emoji bg-transparent'; 
-        bubbleStyle = ''; 
-        contentHtml = `<img src="${msg.imageUrl}" class="w-32 h-32 object-contain cursor-pointer drop-shadow-sm" alt="表情包" />`;
+        
+        // 🌟 语音文字提取到外部 (带有小三角气泡的全新样式)
+        contentHtml = `<div class="flex flex-col cursor-pointer" onclick="this.closest('.relative').querySelector('.mc-voice-text').classList.toggle('hidden'); window.wxActions.scrollToBottom(); ${playScript}"><div class="flex items-center space-x-3 ${msg.isMe ? 'flex-row-reverse space-x-reverse' : ''}"><div class="flex items-center gap-[2px] ${msg.isMe ? 'text-green-800' : 'text-gray-800'}">${barsHtml}</div><span class="text-[13px] opacity-80">${duration}"</span></div></div>`;      
+        voiceTextOut = `<div class="mc-voice-text-out hidden mt-1.5 text-[14px] text-gray-600 bg-gray-100/90 rounded-[10px] px-3 py-2 max-w-full break-words shadow-sm border border-gray-200/50 relative before:content-[''] before:absolute before:border-[6px] before:border-transparent before:border-b-gray-100 ${msg.isMe ? 'before:right-4 before:-top-[11px]' : 'before:left-4 before:-top-[11px]'}">${msg.text}</div>`;
+      } else if (msg.msgType === 'text') {
+        bubbleClass = `mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-wrap break-words text-[15px] ${msg.isMe ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`;
+        bubbleStyle = '';
+        
+        // 🌟 引用文字提取到气泡顶部独立显示
+        if (msg.quote) {
+           quoteHtmlOut = `<div class="mc-quote-out text-[11px] text-gray-500 bg-gray-200/60 rounded-[8px] px-2.5 py-1.5 mb-1 max-w-full break-words whitespace-pre-wrap ${msg.isMe ? 'self-end' : 'self-start'}">${msg.quote.sender}：${msg.quote.text}</div>`;
+        }
+        contentHtml = msg.text;
       } else if (msg.msgType === 'real_image') {
         maxWidthClass = 'max-w-[70%]';
         bubbleClass = 'mc-bubble-img bg-white p-1 rounded-xl shadow-sm border border-gray-100'; 
@@ -2940,18 +2968,18 @@ export function renderWeChatApp(store) {
       let menuHtml = '';
       if (wxState.activeMenuMsgId === msg.id) {
         menuHtml = `
-          <div class="absolute z-[100] bottom-[105%] ${msg.isMe ? 'right-0 origin-bottom-right' : 'left-0 origin-bottom-left'} bg-[#2c2c2c] text-white rounded-[12px] px-1 py-0.5 flex items-center shadow-2xl animate-in zoom-in-95 duration-150 whitespace-nowrap border border-white/10" onclick="event.stopPropagation()">
-            <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.quoteMessage(${msg.id})"><i data-lucide="quote" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">引用</span></div>
-            <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.favoriteMessage(${msg.id})"><i data-lucide="star" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">收藏</span></div>
-            <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.startMultiSelect(${msg.id})"><i data-lucide="check-square" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">多选</span></div>
-            ${msg.isMe ? `<div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.recallMessage(${msg.id})"><i data-lucide="undo-2" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">撤回</span></div>` : ''}
-            <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.openEditMessageModal(${msg.id})"><i data-lucide="edit" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">编辑</span></div>
-            <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.deleteMessage(${msg.id})"><i data-lucide="trash-2" class="w-[18px] h-[18px] mb-1 text-red-400"></i><span class="text-[10px] text-red-400 scale-90">删除</span></div>
+          <div class="mc-context-menu absolute z-[100] bottom-[105%] ${msg.isMe ? 'right-0 origin-bottom-right' : 'left-0 origin-bottom-left'} bg-[#2c2c2c] text-white rounded-[12px] px-1 py-0.5 flex items-center shadow-2xl animate-in zoom-in-95 duration-150 whitespace-nowrap border border-white/10" onclick="event.stopPropagation()">
+            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.quoteMessage(${msg.id})"><i data-lucide="quote" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">引用</span></div>
+            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.favoriteMessage(${msg.id})"><i data-lucide="star" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">收藏</span></div>
+            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.startMultiSelect(${msg.id})"><i data-lucide="check-square" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">多选</span></div>
+            ${msg.isMe ? `<div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.recallMessage(${msg.id})"><i data-lucide="undo-2" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">撤回</span></div>` : ''}
+            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.openEditMessageModal(${msg.id})"><i data-lucide="edit" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">编辑</span></div>
+            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.deleteMessage(${msg.id})"><i data-lucide="trash-2" class="w-[18px] h-[18px] mb-1 text-red-400"></i><span class="text-[10px] text-red-400 scale-90">删除</span></div>
           </div>
         `;
       }
 
-      // 🌟气泡组装
+      // 🌟气泡组装 (把 quoteHtmlOut 和 voiceTextOut 独立于 mc-bubble 外)
       return `${timeHtml}
       <div class="mc-msg-row ${msg.isMe ? 'mc-is-me' : 'mc-is-ai'} flex items-start w-full animate-in fade-in duration-300 mb-3 ${wxState.isMultiSelecting ? 'pl-2 cursor-pointer' : ''}" ${wxState.isMultiSelecting ? `onclick="window.wxActions.toggleSelectMsg(${msg.id})"` : ''}>
         
@@ -2969,7 +2997,9 @@ export function renderWeChatApp(store) {
                ontouchmove="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchMove()`}"
                onmousemove="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchMove()`}">
                
+            ${quoteHtmlOut}
             <div class="mc-bubble ${bubbleClass}" style="${bubbleStyle}">${contentHtml}</div>
+            ${voiceTextOut}
             ${menuHtml}
           </div>
           ${!msg.isMe && msg.isIntercepted ? `<div class="self-center ml-2 w-[20px] h-[20px] rounded-full bg-red-500 text-white flex items-center justify-center font-bold text-[13px] shadow-sm flex-shrink-0" title="消息已被拒收">!</div>` : ''}
@@ -2989,7 +3019,7 @@ export function renderWeChatApp(store) {
       { id: 'mc-tool-videocall', icon: 'video', label: '视频通话', action: "window.wxActions.startCall('video')" },
       { id: 'mc-tool-offline', icon: 'coffee', label: '线下剧情', action: "window.wxActions.enterOffline()" }
     ].map(item => `
-      <div class="mc-tools-item flex flex-col items-center justify-center space-y-1.5 cursor-pointer active:scale-95 transition-transform" onclick="${item.action}">
+      <div class="mc-tool-item flex flex-col items-center justify-center space-y-1.5 cursor-pointer active:scale-95 transition-transform" onclick="${item.action}">
         <div class="${item.id} w-14 h-14 flex items-center justify-center">
           <i data-lucide="${item.icon}" class="text-gray-800" style="width: 28px; height: 28px;"></i>
         </div>
@@ -2997,7 +3027,6 @@ export function renderWeChatApp(store) {
       </div>
     `).join('');
 
-    // ... （弹窗类HTML保持原样，因为不涉及主界面美化）
     const virtualModalHtml = wxState.virtualModalType !== 'none' ? `<div class="absolute inset-0 bg-black/40 z-50 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm"><div class="bg-white w-full rounded-[24px] p-5 shadow-2xl animate-in zoom-in-95 duration-200">${wxState.virtualModalType === 'transfer' ? `<h3 class="font-bold text-gray-800 mb-4 flex items-center justify-center"><i data-lucide="credit-card" class="mr-2 text-orange-500" style="width:20px; height:20px;"></i>发起转账</h3><div class="flex items-center text-4xl font-bold border-b border-gray-200 pb-2 mb-4 text-gray-800"><span class="mr-2 text-2xl">¥</span><input type="number" id="transfer-amount" class="flex-1 outline-none bg-transparent" placeholder="0.00" /></div><input type="text" id="transfer-note" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 outline-none text-sm mb-6 font-bold" placeholder="转账说明（选填，默认：转账）" />` : `<h3 class="font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="${wxState.virtualModalType === 'image' ? 'camera' : 'mic'}" class="mr-2 text-blue-500" style="width:20px; height:20px;"></i>${wxState.virtualModalType === 'image' ? '拍摄虚拟照片' : '录制语音消息'}</h3><p class="text-[10px] text-gray-500 mb-4">${wxState.virtualModalType === 'image' ? '详细描写照片画面。' : '输入你想要用语音发送的文字内容。'}</p><textarea id="virtual-input" rows="4" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 outline-none text-sm mb-4 resize-none focus:border-blue-500 transition-colors" placeholder="请输入描述内容..."></textarea>`}<div class="flex space-x-3"><button onclick="window.wxActions.closeVirtualModal()" class="flex-1 py-2.5 bg-gray-100 text-gray-600 font-bold rounded-xl active:bg-gray-200">取消</button><button onclick="window.wxActions.sendVirtualMedia()" class="flex-1 py-2.5 ${wxState.virtualModalType === 'transfer' ? 'bg-[#f98a2e] active:bg-orange-600' : 'bg-blue-500 active:bg-blue-600'} text-white font-bold rounded-xl shadow-md">发送</button></div></div></div>` : '';
 
     let transferDetailHtml = '';
@@ -3093,19 +3122,19 @@ export function renderWeChatApp(store) {
                  return eHtml + '<div class="text-center text-gray-400 mt-10 text-[12px] font-bold tracking-widest">请在“我”页面导入 JSON 或添加表情哦</div></div>';
               }
 
-              eHtml += '<div class="flex overflow-x-auto hide-scrollbar bg-[#f6f6f6] border-b border-gray-200 px-3 py-2 space-x-3 items-center shadow-sm z-10">';
+              eHtml += '<div class="mc-emoji-tabs flex overflow-x-auto hide-scrollbar bg-[#f6f6f6] border-b border-gray-200 px-3 py-2 space-x-3 items-center shadow-sm z-10">';
               groupedEmojis.forEach((group, idx) => {
                  const isActive = wxState.activeEmojiTab === idx;
-                 eHtml += '<div class="whitespace-nowrap px-3 py-1.5 rounded-full text-[13px] font-bold cursor-pointer transition-all ' + (isActive ? 'bg-white text-gray-800 shadow-sm border border-gray-100' : 'bg-transparent text-gray-400 border border-transparent hover:bg-gray-200/50') + '" onclick="window.wxActions.switchEmojiTab(' + idx + ')">' + group.name + '</div>';
+                 eHtml += '<div class="mc-emoji-tab whitespace-nowrap px-3 py-1.5 rounded-full text-[13px] font-bold cursor-pointer transition-all ' + (isActive ? 'bg-white text-gray-800 shadow-sm border border-gray-100' : 'bg-transparent text-gray-400 border border-transparent hover:bg-gray-200/50') + '" onclick="window.wxActions.switchEmojiTab(' + idx + ')">' + group.name + '</div>';
               });
               eHtml += '</div>';
 
               const activeGroup = groupedEmojis[wxState.activeEmojiTab] || groupedEmojis[0];
-              eHtml += '<div class="flex-1 overflow-y-auto hide-scrollbar p-4">';
+              eHtml += '<div class="mc-emoji-list flex-1 overflow-y-auto hide-scrollbar p-4">';
               eHtml += '<div class="grid grid-cols-4 gap-x-3 gap-y-4">'; 
               activeGroup.emojis.forEach(ep => {
                  const shortName = ep.name.length > 5 ? ep.name.substring(0,5) + '...' : ep.name;
-                 eHtml += '<div class="flex flex-col items-center cursor-pointer active:scale-95 transition-transform" onclick="window.wxActions.sendEmoji(\'' + ep.url + '\', \'' + ep.name + '\')">';
+                 eHtml += '<div class="mc-emoji-item flex flex-col items-center cursor-pointer active:scale-95 transition-transform" onclick="window.wxActions.sendEmoji(\'' + ep.url + '\', \'' + ep.name + '\')">';
                  eHtml += '<div class="w-[3.5rem] h-[3.5rem] rounded-[12px] overflow-hidden flex items-center justify-center p-1"><img src="' + ep.url + '" class="w-full h-full object-contain drop-shadow-sm" /></div>';
                  eHtml += '<span class="text-[10px] text-gray-500 mt-1.5 truncate w-full text-center">' + shortName + '</span>';
                  eHtml += '</div>';
@@ -3121,8 +3150,8 @@ export function renderWeChatApp(store) {
         <input type="file" id="real-image-input" accept="image/*" class="hidden" onchange="window.wxActions.handleImageUpload(event)" />
         
         ${wxState.showForwardModal ? `
-          <div class="absolute inset-0 z-[80] bg-black/40 flex items-end justify-center animate-in fade-in backdrop-blur-sm" onclick="window.wxActions.closeForwardModal()">
-            <div class="bg-[#f3f3f3] w-full max-h-[75vh] rounded-t-[24px] overflow-hidden shadow-2xl animate-in slide-in-from-bottom-4 flex flex-col" onclick="event.stopPropagation()">
+          <div class="mc-modal-overlay absolute inset-0 z-[80] bg-black/40 flex items-end justify-center animate-in fade-in backdrop-blur-sm" onclick="window.wxActions.closeForwardModal()">
+            <div class="mc-modal-content bg-[#f3f3f3] w-full max-h-[75vh] rounded-t-[24px] overflow-hidden shadow-2xl animate-in slide-in-from-bottom-4 flex flex-col" onclick="event.stopPropagation()">
               <div class="bg-white px-4 py-4 flex justify-between items-center border-b border-gray-100">
                 <div class="cursor-pointer active:opacity-50 p-1" onclick="window.wxActions.closeForwardModal()"><i data-lucide="chevron-left" class="w-6 h-6 text-gray-600"></i></div>
                 <span class="absolute left-1/2 -translate-x-1/2 font-bold text-gray-800 text-[16px]">选择发送给谁</span>
@@ -3144,8 +3173,8 @@ export function renderWeChatApp(store) {
         ` : ''}
 
         ${wxState.editMsgData ? `
-          <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeEditMessageModal()">
-            <div class="bg-[#f6f6f6] w-full rounded-[24px] overflow-hidden shadow-2xl flex flex-col" onclick="event.stopPropagation()">
+          <div class="mc-modal-overlay absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeEditMessageModal()">
+            <div class="mc-modal-content bg-[#f6f6f6] w-full rounded-[24px] overflow-hidden shadow-2xl flex flex-col" onclick="event.stopPropagation()">
                <div class="bg-white px-5 py-4 flex justify-between items-center border-b border-gray-100 shadow-sm">
                  <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="edit-3" class="text-blue-500 mr-2 w-5 h-5"></i>编辑消息</span>
                  <i data-lucide="x" class="text-gray-400 cursor-pointer active:scale-90 transition-transform bg-gray-50 p-1 rounded-full w-6 h-6" onclick="window.wxActions.closeEditMessageModal()"></i>
@@ -3162,8 +3191,8 @@ export function renderWeChatApp(store) {
         ` : ''}
 
         ${wxState.showExtractMemoryModal ? `
-          <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeExtractMemoryModal()">
-            <div class="bg-[#f6f6f6] w-full rounded-[24px] overflow-hidden shadow-2xl flex flex-col" onclick="event.stopPropagation()">
+          <div class="mc-modal-overlay absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeExtractMemoryModal()">
+            <div class="mc-modal-content bg-[#f6f6f6] w-full rounded-[24px] overflow-hidden shadow-2xl flex flex-col" onclick="event.stopPropagation()">
                <div class="bg-white px-5 py-4 flex justify-between items-center border-b border-gray-100 shadow-sm">
                  <span class="font-black text-gray-800 text-[16px] flex items-center tracking-wide"><i data-lucide="brain-circuit" class="text-purple-500 mr-2 w-5 h-5"></i>提取记忆片段</span>
                  <i data-lucide="x" class="text-gray-400 cursor-pointer active:scale-90 transition-transform bg-gray-50 p-1 rounded-full w-6 h-6" onclick="window.wxActions.closeExtractMemoryModal()"></i>
@@ -3493,8 +3522,8 @@ export function renderWeChatApp(store) {
         </div>
       ` : ''}
       ${wxState.showGlobalPromptModal ? `
-        <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in backdrop-blur-sm" onclick="window.wxActions.closeGlobalPrompt()">
-           <div class="bg-[#f3f3f3] w-[85%] max-w-[320px] rounded-[16px] overflow-hidden shadow-2xl animate-in zoom-in-95 flex flex-col" onclick="event.stopPropagation()">
+        <div class="mc-modal-overlay absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in backdrop-blur-sm" onclick="window.wxActions.closeGlobalPrompt()">
+           <div class="mc-modal-content bg-[#f3f3f3] w-[85%] max-w-[320px] rounded-[16px] overflow-hidden shadow-2xl animate-in zoom-in-95 flex flex-col" onclick="event.stopPropagation()">
               <div class="bg-white px-4 py-4 flex justify-between items-center border-b border-gray-100">
                  <span class="font-bold text-gray-800 text-[16px] mx-auto">通用用户人设</span>
               </div>
@@ -3555,9 +3584,6 @@ window.syncCloudMailbox = async () => {
           const char = store.contacts.find(c => c.id === m.charId);
           if (char) {
               if (m.text.includes('[系统] 云端请求失败')) window.actions.showToast('⚠️ 云端遇到了错误');
-              else window.actions.showToast('✨ 同步云端大脑，消息秒开！');
-              
-              // 让解析器立刻处理从信箱拿回来的成品文本！
               window.wxActions.getReply(true, m.charId, null, m.text);
           }
       }
