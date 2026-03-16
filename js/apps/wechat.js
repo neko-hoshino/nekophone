@@ -2003,7 +2003,14 @@ window.wxActions = {
       });
     } finally {
       if (!delegatedToCloud) {
-          if (isActive) { wxState.isTyping = false; window.render(); window.wxActions.scrollToBottom(); }
+          // 🌟 核心修复：不管用户当前在哪个页面，只要云端消息落地，立刻无条件强杀“输入中”状态和超时定时器！
+          wxState.isTyping = false;
+          if (window._fastSyncInterval) {
+              clearInterval(window._fastSyncInterval);
+              window._fastSyncInterval = null;
+          }
+          
+          if (isActive) { window.render(); window.wxActions.scrollToBottom(); }
           else { window.render(); }
       }
     }
