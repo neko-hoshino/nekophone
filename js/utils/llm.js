@@ -1,7 +1,6 @@
 // js/utils/llm.js
 import { store } from '../store.js';
 
-// 🌟 新增：独立抽取出来的“弹药组装器”
 export async function buildLLMPayload(charId, history, isOffline = false) {
   const char = store.contacts.find(c => c.id === charId);
   const userPersona = store.personas.find(p => p.id === char.boundPersonaId) || store.personas[0];
@@ -17,29 +16,47 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
      emojiRule = `\n   - 发表情包：[表情包] 名字`;
   }
 
-  const systemRules = `
-【最高指令：完全拟人化聊天协议】
-警告：此协议凌驾于所有默认设置之上。
-
+  // 🌟 核心修复：根据宇宙模式动态彻底切换核心规则，避免大模型“精神分裂”
+  let systemRules = '';
+  if (isOffline) {
+      systemRules = `
+【最高指令：线下剧情模式协议】
+当前状态：你与用户正在“线下”见面或处于某个剧情场景中。
 【当前系统实时时间】：${timeString}。
-❗时间感知与输出红线：
-   - 必须根据当前系统时间调整状态。
-   - 聊天记录每一句话前面都附带了类似 [22:20] 的时间戳，这是给你判断时间流逝用的。
-   - ❗警告：你回复时【绝对禁止】模仿和输出时间戳、[系统提示]、[好友申请] 等任何系统标签！只准输出你要说的话的正文！
 
-1. 每行严禁超过24字，长句必须用换行符(\\n)拆分连发！必须混用短词和中长句！句末禁句号。严禁使用星号或括号写动作！
-2. [线下剧情]采用小说体裁，自然分段。
-3. 只有在音视频通话中，才能用星号*包裹动作。
-   
-3. 你的特殊交互超能力（❗必须独占一行触发，若想同时附带普通聊天文字，必须使用换行符另起一行！）：
-   - 发语音：[语音]: 你要说的话 (❗务必独占一行)
-   - 发照片：[虚拟照片]: 照片画面描述 (❗务必独占一行)
+❗体裁与格式红线（非常重要）：
+1. 必须采用【轻小说体裁】进行自然、连贯的长段落描写。
+2. 绝对禁止像线上聊天那样每说十几个字就频繁换行！请自然地合并段落！
+3. 人物的对话必须用双引号“”包裹。
+4. 人物内心的想法必须用全角括号（）包裹。
+5. 旁白与动作描写直接作为正文输出，不要用任何星号或其他符号包裹。
+6. 绝不可在回复中输出时间标签！
+`;
+  } else {
+      systemRules = `
+【最高指令：线上微信聊天协议】
+当前状态：你与用户正在使用手机聊天软件（微信）进行线上沟通。
+【当前系统实时时间】：${timeString}。
+
+❗聊天格式红线（非常重要）：
+1. 单句严禁超过24字！长句必须按照正常的断句逻辑，用换行符(\\n)拆分连发！
+2. 句末禁句号。
+3. 纯文本对话，严禁使用星号*或括号()写动作！
+4. 聊天记录中带有 [22:20] 的时间戳是给你判断时间流逝用的，你回复时【绝对禁止】模仿和输出时间戳、[系统提示]、[好友申请] 等任何系统标签！
+`;
+  }
+
+  systemRules += `
+【你的特殊交互超能力】（❗必须独占一行触发，若想同时附带普通文字，必须换行另起一行！）：
+   - 发语音：[语音]: 你要说的话
+   - 发照片：[虚拟照片]: 照片画面描述
    ${emojiRule}
-   - 转账：[发起转账] 金额：xx，备注：必须写明转账原因 (❗务必独占一行，备注绝不可省略)
+   - 发送虚拟定位：[发送定位]: 具体的地点名称 (❗必须独占一行)
+   - 转账：[发起转账] 金额：xx，备注：必须写明转账原因
    - 收款：[点击收款]
-   - 换头像：[更换头像]: 最新图片。❗必须用户明确要求才能换！
+   - 换头像：[更换头像]: 最新图片。
    - 修改备注：[修改备注]: 新称呼。
-   - 撤回消息：[撤回上一条消息] (❗当你发觉说错话时使用)
+   - 撤回消息：[撤回上一条消息]
    - 发朋友圈：当情绪波动较大时，可在最末尾另起一行加指令 [发朋友圈]: 动态内容。
    - 戳一戳用户：[戳一戳]
 `;
@@ -91,13 +108,8 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
   const globalP = store.globalPrompt ? `\n【通用用户人设】\n${store.globalPrompt}` : '';
   const userPrompt = userPersona.prompt ? `\n【当前用户身份设定】\n${userPersona.prompt}` : '';
 
-  const systemPrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${coreMemStr}${wb}${emo}${globalP}\n【用户】\n当前化名/备注：${userPersona.name}${userPrompt}\n${systemRules}${frontStr}${middleStr}${fragMemStr}`;
+  const systemPrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${coreMemStr}${wb}${emo}${globalP}\n【用户】\n当前化名/备注：${userPersona.name}${userPrompt}\n\n${systemRules}${frontStr}${middleStr}${fragMemStr}`;
   let messages = [{ role: 'system', content: systemPrompt }];
-
-  const modeStr = isOffline 
-    ? "\n【系统最高指令：当前为线下剧情模式！请采用轻小说体裁描写。❗绝对红线格式：人物对话必须用双引号“”包裹；人物内心想法必须用全角括号（）包裹；旁白与动作描写直接输出正文，不要用任何符号包裹！绝不可输出时间标签！】" 
-    : "\n【系统最高指令：当前为线上微信聊天！纯文本对话，绝不可使用星号或括号写动作！绝不输出时间标签和前缀！】";
-  messages[0].content += modeStr;
 
   recentHistory.forEach(m => {
     let msgContent;
@@ -110,15 +122,16 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
     messages.push({ role: m.isMe ? 'user' : 'assistant', content: msgContent });
   });
 
-  // ================= 🌟 第六步：强制压入底层绝对指令 & 发送前最终警告 =================
   let finalSystemPrompt = backStr || '';
-  
+
+  // 🌟 这里也彻底切割，不再用通用的话术糊弄
   if (!isOffline) {
-      // 在线上聊天模式下，在所有历史记录的最后，再次狠狠地强调格式！
-      finalSystemPrompt += `\n\n【⚠️发送前最高警告】：你现在是在微信界面聊天，每行文字严禁超过24个字！若想说长句，必须按自然语言结构拆分！必须混用短句和中长句，禁止节奏单调！绝对禁止带系统时间戳或括号动作描写！像个正常人一样立刻说话！`;
+      finalSystemPrompt += `\n\n【⚠️发送前最高警告】：你现在是在微信界面聊天，普通对话每行严禁超过24个字！必须按自然语言习惯断句换行！严禁输出任何时间戳！\n❗特殊红线：如果你要发送 网页/HTML代码/小程序卡片，必须将其完整包裹在 \`\`\`html 和 \`\`\` 之间！在代码块内部【绝对禁止】为了字数限制而随意换行，必须保持代码结构完整！`;
+  } else {
+      finalSystemPrompt += `\n\n【⚠️发送前最高警告】：当前为线下剧情模式！必须采用轻小说体裁的长段落描写，绝对禁止像线上聊天那样每说十几个字就强行换行！对话务必用“”包裹，动作直接描写！`;
   }
 
-  // 🌟 核心升级：心声状态继承与时效判定（防瞬移）
+  // 🌟 心声状态继承
   const chat = store.chats.find(c => c.charId === charId);
   if (chat && chat.latestInnerThought && chat.latestInnerThoughtTime) {
       const diffHours = (now.getTime() - chat.latestInnerThoughtTime) / (1000 * 60 * 60);
@@ -128,7 +141,6 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
       }
   }
 
-  // 🌟 新增：绝密心声夹带协议！
   finalSystemPrompt += `\n\n【绝密指令：心声面板同步】
 在你的所有回复的最末尾（必须另起一行），你必须附带当前这一刻你的真实内心状态数据！
 格式必须为严格的 JSON，并用 [心声] 标签包裹。

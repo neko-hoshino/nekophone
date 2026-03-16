@@ -162,7 +162,6 @@ window.wxActions = {
   handleAvatarClick: (charId) => {
     // 每次点击，计数器 +1
     window.wxActions.avatarClickCount++;
-    
     if (window.wxActions.avatarClickCount === 1) {
         // 第一次点击，开启一个 300ms 的倒计时
         window.wxActions.avatarClickTimer = setTimeout(() => {
@@ -173,7 +172,6 @@ window.wxActions = {
             window.render();
             restoreScroll();
         }, 300); // 300ms 是人类双击的黄金间隔，觉得快了可以改 350
-        
     } else if (window.wxActions.avatarClickCount === 2) {
         // 在 300ms 内点下了第二下，触发【双击】！
         clearTimeout(window.wxActions.avatarClickTimer); // 赶紧拦截住单击的弹窗
@@ -285,7 +283,7 @@ window.wxActions = {
       window.render();
       window.wxActions.getReply(true, null, '(系统指令：请顺着上面的剧情继续往下写，不要重复，自然地推动情节发展。)');
   },
-  // 彻底修复的美化预设逻辑
+  // 美化预设
   applyCSSPreset: (event) => {
     saveScroll();
     const val = event.target.value;
@@ -305,7 +303,6 @@ window.wxActions = {
     saveScroll();
     const name = prompt("请输入新美化预设的名称：", "我的自定义预设");
     if (!name) { restoreScroll(); return window.actions.showToast("已取消保存"); }
-    // 直接从输入框抓取最新的代码，不再抓空！
     const cssBox = document.getElementById('set-custom-css');
     const currentCssStr = cssBox ? cssBox.value : '';
     
@@ -1296,7 +1293,6 @@ window.wxActions = {
 
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     if (chat) {
-      //如果当前在引用状态，就把引用内容打包进这根消息里
       let quoteData = null;
       if (wxState.quoteMsgId) {
         const qMsg = chat.messages.find(m => m.id === wxState.quoteMsgId);
@@ -1308,8 +1304,10 @@ window.wxActions = {
       }
       chat.messages.push({
         id: Date.now(), sender: store.personas[0].name, text: text,
-        isMe: true, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: 'text', time: getNowTime(),
-        quote: quoteData // 把打包好的引用数据塞进气泡
+        isMe: true, source: 'wechat', 
+        isOffline: isOffline, 
+        isCallMsg: isCall, msgType: 'text', time: getNowTime(),
+        quote: quoteData
       });
       input.value = ''; 
       wxState.quoteMsgId = null; // 发送完立刻清空引用状态
@@ -1368,12 +1366,18 @@ window.wxActions = {
     } else {
       const input = document.getElementById('virtual-input');
       const desc = input.value.trim();
-      if (!desc) return window.actions.showToast('描述不能为空哦！');
-      chat.messages.push({ id: Date.now(), sender: store.personas[0].name, text: desc, isMe: true, source: 'wechat', isOffline: false, msgType: wxState.virtualModalType === 'image' ? 'virtual_image' : 'voice', time: getNowTime() });
+      if (!desc) return window.actions.showToast('内容不能为空哦！');
+      // 🌟 根据模式发送不同气泡
+      let mType = 'text';
+      if (wxState.virtualModalType === 'image') mType = 'virtual_image';
+      if (wxState.virtualModalType === 'voice') mType = 'voice';
+      if (wxState.virtualModalType === 'location') mType = 'location'; // 🌟 发送定位
+      
+      chat.messages.push({ id: Date.now(), sender: store.personas[0].name, text: desc, isMe: true, source: 'wechat', isOffline: false, msgType: mType, time: getNowTime() });
     }
     wxState.virtualModalType = 'none'; 
     window.render(); 
-    window.wxActions.scrollToBottom(); // 🌟 修复：渲染完立刻滚到底部看新消息！
+    window.wxActions.scrollToBottom(); 
   },
 
   startCall: (type) => { 
@@ -1501,7 +1505,6 @@ window.wxActions = {
       if(type === 'thought') char.offlineThoughtColor = color;
       window.render();
   },
-  // 🧠 大脑中枢解析器 (支持被动回复、主动出击、自动记忆、通话自动播放)
   getReply: async (isAuto = false, targetCharId = null, customPrompt = null, preGeneratedText = null) => {
     const charId = targetCharId || wxState.activeChatId;
     const chat = store.chats.find(c => c.charId === charId);
@@ -1529,7 +1532,7 @@ window.wxActions = {
       });
     }
 
-    let delegatedToCloud = false; // 🌟 核心：新增标志位！
+    let delegatedToCloud = false; 
 
     try {
       let replyText = '';
@@ -1538,15 +1541,17 @@ window.wxActions = {
           replyText = preGeneratedText;
           if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
       } else {
-          delegatedToCloud = true; // 🌟 告诉系统：任务已交出！
           if (isActive) {
               wxState.isTyping = true;
+              wxState.cloudTaskStartTime = Date.now(); // 🌟 记录云端发车时间
               window.render();
               window.wxActions.scrollToBottom();
           }
           
           const { buildLLMPayload } = await import('../utils/llm.js');
-          const llmMessages = await buildLLMPayload(charId, chat.messages, isActive ? wxState.view === 'offlineStory' : false);
+          const llmMessages = await buildLLMPayload(charId, chat.messages, isOffline);
+          
+          delegatedToCloud = true; 
           
           if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
 
@@ -1555,25 +1560,35 @@ window.wxActions = {
           if (window._fastSyncInterval) clearInterval(window._fastSyncInterval);
           window._fastSyncInterval = setInterval(() => {
               if (wxState.isTyping) {
+                  // 🌟 120秒超时救生圈：彻底终结无限卡死Bug
+                  if (Date.now() - (wxState.cloudTaskStartTime || Date.now()) > 120000) {
+                      wxState.isTyping = false;
+                      clearInterval(window._fastSyncInterval);
+                      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+                      if (chat) {
+                          chat.messages.push({ id: Date.now(), sender: 'system', text: '[系统] 请求超时（等待超过2分钟）或服务器崩溃。可能是生成的代码过长。请长按重roll。', isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'text', time: getNowTime() });
+                      }
+                      window.render();
+                      window.wxActions.scrollToBottom();
+                      return;
+                  }
                   window.syncCloudMailbox();
               } else {
                   clearInterval(window._fastSyncInterval);
               }
           }, 3000);
           
-          return; // 🌟 退出执行，此时 finally 依然会跑！
+          return; 
       }
-      // 🌟 绝密安检机：剥离并保存心声数据
+      
       const thoughtRegex = /\[心声\]\s*(\{.*?\})/s;
       const thoughtMatch = replyText.match(thoughtRegex);
       if (thoughtMatch) {
           try {
               const innerThought = JSON.parse(thoughtMatch[1]);
               chat.latestInnerThought = innerThought;
-              chat.latestInnerThoughtTime = Date.now(); // 🌟 新增：记住偷听心声的时间！
-              console.log("偷听心声成功：", innerThought);
-          } catch(e) { console.error("解析心声失败", e); }
-          // 把心声从要展示的文本里剔除，做到无痕！
+              chat.latestInnerThoughtTime = Date.now(); 
+          } catch(e) {}
           replyText = replyText.replace(thoughtRegex, '').trim();
       }
 
@@ -1583,118 +1598,33 @@ window.wxActions = {
           .replace(/\[系统提示.*?\][:：]?\s*/g, '')
           .replace(/\[好友申请\][:：]?\s*/g, '')
           .trim();
+
+      // 🌟 核心修复 1：提前提取代码块和自定义网页卡片，防止被换行符切碎
+      let codeBlocks = [];
+      remainingText = remainingText.replace(/```[a-z]*\n?([\s\S]*?)```/gi, (match, code) => {
+          let id = `__CODE_BLOCK_${codeBlocks.length}__`;
+          codeBlocks.push(code.trim());
+          return `\n${id}\n`;
+      });
+      // 容错：如果用户写了 [网页卡片] 的标签
+      remainingText = remainingText.replace(/\[网页(?:卡片)?\]([\s\S]*?)\[\/网页(?:卡片)?\]/gi, (match, code) => {
+          let id = `__CODE_BLOCK_${codeBlocks.length}__`;
+          codeBlocks.push(code.trim());
+          return `\n${id}\n`;
+      });
+      // 终极容错：尝试捕获 AI 忘记带标签的裸露 <div> 块
+      remainingText = remainingText.replace(/(<div[\s\S]*?<\/div>)/gi, (match) => {
+          let id = `__CODE_BLOCK_${codeBlocks.length}__`;
+          codeBlocks.push(match.trim());
+          return `\n${id}\n`;
+      });
+
       let msgsToPush = [];
       let delayedActions = [];
       let hasSystemAction = false;
-
-      // 拦截电话指令
-      if (/\[发起(语音|视频)?通话\]/.test(remainingText)) {
-        if (wxState.view === 'call') {
-          remainingText = remainingText.replace(/\[发起(语音|视频)?通话\][:：]?\s*/g, '').trim();
-        } else {
-          const match = remainingText.match(/\[发起(语音|视频)?通话\]/);
-          let parts = remainingText.split(/\[发起(语音|视频)?通话\][:：]?\s*/);
-          if (parts[0].trim()) { chat.messages.push({ id: Date.now(), sender: char.name, text: parts[0].trim(), isMe: false, source: 'wechat', isOffline: false, msgType: 'text', time: getNowTime() }); }
-          wxState.pendingCallMsg = parts[2] ? parts[2].trim() : '';
-          wxState.view = 'incomingCall'; wxState.callType = match[1] === '视频' ? 'video' : 'voice'; wxState.isTyping = false; 
-          try { 
-            const ap = store.appearance || {};
-            wxState.ringtone.src = ap.callSound || 'https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3';
-            wxState.ringtone.play(); 
-          } catch(e){}
-          return window.render(); 
-        }
-      }
       
-      if (/\[(语音|视频)?通话(已)?结束\]/.test(remainingText)) { delayedActions.push('end_call'); remainingText = remainingText.replace(/\[(语音|视频)?通话(已)?结束\][:：]?\s*/g, '').trim(); }
-      if (/\[(点击收款|接收转账)\]/.test(remainingText)) { delayedActions.push('accept_transfer'); remainingText = remainingText.replace(/\[(点击收款|接收转账)\][:：]?\s*/g, '').trim(); }
-      
-      // 拦截朋友圈
-      if (/\[(?:发朋友圈|发布朋友圈)\]/.test(remainingText)) {
-        const match = remainingText.match(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*([^\n\[\]]+)/);
-        if (match) {
-          store.moments = store.moments || [];
-          store.moments.push({ id: Date.now(), senderId: char.id, senderName: char.name, avatar: char.avatar, text: match[1].trim(), imageUrl: null, time: '刚刚', likes: [], comments: [] });
-          hasSystemAction = true;
-        }
-        remainingText = remainingText.replace(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*[^\n\[\]]+/, '').trim();
-      }
-      
-      // 拦截换头像
-      if (/\[更换头像\]/.test(remainingText)) {
-        const match = remainingText.match(/\[更换头像\][:：]?\s*([^\n\[\]]+)/);
-        if (match) {
-          let newAvatar = match[1].trim();
-          if (newAvatar.includes('最新图片')) {
-            const lastImgMsg = chat.messages.slice().reverse().find(m => m.msgType === 'real_image');
-            newAvatar = (lastImgMsg && lastImgMsg.imageUrl) ? lastImgMsg.imageUrl : '❓';
-          }
-          char.avatar = newAvatar;
-          chat.messages.push({ id: Date.now() + 150, sender: 'system', text: `${char.name} 更改了TA的头像`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
-          hasSystemAction = true;
-        }
-        remainingText = remainingText.replace(/\[更换头像\][:：]?\s*[^\n\[\]]+/, '').trim();
-      }
-
-      // 拦截表情包
-      if (/\[(?:发送表情|表情包)\]/.test(remainingText)) {
-        const match = remainingText.match(/\[(?:发送表情|表情包)\][:：]?\s*([^\n\[\]]+)/);
-        if (match) {
-          const emojiName = match[1].trim();
-          let foundUrl = '';
-          for (let libId of (char.mountedEmojis || [])) {
-             const lib = (store.emojiLibs || []).find(l => l.id === libId);
-             if (lib) {
-                 const ep = lib.emojis.find(e => (typeof e === 'object' ? e.name : '') === emojiName);
-                 if (ep) { foundUrl = ep.url; break; }
-             }
-          }
-          if (foundUrl) {
-              chat.messages.push({ id: Date.now() + 150, sender: char.name, text: `[表情包] ${emojiName}`, imageUrl: foundUrl, isMe: false, source: 'wechat', isOffline: false, msgType: 'emoji', time: getNowTime() });
-              hasSystemAction = true;
-          }
-        }
-        // 🌟 核心修复：只精准抹除这一行的指令，不再吃掉后面的连发文字！
-        remainingText = remainingText.replace(/\[(?:发送表情|表情包)\][:：]?\s*[^\n\[\]]*/, '').trim();
-      }
-
-      // 拦截改备注
-      if (/\[修改备注\]/.test(remainingText)) {
-        const match = remainingText.match(/\[修改备注\][:：]?\s*([^\n\[\]]+)/);
-        if (match) {
-          store.personas[0].name = match[1].trim().substring(0, 15);
-          chat.messages.push({ id: Date.now() + 160, sender: 'system', text: `${char.name} 将你的备注修改为“${store.personas[0].name}”`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
-          hasSystemAction = true;
-        }
-        remainingText = remainingText.replace(/\[修改备注\][:：]?\s*[^\n\[\]]+/, '').trim();
-      }
-
-      // 拦截撤回
-      if (/\[撤回上一条消息\]/.test(remainingText)) {
-        const aiMsgs = chat.messages.filter(m => !m.isMe && m.msgType !== 'system' && m.msgType !== 'recall_system');
-        if (aiMsgs.length > 0) {
-          const lastAiMsg = aiMsgs[aiMsgs.length - 1];
-          lastAiMsg.recalledText = lastAiMsg.text; 
-          lastAiMsg.text = `${char.name} 撤回了一条消息`;
-          lastAiMsg.msgType = 'recall_system'; 
-          lastAiMsg.quote = null;
-        }
-        remainingText = remainingText.replace(/\[撤回上一条消息\][:：]?\s*/, '').trim();
-        hasSystemAction = true;
-      }
-
-      // 拦截对方反击的戳一戳
-      if (/\[戳一戳\]/.test(remainingText)) {
-        const verb = char.nudgeAIVerb || '拍了拍';
-        const suffix = char.nudgeAISuffix || '';
-        chat.messages.push({ id: Date.now() + 50, sender: 'system', text: `${char.name}${verb}了我${suffix}`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
-        remainingText = remainingText.replace(/\[戳一戳\][:：]?\s*/g, '').trim();
-        hasSystemAction = true;
-      }
-
       if (wxState.view === 'chatRoom') remainingText = remainingText.replace(/\*[^*]*\*/g, '').replace(/[(（][^)）]*[)）]/g, '').trim();
 
-      // 🌟 核心修复：防止图片/语音把后面的普通聊天吞噬
       if (/\[发起转账\]/.test(remainingText)) {
         let parts = remainingText.split(/\[发起转账\][:：]?\s*/);
         if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
@@ -1703,7 +1633,6 @@ window.wxActions = {
         const amount = (tStr.match(/金额[:：]?\s*(\d+(\.\d+)?)/) || [])[1] || '520.00';
         const note = (tStr.match(/备注[:：]?\s*([^，,。\]\n]+)/) || [])[1] || '转账给你';
         msgsToPush.push({ msgType: 'transfer', text: `[收到转账] 金额：${amount}元，备注：${note}`, transferData: { amount, note }, transferState: 'pending' });
-        // 把剩余的行再推回去当做普通文字
         let restText = nextLines.slice(1).join('\n').trim();
         if (restText) msgsToPush.push({ msgType: 'text', text: restText });
       } else if (/\[语音\]/.test(remainingText)) {
@@ -1720,10 +1649,21 @@ window.wxActions = {
         if (nextLines[0].trim()) msgsToPush.push({ msgType: 'virtual_image', text: nextLines[0].trim() });
         let restText = nextLines.slice(1).join('\n').trim();
         if (restText) msgsToPush.push({ msgType: 'text', text: restText });
+      } else if (/\[发送定位\]/.test(remainingText)) {
+        let parts = remainingText.split(/\[发送定位\][:：]?\s*/);
+        if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+        let nextLines = parts[1].split('\n');
+        if (nextLines[0].trim()) msgsToPush.push({ msgType: 'location', text: nextLines[0].trim() });
+        let restText = nextLines.slice(1).join('\n').trim();
+        if (restText) msgsToPush.push({ msgType: 'text', text: restText });
       } else {
         if (remainingText.trim()) {
-          if (wxState.view === 'offlineStory') { 
-            msgsToPush.push({ msgType: 'text', text: remainingText.trim() });
+          if (wxState.view === 'offlineStory' || wxState.view === 'sideStory') { 
+            let finalOfflineText = remainingText.trim();
+            codeBlocks.forEach((code, idx) => {
+                finalOfflineText = finalOfflineText.replace(`__CODE_BLOCK_${idx}__`, `<br/><div class="mc-html-card my-2 w-full overflow-hidden">${code}</div><br/>`);
+            });
+            msgsToPush.push({ msgType: 'text', text: finalOfflineText });
           } else {
             const lines = remainingText.split('\n');
             lines.forEach(line => {
@@ -1731,6 +1671,14 @@ window.wxActions = {
               fragments.forEach(frag => {
                 const t = frag.trim();
                 if (!t) return;
+                
+                // 🌟 新增：识别被提取出来的完整 HTML 代码块，作为独立气泡推送
+                let blockMatch = t.match(/__CODE_BLOCK_(\d+)__/);
+                if (blockMatch) {
+                   msgsToPush.push({ msgType: 'html_card', text: codeBlocks[parseInt(blockMatch[1])] });
+                   return;
+                }
+                
                 if (t.startsWith('*') && t.endsWith('*') && wxState.view === 'call') msgsToPush.push({ msgType: 'action', text: t.slice(1, -1) });
                 else msgsToPush.push({ msgType: 'text', text: t });
               });
@@ -1738,109 +1686,47 @@ window.wxActions = {
           }
         }
       }
-
-      // 🌟 核心升级：模拟真人“一条一条发”的拟真节奏
       const finalMsgs = [];
       msgsToPush.forEach((m, index) => {
         finalMsgs.push({ 
           id: Date.now() + index, sender: m.msgType === 'system' ? 'system' : char.name, text: m.text, isMe: false, source: 'wechat', 
-          isOffline: wxState.view === 'offlineStory', isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime(),
-          isIntercepted: char.isBlocked ? true : false // 🌟 打上拦截标记
+          isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime(),
+          isIntercepted: char.isBlocked ? true : false 
         });
       });
 
-      // 🌟 如果角色处于被拉黑状态，发完消息后强制追加一张“好友申请”卡片
       if (char.isBlocked && msgsToPush.length > 0) {
-         finalMsgs.push({
-            id: Date.now() + 999, sender: 'system', text: '好友申请',
-            msgType: 'friend_request', isMe: false, time: getNowTime()
-         });
+         finalMsgs.push({ id: Date.now() + 999, sender: 'system', text: '好友申请', msgType: 'friend_request', isMe: false, time: getNowTime() });
       }
 
       for (let i = 0; i < finalMsgs.length; i++) {
          const newMsg = finalMsgs[i];
          chat.messages.push(newMsg);
 
-         // 1. 触发 Minimax 语音 (异步不阻塞UI)
-         if (char.minimaxVoiceId && store.minimaxConfig?.enabled !== false && store.minimaxConfig?.apiKey) {
-             (async () => {
-                if (newMsg.msgType === 'voice' || (isCall && newMsg.msgType === 'text')) {
-                   const url = await fetchMinimaxVoice(newMsg.text, char.minimaxVoiceId);
-                   if (url) { 
-                      newMsg.audioUrl = url; 
-                      if (isCall && newMsg.msgType === 'text') {
-                          await new Promise(resolve => { const audio = new Audio(url); audio.onended = resolve; audio.onerror = resolve; audio.play().catch(() => resolve()); });
-                      } else { window.render(); }
-                   }
-                }
-             })();
-         }
-
-         // 2. 播放叮咚提示音
          if (!isCall && newMsg.msgType !== 'system') {
              try { const ap = store.appearance || {}; new Audio(ap.newMsgSound || 'https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3').play().catch(()=>{}); } catch(e) {}
          }
 
-         // 3. 后台横幅弹窗通知
-         const isLookingAtChat = store.currentApp === 'wechat' && wxState.view === 'chatRoom' && wxState.activeChatId === char.id;
-         if (!isLookingAtChat && window.actions.notify && newMsg.msgType !== 'system') {
-             window.actions.notify(char.name, newMsg.msgType === 'text' ? newMsg.text : `[${newMsg.msgType}]`, char.avatar);
-         }
-
-         // 4. 实时刷新画面并滚到底部
-         if (isActive) {
-             window.render();
-             setTimeout(() => window.wxActions.scrollToBottom(), 50);
-         }
-
-         // 🌟 5. 灵魂节奏：如果不是最后一条，按照字数计算停顿时间 (最低 600ms, 最高 2500ms)
-         if (i < finalMsgs.length - 1) {
-             const delayMs = Math.min(Math.max(newMsg.text.length * 60, 600), 2500);
-             await new Promise(resolve => setTimeout(resolve, delayMs));
-         }
+         if (isActive) { window.render(); setTimeout(() => window.wxActions.scrollToBottom(), 50); }
+         if (i < finalMsgs.length - 1) await new Promise(resolve => setTimeout(resolve, Math.min(Math.max(newMsg.text.length * 60, 600), 2500)));
       }
 
-      if (delayedActions.includes('accept_transfer')) {
-        const lastTransfer = chat.messages.slice().reverse().find(m => m.msgType === 'transfer' && m.isMe && m.transferState === 'pending');
-        if (lastTransfer) {
-          lastTransfer.transferState = 'accepted'; 
-          const amt = parseFloat(lastTransfer.transferData.amount);
-          store.wallet.balance -= amt; 
-          store.wallet.transactions.push({ type: 'out', amount: amt, title: `转账给 ${char.name}`, date: new Date().toISOString() });
-          chat.messages.push({ id: Date.now() + 100, sender: 'system', text: '对方已收款', isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
-        }
-      }
-      if (delayedActions.includes('end_call')) {
-        chat.messages.push({ id: Date.now() + 200, sender: 'system', text: '对方已挂断通话', isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
-        wxState.view = 'chatRoom'; wxState.callType = null; wxState.callStartTime = null;
-      }
-      if (msgsToPush.length === 0 && delayedActions.length === 0 && !hasSystemAction && wxState.view !== 'incomingCall') {
-        chat.messages.push({ 
-          id: Date.now() + 100, sender: char.name, text: `[系统] API返回了空消息或被规则拦截，请重roll`, 
-          isMe: false, source: 'wechat', isOffline: false, msgType: 'text', time: getNowTime() 
-        });
+      if (msgsToPush.length === 0 && !hasSystemAction) {
+        chat.messages.push({ id: Date.now() + 100, sender: char.name, text: `[系统] API返回了空消息或被规则拦截，请重roll`, isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'text', time: getNowTime() });
       }
 
     } catch (error) { 
-      // 🌟 核心修复：强行转义报错里的 HTML 标签，防止撑碎微信 UI 结构！
       let rawErr = error ? (error.message || error.toString()) : "未知网络错误";
       const errMsg = rawErr.replace(/</g, '&lt;').replace(/>/g, '&gt;');
       
       wxState.showPlusMenu = false; 
       wxState.showEmojiMenu = false;
-      if (document.hidden) {
-         chat.messages.push({ 
-           id: Date.now(), sender: 'system', text: `连接被系统强行中断。请长按重roll。`, 
-           isMe: true, source: 'wechat', isOffline: isOffline, msgType: 'system', time: getNowTime() 
-         });
-      } else {
-         chat.messages.push({ 
-           id: Date.now(), sender: char.name, text: `[系统] 请求失败: ${errMsg} (请长按重roll)`, 
-           isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'text', time: getNowTime() 
-         });
-      }
+      chat.messages.push({ 
+        id: Date.now(), sender: document.hidden ? 'system' : char.name, 
+        text: document.hidden ? `连接被系统强行中断。请长按重roll。` : `[系统] 请求失败: ${errMsg} (请长按重roll)`, 
+        isMe: document.hidden, source: 'wechat', isOffline: isOffline, msgType: document.hidden ? 'system' : 'text', time: getNowTime() 
+      });
     } finally {
-      // 🌟 终极拦截：只有在【没有交出代跑权】（即拿回了信件正常执行完解析）的情况下，才允许关掉 isTyping！
       if (!delegatedToCloud) {
           if (isActive) { wxState.isTyping = false; window.render(); window.wxActions.scrollToBottom(); }
           else { window.render(); }
@@ -2926,20 +2812,61 @@ export function renderWeChatApp(store) {
         // 🌟 语音文字提取到外部 (带有小三角气泡的全新样式)
         contentHtml = `<div class="flex flex-col cursor-pointer" onclick="this.closest('.relative').querySelector('.mc-voice-text').classList.toggle('hidden'); window.wxActions.scrollToBottom(); ${playScript}"><div class="flex items-center space-x-3 ${msg.isMe ? 'flex-row-reverse space-x-reverse' : ''}"><div class="flex items-center gap-[2px] ${msg.isMe ? 'text-green-800' : 'text-gray-800'}">${barsHtml}</div><span class="text-[13px] opacity-80">${duration}"</span></div></div>`;      
         voiceTextOut = `<div class="mc-voice-text-out hidden mt-1.5 text-[14px] text-gray-600 bg-gray-100/90 rounded-[10px] px-3 py-2 max-w-full break-words shadow-sm border border-gray-200/50 relative before:content-[''] before:absolute before:border-[6px] before:border-transparent before:border-b-gray-100 ${msg.isMe ? 'before:right-4 before:-top-[11px]' : 'before:left-4 before:-top-[11px]'}">${msg.text}</div>`;
+      } else if (msg.msgType === 'html_card') {
+        maxWidthClass = 'max-w-[85%]';
+        // 让 HTML 卡片透明且充满宽度，由 AI 自己的 CSS 来决定长什么样
+        bubbleClass = 'mc-bubble-html bg-transparent shadow-none p-0 overflow-visible w-full flex flex-col';
+        bubbleStyle = '';
+        
+        let safeHtml = msg.text;
+        try { // 🌟 核心防爆：用浏览器原生的 DOMParser 强行闭合缺失的标签，绝不连累父级 UI！
+            const doc = new DOMParser().parseFromString(safeHtml, 'text/html');
+            safeHtml = doc.body.innerHTML;
+        } catch(e) {}
+        contentHtml = `<div class="w-full overflow-hidden rounded-xl">${safeHtml}</div>`;
+        
       } else if (msg.msgType === 'text') {
         bubbleClass = `mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-wrap break-words text-[15px] ${msg.isMe ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`;
         bubbleStyle = '';
         
-        // 🌟 引用文字提取到气泡顶部独立显示
+        let safeText = msg.text;
+        try { // 🌟 防止普通零碎文字里的孤立 HTML 标签撑破底栏
+            if (safeText.includes('<') && safeText.includes('>')) {
+               const doc = new DOMParser().parseFromString(safeText, 'text/html');
+               safeText = doc.body.innerHTML;
+            }
+        } catch(e) {}
+        
         if (msg.quote) {
            quoteHtmlOut = `<div class="mc-quote-out text-[11px] text-gray-500 bg-gray-200/60 rounded-[8px] px-2.5 py-1.5 mb-1 max-w-full break-words whitespace-pre-wrap ${msg.isMe ? 'self-end' : 'self-start'}">${msg.quote.sender}：${msg.quote.text}</div>`;
         }
-        contentHtml = msg.text;
+        contentHtml = safeText;
       } else if (msg.msgType === 'real_image') {
         maxWidthClass = 'max-w-[40%]';
         bubbleClass = 'mc-bubble-img bg-white p-1 rounded-xl shadow-sm border border-gray-100'; 
         bubbleStyle = ''; 
         contentHtml = `<img src="${msg.imageUrl}" class="w-full h-auto rounded-lg object-cover max-h-[200px] cursor-pointer" onclick="window.actions.showToast('查看大图')" alt="照片" />`;
+      } else if (msg.msgType === 'location') {
+        maxWidthClass = 'max-w-[65%]';
+        bubbleClass = 'mc-bubble-location bg-white rounded-[12px] shadow-sm border border-gray-100 overflow-hidden p-0 cursor-pointer active:scale-95 transition-transform';
+        bubbleStyle = '';
+        contentHtml = `
+          <div class="flex flex-col w-56" onclick="window.actions.showToast('正在打开地图...')">
+            <div class="px-3 pt-2 text-[15px] text-gray-800 font-bold truncate w-full">${msg.text}</div>
+            <div class="text-[11px] text-gray-400 px-3 pb-2 truncate w-full">点击查看详细位置</div>
+            <div class="h-24 relative w-full overflow-hidden border-t border-gray-100 bg-[#f2f0e6]">
+               <div class="absolute w-full h-2 bg-white top-8 rotate-12"></div>
+               <div class="absolute w-full h-3 bg-white top-12 -rotate-6"></div>
+               <div class="absolute w-2 h-full bg-white left-12 rotate-3"></div>
+               <div class="absolute w-3 h-full bg-white right-10 -rotate-12"></div>
+               <div class="absolute w-16 h-10 bg-[#c8e6c9] top-2 left-20 rounded-md opacity-60"></div>
+               <div class="absolute w-32 h-6 bg-[#bbdefb] bottom-2 right-[-10px] rotate-[-15deg] opacity-80"></div>
+               <div class="absolute inset-0 flex items-center justify-center">
+                   <i data-lucide="map-pin" class="text-red-500 drop-shadow-md pb-2" style="width: 32px; height: 32px; fill: #ef444420;"></i>
+               </div>
+            </div>
+          </div>
+        `;
       } else if (msg.msgType === 'transfer') {
         maxWidthClass = ''; 
         bubbleClass = 'mc-bubble-transfer w-[230px] h-[95px] rounded-xl shadow-sm overflow-hidden flex flex-col cursor-pointer active:scale-95 transition-transform'; 
@@ -3056,7 +2983,8 @@ export function renderWeChatApp(store) {
       { id: 'mc-tool-mic', icon: 'mic', label: '发送语音', action: "window.wxActions.openVirtualModal('voice')" },
       { id: 'mc-tool-voicecall', icon: 'phone', label: '语音通话', action: "window.wxActions.startCall('voice')" },
       { id: 'mc-tool-videocall', icon: 'video', label: '视频通话', action: "window.wxActions.startCall('video')" },
-      { id: 'mc-tool-offline', icon: 'coffee', label: '线下剧情', action: "window.wxActions.enterOffline()" }
+      { id: 'mc-tool-location', icon: 'map-pin', label: '发送定位', action: "window.wxActions.openVirtualModal('location')" },
+      { id: 'mc-tool-offline', icon: 'coffee', label: '线下剧情', action: "window.wxActions.enterOffline()" },
     ].map(item => `
       <div class="mc-tool-item flex flex-col items-center justify-center space-y-1.5 cursor-pointer active:scale-95 transition-transform" onclick="${item.action}">
         <div class="${item.id} w-14 h-14 flex items-center justify-center">
@@ -3066,8 +2994,30 @@ export function renderWeChatApp(store) {
       </div>
     `).join('');
 
-    const virtualModalHtml = wxState.virtualModalType !== 'none' ? `<div class="absolute inset-0 bg-black/40 z-50 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm"><div class="bg-white w-full rounded-[24px] p-5 shadow-2xl animate-in zoom-in-95 duration-200">${wxState.virtualModalType === 'transfer' ? `<h3 class="font-bold text-gray-800 mb-4 flex items-center justify-center"><i data-lucide="credit-card" class="mr-2 text-orange-500" style="width:20px; height:20px;"></i>发起转账</h3><div class="flex items-center text-4xl font-bold border-b border-gray-200 pb-2 mb-4 text-gray-800"><span class="mr-2 text-2xl">¥</span><input type="number" id="transfer-amount" class="flex-1 outline-none bg-transparent" placeholder="0.00" /></div><input type="text" id="transfer-note" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 outline-none text-sm mb-6 font-bold" placeholder="转账说明（选填，默认：转账）" />` : `<h3 class="font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="${wxState.virtualModalType === 'image' ? 'camera' : 'mic'}" class="mr-2 text-blue-500" style="width:20px; height:20px;"></i>${wxState.virtualModalType === 'image' ? '拍摄虚拟照片' : '录制语音消息'}</h3><p class="text-[10px] text-gray-500 mb-4">${wxState.virtualModalType === 'image' ? '详细描写照片画面。' : '输入你想要用语音发送的文字内容。'}</p><textarea id="virtual-input" rows="4" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 outline-none text-sm mb-4 resize-none focus:border-blue-500 transition-colors" placeholder="请输入描述内容..."></textarea>`}<div class="flex space-x-3"><button onclick="window.wxActions.closeVirtualModal()" class="flex-1 py-2.5 bg-gray-100 text-gray-600 font-bold rounded-xl active:bg-gray-200">取消</button><button onclick="window.wxActions.sendVirtualMedia()" class="flex-1 py-2.5 ${wxState.virtualModalType === 'transfer' ? 'bg-[#f98a2e] active:bg-orange-600' : 'bg-blue-500 active:bg-blue-600'} text-white font-bold rounded-xl shadow-md">发送</button></div></div></div>` : '';
-
+    const virtualModalHtml = wxState.virtualModalType !== 'none' ? `
+      <div class="absolute inset-0 bg-black/40 z-50 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm">
+        <div class="bg-white w-full rounded-[24px] p-5 shadow-2xl animate-in zoom-in-95 duration-200">
+          ${wxState.virtualModalType === 'transfer' ? `
+            <h3 class="font-bold text-gray-800 mb-4 flex items-center justify-center"><i data-lucide="credit-card" class="mr-2 text-orange-500" style="width:20px; height:20px;"></i>发起转账</h3>
+            <div class="flex items-center text-4xl font-bold border-b border-gray-200 pb-2 mb-4 text-gray-800"><span class="mr-2 text-2xl">¥</span><input type="number" id="transfer-amount" class="flex-1 outline-none bg-transparent" placeholder="0.00" /></div>
+            <input type="text" id="transfer-note" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 outline-none text-sm mb-6 font-bold" placeholder="转账说明（选填，默认：转账）" />
+          ` : `
+            <h3 class="font-bold text-gray-800 mb-2 flex items-center">
+              <i data-lucide="${wxState.virtualModalType === 'image' ? 'camera' : (wxState.virtualModalType === 'location' ? 'map-pin' : 'mic')}" class="mr-2 text-blue-500" style="width:20px; height:20px;"></i>
+              ${wxState.virtualModalType === 'image' ? '拍摄虚拟照片' : (wxState.virtualModalType === 'location' ? '发送虚拟定位' : '录制语音消息')}
+            </h3>
+            <p class="text-[10px] text-gray-500 mb-4">
+              ${wxState.virtualModalType === 'image' ? '详细描写照片画面。' : (wxState.virtualModalType === 'location' ? '输入你想发送的具体位置名称。' : '输入你想要用语音发送的文字内容。')}
+            </p>
+            <textarea id="virtual-input" rows="4" class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 outline-none text-sm mb-4 resize-none focus:border-blue-500 transition-colors" placeholder="请输入内容..."></textarea>
+          `}
+          <div class="flex space-x-3">
+            <button onclick="window.wxActions.closeVirtualModal()" class="flex-1 py-2.5 bg-gray-100 text-gray-600 font-bold rounded-xl active:bg-gray-200">取消</button>
+            <button onclick="window.wxActions.sendVirtualMedia()" class="flex-1 py-2.5 ${wxState.virtualModalType === 'transfer' ? 'bg-[#f98a2e] active:bg-orange-600' : 'bg-blue-500 active:bg-blue-600'} text-white font-bold rounded-xl shadow-md">发送</button>
+          </div>
+        </div>
+      </div>
+    ` : '';
     let transferDetailHtml = '';
     if (wxState.activeTransferId) {
       const tMsg = chatData.messages.find(m => m.id === wxState.activeTransferId);
@@ -3688,13 +3638,14 @@ window.syncCloudMailbox = async () => {
           headers: { 'Content-Type': 'application/json', 'x-secret-token': localStorage.getItem('neko_server_pwd') || '' },
           body: JSON.stringify({ endpoint: sub.endpoint })
       });
-      const data = await res.json();
+      
+      if (!res.ok) return; // 🌟 核心防爆：遇到 502/504 网页直接跳过，等待 120s 超时救生圈接管！
 
+      const data = await res.json();
       for (const m of data.messages) {
           const char = store.contacts.find(c => c.id === m.charId);
           if (char) {
               let safeText = m.text;
-              // 🌟 终极防碎屏：在拿到信件的第一时间，把报错里的 HTML 全部转义，当做纯文本显示！
               if (safeText.includes('[系统] 云端请求失败')) {
                   safeText = safeText.replace(/</g, '&lt;').replace(/>/g, '&gt;');
                   window.actions.showToast('⚠️ 云端遇到了错误');
@@ -3702,7 +3653,7 @@ window.syncCloudMailbox = async () => {
               window.wxActions.getReply(true, m.charId, null, safeText);
           }
       }
-  } catch(e) { console.error('同步信箱失败:', e); }
+  } catch(e) {}
 };
 
 window.checkAutoMsg = async () => {
