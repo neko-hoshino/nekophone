@@ -874,32 +874,42 @@ window.wxActions = {
   uploadBookTxt: (event) => {
       const file = event.target.files[0];
       if (!file) return;
-      // 检查文件大小，防止过大卡死浏览器
-      if (file.size > 2 * 1024 * 1024) return window.actions.showToast('TXT 文件太大啦，请截取 2MB 以内的片段上传哦');
+      if (file.size > 5 * 1024 * 1024) return window.actions.showToast('文件过大，请截取 5MB 以内的片段上传哦');
       
-      const reader = new FileReader();
-      reader.onload = (e) => {
-          const text = e.target.result;
-          // 智能分页：大概每 400 字符切成一页，保证排版好看且不爆大模型 Token，同时适合语音朗读
+      const parseAndSave = (text) => {
           const pages = [];
           let current = '';
           const paragraphs = text.split('\n');
           for(let p of paragraphs) {
-              if(current.length + p.length > 400 && current.length > 0) {
-                  pages.push(current);
+              // 🌟 将单页字数从 400 提高到了 1200，大约是原来的三倍！
+              if(current.length + p.length > 1200 && current.trim().length > 0) {
+                  // 🌟 核心修复：用 .trim() 强制切掉首尾所有多余的空格和回车，绝不让它带到下一页开头！
+                  pages.push(current.trim());
                   current = p + '\n';
               } else {
                   current += p + '\n';
               }
           }
-          if(current) pages.push(current);
+          if(current.trim()) pages.push(current.trim()); // 最后一页也要脱水
           
           store.books = store.books || [];
           store.books.push({ id: 'book_' + Date.now(), title: file.name.replace('.txt', ''), pages: pages, progress: 0 });
           window.actions.showToast('书籍导入成功！');
           window.render();
       };
-      reader.readAsText(file);
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+          const text = e.target.result;
+          if (text.includes('')) {
+              const readerGBK = new FileReader();
+              readerGBK.onload = (e2) => parseAndSave(e2.target.result);
+              readerGBK.readAsText(file, 'gbk'); 
+          } else {
+              parseAndSave(text);
+          }
+      };
+      reader.readAsText(file, 'utf-8'); 
       event.target.value = '';
   },
   deleteBook: (id) => {
@@ -2946,16 +2956,39 @@ export function renderWeChatApp(store) {
         voiceTextOut = `<div class="mc-voice-text-out hidden mt-1.5 text-[14px] text-gray-600 bg-gray-100/90 rounded-[10px] px-3 py-2 max-w-full break-words shadow-sm border border-gray-200/50 relative before:content-[''] before:absolute before:border-[6px] before:border-transparent before:border-b-gray-100 ${msg.isMe ? 'before:right-4 before:-top-[11px]' : 'before:left-4 before:-top-[11px]'}">${msg.text}</div>`;
       } else if (msg.msgType === 'html_card') {
         maxWidthClass = 'max-w-[85%]';
-        // 让 HTML 卡片透明且充满宽度，由 AI 自己的 CSS 来决定长什么样
-        bubbleClass = 'mc-bubble-html bg-transparent shadow-none p-0 overflow-visible w-full flex flex-col';
+        // 🌟 修复 1：恢复漂亮的白色底板和卡片圆角阴影
+        bubbleClass = 'mc-bubble-html bg-white rounded-[16px] shadow-sm border border-gray-100 overflow-hidden w-full flex flex-col';
         bubbleStyle = '';
         
         let safeHtml = msg.text;
-        try { // 🌟 核心防爆：用浏览器原生的 DOMParser 强行闭合缺失的标签，绝不连累父级 UI！
+        try { 
             const doc = new DOMParser().parseFromString(safeHtml, 'text/html');
-            safeHtml = doc.body.innerHTML;
+            // 🌟 修复 2：把 AI 写在 <head> 里的 CSS 样式（<style>）强行抢救回来！
+            const headStyles = Array.from(doc.head.querySelectorAll('style')).map(s => s.outerHTML).join('\n');
+            safeHtml = headStyles + doc.body.innerHTML;
         } catch(e) {}
-        contentHtml = `<div class="w-full overflow-hidden rounded-xl">${safeHtml}</div>`;
+        
+        // 🌟 修复 3：加入一套基础的“兜底 CSS”，抵抗 Tailwind 的格式化重置！
+        // 这样即使 AI 不写样式，按钮也是好看的灰色圆角按钮，标题也是加粗的！
+        contentHtml = `
+          <div class="w-full p-4 mc-html-render-box relative text-[14px] text-gray-800 leading-relaxed">
+             <style>
+               .mc-html-render-box button { background-color: #f3f4f6; color: #374151; padding: 6px 14px; border-radius: 8px; font-weight: bold; border: 1px solid #e5e7eb; cursor: pointer; transition: all 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
+               .mc-html-render-box button:active { transform: scale(0.95); background-color: #e5e7eb; }
+               .mc-html-render-box input { border: 1px solid #d1d5db; border-radius: 8px; padding: 6px 10px; outline: none; width: 100%; box-sizing: border-box; }
+               .mc-html-render-box input:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59,130,246,0.2); }
+               .mc-html-render-box h1 { font-size: 1.4em; font-weight: 900; margin-bottom: 0.5em; color: #111827; }
+               .mc-html-render-box h2 { font-size: 1.2em; font-weight: 800; margin-bottom: 0.5em; color: #1f2937; }
+               .mc-html-render-box h3 { font-size: 1.1em; font-weight: bold; margin-bottom: 0.5em; color: #374151; }
+               .mc-html-render-box ul { list-style-type: disc; padding-left: 1.5em; margin-bottom: 0.5em; }
+               .mc-html-render-box ol { list-style-type: decimal; padding-left: 1.5em; margin-bottom: 0.5em; }
+               .mc-html-render-box p { margin-bottom: 0.5em; }
+               .mc-html-render-box hr { border: 0; border-top: 1px solid #e5e7eb; margin: 1em 0; }
+               .mc-html-render-box a { color: #3b82f6; text-decoration: underline; cursor: pointer; }
+             </style>
+             ${safeHtml}
+          </div>
+        `;
         
       } else if (msg.msgType === 'text') {
         bubbleClass = `mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-wrap break-words text-[15px] ${msg.isMe ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`;
@@ -3362,12 +3395,6 @@ export function renderWeChatApp(store) {
             </div>
           </div>
         ` : ''}
-        
-      ${wxState.showExtractMemoryModal ? `
-          <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeExtractMemoryModal()">
-             ... (略过，你保留原来的提取记忆代码即可) ...
-          </div>
-        ` : ''}
 
         ${wxState.showInnerThoughtModal ? (() => {
             const charId = wxState.showInnerThoughtModal;
@@ -3434,14 +3461,14 @@ export function renderWeChatApp(store) {
             `;
         })() : ''}
         ${wxState.showBookSelectModal ? `
-          <div class="absolute inset-0 z-[80] bg-black/40 flex items-end justify-center animate-in fade-in backdrop-blur-sm" onclick="window.wxActions.closeBookSelectModal()">
-            <div class="bg-[#f3f3f3] w-full max-h-[75vh] rounded-t-[24px] overflow-hidden shadow-2xl animate-in slide-in-from-bottom-4 flex flex-col" onclick="event.stopPropagation()">
-              <div class="bg-white px-4 py-4 flex justify-between items-center border-b border-gray-100">
-                <div class="cursor-pointer active:opacity-50 p-1" onclick="window.wxActions.closeBookSelectModal()"><i data-lucide="chevron-left" class="w-6 h-6 text-gray-600"></i></div>
+          <div class="mc-modal-overlay absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in backdrop-blur-sm" onclick="window.wxActions.closeBookSelectModal()">
+            <div class="mc-modal-content bg-[#f3f3f3] w-11/12 max-w-sm max-h-[75vh] rounded-[24px] overflow-hidden shadow-2xl animate-in zoom-in-95 flex flex-col" onclick="event.stopPropagation()">
+              <div class="bg-white px-4 py-4 flex justify-between items-center border-b border-gray-100 shrink-0">
+                <div class="cursor-pointer active:opacity-50 p-1" onclick="window.wxActions.closeBookSelectModal()"><i data-lucide="x" class="w-5 h-5 text-gray-500"></i></div>
                 <span class="font-bold text-gray-800 text-[16px]">选择要一起读的书</span>
-                <div class="w-8"></div>
+                <div class="w-7"></div>
               </div>
-              <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-10">
+              <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-6">
                 ${(store.books || []).map(b => `
                   <div class="bg-white rounded-[16px] p-3 flex items-center shadow-sm cursor-pointer active:scale-95 border border-transparent hover:border-[#07c160]/30 transition-all" onclick="window.wxActions.selectBookForReading('${b.id}')">
                     <div class="w-10 h-12 bg-purple-50 rounded flex items-center justify-center mr-3 border border-purple-100"><i data-lucide="book" class="text-purple-400 w-5 h-5"></i></div>
@@ -3451,7 +3478,7 @@ export function renderWeChatApp(store) {
                     </div>
                   </div>
                 `).join('')}
-                ${(store.books || []).length === 0 ? '<div class="text-center text-gray-400 mt-10 text-[12px] font-bold">书架空空如也，请先去“我”页面上传 txt 吧</div>' : ''}
+                ${(store.books || []).length === 0 ? '<div class="text-center text-gray-400 mt-6 text-[12px] font-bold">书架空空如也，请先去“我”页面上传 txt 吧</div>' : ''}
               </div>
             </div>
           </div>
@@ -3495,10 +3522,10 @@ export function renderWeChatApp(store) {
                   </div>
                 `;
             } else {
-                // 📖 全屏阅读模式
+                // 📖 半屏悬浮阅读模式 (留出底部三分之一)
                 return `
-                  <div class="absolute inset-0 z-[70] bg-[#f4f1ea] flex flex-col animate-in zoom-in-95 duration-200">
-                     <div class="pt-10 pb-3 px-4 flex justify-between items-center border-b border-[#e5e0d8]/60 bg-[#f4f1ea] shrink-0 shadow-sm">
+                  <div class="absolute top-0 left-0 right-0 h-[65%] z-[60] bg-[#f4f1ea] flex flex-col animate-in slide-in-from-top-4 duration-300 rounded-b-[32px] shadow-[0_20px_40px_rgba(0,0,0,0.15)] border-b border-[#e5e0d8] overflow-hidden" onclick="event.stopPropagation()">
+                     <div class="pt-10 pb-3 px-4 flex justify-between items-center border-b border-[#e5e0d8]/60 bg-[#f4f1ea] shrink-0">
                         <div class="cursor-pointer p-2 active:scale-90 opacity-70 bg-black/5 rounded-full" onclick="window.wxActions.toggleReadingSize()"><i data-lucide="minimize-2" class="w-5 h-5 text-gray-800"></i></div>
                         <div class="flex flex-col items-center">
                            <span class="text-[15px] font-bold text-gray-800 truncate max-w-[180px]">${book.title}</span>
@@ -3506,17 +3533,17 @@ export function renderWeChatApp(store) {
                         </div>
                         <div class="cursor-pointer p-2 active:scale-90 opacity-70 text-red-500 bg-red-50 rounded-full" onclick="window.wxActions.stopReading()"><i data-lucide="power" class="w-5 h-5"></i></div>
                      </div>
-                     <div class="flex-1 overflow-y-auto px-6 py-8 text-[17px] text-[#333] leading-[2] font-serif hide-scrollbar text-justify whitespace-pre-wrap break-words tracking-wide">
-                        ${book.pages[book.progress]}
+                     <div class="flex-1 overflow-y-auto px-6 py-5 text-[16.5px] text-[#333] leading-[1.8] font-serif hide-scrollbar text-justify break-words tracking-wide">
+                        ${book.pages[book.progress].split('\n').filter(line => line.trim() !== '').map(line => `<p style="text-indent: 2em; margin-bottom: 0.85em;">${line.trim()}</p>`).join('')}
                      </div>
-                     <div class="p-5 flex justify-between items-center bg-white border-t border-gray-100 shrink-0 shadow-[0_-10px_20px_rgba(0,0,0,0.03)] rounded-t-[24px]">
-                        <button class="w-24 py-3 bg-gray-50 rounded-[14px] text-[14px] font-bold text-gray-700 active:scale-95 transition-transform" onclick="window.wxActions.prevBookPage()">上一页</button>
+                     <div class="p-4 pb-5 flex justify-between items-center bg-[#fcfbf9] border-t border-[#e5e0d8]/50 shrink-0 shadow-[0_-5px_15px_rgba(0,0,0,0.02)]">
+                        <button class="w-20 py-2.5 bg-gray-100 rounded-[12px] text-[13px] font-bold text-gray-600 active:scale-95 transition-transform" onclick="window.wxActions.prevBookPage()">上一页</button>
                         ${wxState.reading.mode === 'listen' ? `
-                           <div class="w-14 h-14 bg-[#07c160] rounded-full flex items-center justify-center text-white shadow-[0_8px_20px_rgba(7,193,96,0.3)] animate-pulse">
-                              <i data-lucide="headphones" class="w-6 h-6"></i>
+                           <div class="w-12 h-12 bg-[#07c160] rounded-full flex items-center justify-center text-white shadow-[0_8px_20px_rgba(7,193,96,0.3)] animate-pulse">
+                              <i data-lucide="headphones" class="w-5 h-5"></i>
                            </div>
-                        ` : '<div class="text-[12px] text-gray-400 font-medium tracking-widest px-4">一起阅读中...</div>'}
-                        <button class="w-24 py-3 bg-gray-800 rounded-[14px] text-[14px] font-bold text-white active:scale-95 transition-transform shadow-md" onclick="window.wxActions.nextBookPage()">下一页</button>
+                        ` : '<div class="text-[11px] text-gray-400 font-medium tracking-widest px-2">一起阅读中</div>'}
+                        <button class="w-20 py-2.5 bg-gray-800 rounded-[12px] text-[13px] font-bold text-white active:scale-95 transition-transform shadow-md" onclick="window.wxActions.nextBookPage()">下一页</button>
                      </div>
                   </div>
                 `;
