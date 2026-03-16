@@ -869,12 +869,114 @@ window.wxActions = {
      window.actions.showToast('记忆已保存！');
      window.wxActions.closeExtractMemoryModal();
   },
-  doNothing: () => {
-    saveScroll();
-    window.actions.showToast('该功能将在下一阶段解锁！');
-    wxState.activeMenuMsgId = null; 
-    window.render();
-    restoreScroll();
+  // ================= 📖 一起看书核心引擎 =================
+  openBookshelf: () => { saveScroll(); wxState.view = 'bookshelf'; window.render(); restoreScroll(); },
+  uploadBookTxt: (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+      // 检查文件大小，防止过大卡死浏览器
+      if (file.size > 2 * 1024 * 1024) return window.actions.showToast('TXT 文件太大啦，请截取 2MB 以内的片段上传哦');
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+          const text = e.target.result;
+          // 智能分页：大概每 400 字符切成一页，保证排版好看且不爆大模型 Token，同时适合语音朗读
+          const pages = [];
+          let current = '';
+          const paragraphs = text.split('\n');
+          for(let p of paragraphs) {
+              if(current.length + p.length > 400 && current.length > 0) {
+                  pages.push(current);
+                  current = p + '\n';
+              } else {
+                  current += p + '\n';
+              }
+          }
+          if(current) pages.push(current);
+          
+          store.books = store.books || [];
+          store.books.push({ id: 'book_' + Date.now(), title: file.name.replace('.txt', ''), pages: pages, progress: 0 });
+          window.actions.showToast('书籍导入成功！');
+          window.render();
+      };
+      reader.readAsText(file);
+      event.target.value = '';
+  },
+  deleteBook: (id) => {
+      if(confirm('确定从书架删除这本书吗？')) {
+          store.books = store.books.filter(b => b.id !== id);
+          window.render();
+      }
+  },
+  openBookSelectModal: () => { wxState.showPlusMenu = false; wxState.showBookSelectModal = true; window.render(); },
+  closeBookSelectModal: () => { wxState.showBookSelectModal = false; window.render(); },
+  selectBookForReading: (id) => { wxState.tempSelectedBookId = id; wxState.showBookSelectModal = false; wxState.showBookModeModal = true; window.render(); },
+  closeBookModeModal: () => { wxState.showBookModeModal = false; window.render(); },
+  startReading: (mode) => {
+      const book = store.books.find(b => b.id === wxState.tempSelectedBookId);
+      if(!book) return;
+      wxState.reading = { active: true, bookId: book.id, mode: mode, isMinimized: false };
+      wxState.showBookModeModal = false;
+      window.wxActions.syncReadingToStore();
+      window.render();
+      
+      if(mode === 'listen') window.wxActions.playCurrentPageAudio();
+      else if(mode === 'active') window.wxActions.triggerActiveReadingAI();
+      else window.actions.showToast('已开启安静陪伴模式');
+  },
+  stopReading: () => {
+      if(wxState.readingAudio) { wxState.readingAudio.pause(); wxState.readingAudio = null; }
+      wxState.reading = { active: false };
+      window.wxActions.syncReadingToStore();
+      window.render();
+  },
+  toggleReadingSize: () => { wxState.reading.isMinimized = !wxState.reading.isMinimized; window.render(); },
+  nextBookPage: () => {
+      const book = store.books.find(b => b.id === wxState.reading?.bookId);
+      if(book && book.progress < book.pages.length - 1) {
+          if(wxState.readingAudio) { wxState.readingAudio.pause(); wxState.readingAudio = null; }
+          book.progress++;
+          window.wxActions.syncReadingToStore();
+          window.render();
+          if(wxState.reading.mode === 'listen') window.wxActions.playCurrentPageAudio();
+          else if(wxState.reading.mode === 'active') window.wxActions.triggerActiveReadingAI();
+      } else { window.actions.showToast('已经是最后一页啦'); }
+  },
+  prevBookPage: () => {
+      const book = store.books.find(b => b.id === wxState.reading?.bookId);
+      if(book && book.progress > 0) {
+          if(wxState.readingAudio) { wxState.readingAudio.pause(); wxState.readingAudio = null; }
+          book.progress--;
+          window.wxActions.syncReadingToStore();
+          window.render();
+          if(wxState.reading.mode === 'listen') window.wxActions.playCurrentPageAudio();
+      } else { window.actions.showToast('已经是第一页啦'); }
+  },
+  syncReadingToStore: () => {
+      if (wxState.reading?.active) {
+          const book = store.books.find(b => b.id === wxState.reading.bookId);
+          if(book) store.activeReading = { active: true, bookName: book.title, text: book.pages[book.progress] };
+      } else {
+          store.activeReading = { active: false };
+      }
+  },
+  triggerActiveReadingAI: () => {
+      window.wxActions.getReply(true, null, '(系统自动触发：用户翻到了新的一页，请你主动发表关于当前页面的简短感想、吐槽或提问，不要超过30个字。)');
+  },
+  playCurrentPageAudio: () => {
+      const book = store.books.find(b => b.id === wxState.reading?.bookId);
+      const char = store.contacts.find(c => c.id === wxState.activeChatId);
+      if(!book || !char || !char.minimaxVoiceId) return window.actions.showToast('该角色未配置 Minimax 音色，无法听书哦');
+      
+      const text = book.pages[book.progress];
+      window.actions.showToast('正在生成语音，请稍候...');
+      fetchMinimaxVoice(text, char.minimaxVoiceId).then(url => {
+          if(url && wxState.reading?.active) { 
+              wxState.readingAudio = new Audio(url);
+              wxState.readingAudio.play();
+              wxState.readingAudio.onended = () => { if(wxState.reading?.active) window.wxActions.nextBookPage(); };
+          }
+      });
   },
 
   // ================= 朋友圈核心引擎 (含 AI 交互) =================
@@ -1560,8 +1662,8 @@ window.wxActions = {
           if (window._fastSyncInterval) clearInterval(window._fastSyncInterval);
           window._fastSyncInterval = setInterval(() => {
               if (wxState.isTyping) {
-                  // 🌟 120秒超时救生圈：彻底终结无限卡死Bug
-                  if (Date.now() - (wxState.cloudTaskStartTime || Date.now()) > 120000) {
+                  // 🌟 超时救生圈：彻底终结无限卡死Bug
+                  if (Date.now() - (wxState.cloudTaskStartTime || Date.now()) > 300000) {
                       wxState.isTyping = false;
                       clearInterval(window._fastSyncInterval);
                       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
@@ -2190,7 +2292,37 @@ export function renderWeChatApp(store) {
       </div>
     `;
   }
-
+  // 📚 场景 0.95: 我的书架
+  if (wxState.view === 'bookshelf') {
+    store.books = store.books || [];
+    return `
+      <div class="w-full h-full bg-[#f3f3f3] flex flex-col relative animate-in slide-in-from-right-4 duration-200 z-50">
+         <div class="bg-white/90 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 sticky top-0 z-10">
+           <div class="w-1/4 cursor-pointer text-gray-800" onclick="window.wxActions.closeSubView()"><i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i></div>
+           <span class="flex-1 text-center font-bold text-gray-800">我的书架</span>
+           <div class="w-1/4 flex justify-end items-center text-[#07c160]">
+             <input type="file" id="upload-book-txt" accept=".txt" class="hidden" onchange="window.wxActions.uploadBookTxt(event)" />
+             <i data-lucide="upload-cloud" class="cursor-pointer active:scale-90 transition-transform" style="width: 26px; height: 26px;" onclick="document.getElementById('upload-book-txt').click()"></i>
+           </div>
+         </div>
+         <div class="flex-1 overflow-y-auto p-4 space-y-4 hide-scrollbar pb-10">
+            ${store.books.map(b => `
+              <div class="bg-white rounded-[16px] p-4 shadow-sm border border-gray-100 flex items-center justify-between">
+                 <div class="flex items-center flex-1 overflow-hidden mr-3">
+                    <div class="w-12 h-14 bg-purple-50 rounded-lg flex items-center justify-center mr-4 shadow-inner border border-purple-100"><i data-lucide="book" class="text-purple-400 w-6 h-6"></i></div>
+                    <div class="flex flex-col overflow-hidden flex-1">
+                       <span class="text-[15px] font-bold text-gray-800 truncate">${b.title}</span>
+                       <span class="text-[11px] text-gray-400 mt-1">阅读进度: ${(b.progress / b.pages.length * 100).toFixed(1)}% (${b.progress + 1}/${b.pages.length})</span>
+                    </div>
+                 </div>
+                 <div class="w-8 h-8 flex items-center justify-center cursor-pointer active:scale-90 opacity-60 hover:text-red-500 transition-all" onclick="window.wxActions.deleteBook('${b.id}')"><i data-lucide="trash-2" class="w-5 h-5 text-red-400"></i></div>
+              </div>
+            `).join('')}
+            ${store.books.length === 0 ? '<div class="text-center text-gray-400 mt-20 text-[13px] font-bold tracking-widest flex flex-col items-center"><i data-lucide="book-dashed" class="w-12 h-12 mb-3 opacity-30"></i>右上角上传 TXT 小说吧</div>' : ''}
+         </div>
+      </div>
+    `;
+  }
   // 🎭 场景 0.10: 身份管理 & 编辑
   if (wxState.view === 'personaManage') {
     return `
@@ -2985,6 +3117,7 @@ export function renderWeChatApp(store) {
       { id: 'mc-tool-videocall', icon: 'video', label: '视频通话', action: "window.wxActions.startCall('video')" },
       { id: 'mc-tool-location', icon: 'map-pin', label: '发送定位', action: "window.wxActions.openVirtualModal('location')" },
       { id: 'mc-tool-offline', icon: 'coffee', label: '线下剧情', action: "window.wxActions.enterOffline()" },
+      { id: 'mc-tool-read', icon: 'book-open', label: '一起看书', action: "window.wxActions.openBookSelectModal()" }
     ].map(item => `
       <div class="mc-tool-item flex flex-col items-center justify-center space-y-1.5 cursor-pointer active:scale-95 transition-transform" onclick="${item.action}">
         <div class="${item.id} w-14 h-14 flex items-center justify-center">
@@ -3300,7 +3433,95 @@ export function renderWeChatApp(store) {
             </div>
             `;
         })() : ''}
+        ${wxState.showBookSelectModal ? `
+          <div class="absolute inset-0 z-[80] bg-black/40 flex items-end justify-center animate-in fade-in backdrop-blur-sm" onclick="window.wxActions.closeBookSelectModal()">
+            <div class="bg-[#f3f3f3] w-full max-h-[75vh] rounded-t-[24px] overflow-hidden shadow-2xl animate-in slide-in-from-bottom-4 flex flex-col" onclick="event.stopPropagation()">
+              <div class="bg-white px-4 py-4 flex justify-between items-center border-b border-gray-100">
+                <div class="cursor-pointer active:opacity-50 p-1" onclick="window.wxActions.closeBookSelectModal()"><i data-lucide="chevron-left" class="w-6 h-6 text-gray-600"></i></div>
+                <span class="font-bold text-gray-800 text-[16px]">选择要一起读的书</span>
+                <div class="w-8"></div>
+              </div>
+              <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar pb-10">
+                ${(store.books || []).map(b => `
+                  <div class="bg-white rounded-[16px] p-3 flex items-center shadow-sm cursor-pointer active:scale-95 border border-transparent hover:border-[#07c160]/30 transition-all" onclick="window.wxActions.selectBookForReading('${b.id}')">
+                    <div class="w-10 h-12 bg-purple-50 rounded flex items-center justify-center mr-3 border border-purple-100"><i data-lucide="book" class="text-purple-400 w-5 h-5"></i></div>
+                    <div class="flex-1 flex flex-col overflow-hidden">
+                      <span class="text-[14px] font-bold text-gray-800 truncate">${b.title}</span>
+                      <span class="text-[10px] text-gray-400 mt-0.5">上次读到第 ${b.progress + 1} 页</span>
+                    </div>
+                  </div>
+                `).join('')}
+                ${(store.books || []).length === 0 ? '<div class="text-center text-gray-400 mt-10 text-[12px] font-bold">书架空空如也，请先去“我”页面上传 txt 吧</div>' : ''}
+              </div>
+            </div>
+          </div>
+        ` : ''}
 
+        ${wxState.showBookModeModal ? `
+          <div class="absolute inset-0 z-[90] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeBookModeModal()">
+            <div class="bg-white w-full rounded-[24px] p-6 shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col" onclick="event.stopPropagation()">
+                <h3 class="font-black text-gray-800 mb-5 text-center text-[18px]">选择陪读模式</h3>
+                <div class="space-y-4">
+                   <div class="bg-blue-50 border border-blue-100 rounded-[16px] p-4 cursor-pointer active:scale-95 transition-transform shadow-sm" onclick="window.wxActions.startReading('active')">
+                      <div class="flex items-center mb-1.5"><i data-lucide="messages-square" class="text-blue-500 w-5 h-5 mr-2"></i><span class="font-bold text-blue-700 text-[15px]">主动探讨模式</span></div>
+                      <p class="text-[11px] text-blue-500/80 leading-relaxed">每翻一页，TA 都会主动发起关于书中内容的讨论，极度粘人。</p>
+                   </div>
+                   <div class="bg-green-50 border border-green-100 rounded-[16px] p-4 cursor-pointer active:scale-95 transition-transform shadow-sm" onclick="window.wxActions.startReading('passive')">
+                      <div class="flex items-center mb-1.5"><i data-lucide="coffee" class="text-green-600 w-5 h-5 mr-2"></i><span class="font-bold text-green-700 text-[15px]">安静陪伴模式</span></div>
+                      <p class="text-[11px] text-green-600/80 leading-relaxed">TA 会安安静静陪你读，只有当你主动发消息时，TA 才会在上下文里回复你。</p>
+                   </div>
+                   <div class="bg-purple-50 border border-purple-100 rounded-[16px] p-4 cursor-pointer active:scale-95 transition-transform shadow-sm" onclick="window.wxActions.startReading('listen')">
+                      <div class="flex items-center mb-1.5"><i data-lucide="headphones" class="text-purple-500 w-5 h-5 mr-2"></i><span class="font-bold text-purple-700 text-[15px]">听 TA 读模式</span></div>
+                      <p class="text-[11px] text-purple-500/80 leading-relaxed">调用语音大模型，让 TA 亲自用声音把书里的内容读给你听。</p>
+                   </div>
+                </div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${(wxState.reading && wxState.reading.active) ? (() => {
+            const book = store.books.find(b => b.id === wxState.reading.bookId);
+            if (!book) return '';
+            
+            if (wxState.reading.isMinimized) {
+                // 🍏 灵动岛模式
+                return `
+                  <div class="absolute top-[85px] left-1/2 -translate-x-1/2 bg-black/85 backdrop-blur-md text-white px-4 py-2 rounded-full flex items-center space-x-3 z-[70] shadow-[0_10px_25px_rgba(0,0,0,0.2)] cursor-pointer animate-in slide-in-from-top-4 hover:scale-105 active:scale-95 transition-all border border-white/10" onclick="window.wxActions.toggleReadingSize()">
+                     <div class="w-6 h-6 bg-[#07c160] rounded-full flex items-center justify-center shadow-inner ${wxState.reading.mode === 'listen' ? 'animate-pulse' : ''}"><i data-lucide="${wxState.reading.mode === 'listen' ? 'headphones' : 'book-open'}" class="w-3.5 h-3.5 text-white"></i></div>
+                     <div class="flex flex-col">
+                         <span class="text-[13px] font-bold truncate max-w-[120px] tracking-wide">${book.title}</span>
+                         <span class="text-[9px] text-white/60 font-mono mt-[1px]">正在阅读 · ${book.progress + 1} / ${book.pages.length}</span>
+                     </div>
+                  </div>
+                `;
+            } else {
+                // 📖 全屏阅读模式
+                return `
+                  <div class="absolute inset-0 z-[70] bg-[#f4f1ea] flex flex-col animate-in zoom-in-95 duration-200">
+                     <div class="pt-10 pb-3 px-4 flex justify-between items-center border-b border-[#e5e0d8]/60 bg-[#f4f1ea] shrink-0 shadow-sm">
+                        <div class="cursor-pointer p-2 active:scale-90 opacity-70 bg-black/5 rounded-full" onclick="window.wxActions.toggleReadingSize()"><i data-lucide="minimize-2" class="w-5 h-5 text-gray-800"></i></div>
+                        <div class="flex flex-col items-center">
+                           <span class="text-[15px] font-bold text-gray-800 truncate max-w-[180px]">${book.title}</span>
+                           <span class="text-[10px] text-gray-500 font-mono mt-1 px-2 py-0.5 bg-black/5 rounded-md">${wxState.reading.mode === 'active' ? '主动探讨' : (wxState.reading.mode === 'listen' ? '语音听书' : '安静陪伴')} · ${book.progress + 1} / ${book.pages.length}</span>
+                        </div>
+                        <div class="cursor-pointer p-2 active:scale-90 opacity-70 text-red-500 bg-red-50 rounded-full" onclick="window.wxActions.stopReading()"><i data-lucide="power" class="w-5 h-5"></i></div>
+                     </div>
+                     <div class="flex-1 overflow-y-auto px-6 py-8 text-[17px] text-[#333] leading-[2] font-serif hide-scrollbar text-justify whitespace-pre-wrap break-words tracking-wide">
+                        ${book.pages[book.progress]}
+                     </div>
+                     <div class="p-5 flex justify-between items-center bg-white border-t border-gray-100 shrink-0 shadow-[0_-10px_20px_rgba(0,0,0,0.03)] rounded-t-[24px]">
+                        <button class="w-24 py-3 bg-gray-50 rounded-[14px] text-[14px] font-bold text-gray-700 active:scale-95 transition-transform" onclick="window.wxActions.prevBookPage()">上一页</button>
+                        ${wxState.reading.mode === 'listen' ? `
+                           <div class="w-14 h-14 bg-[#07c160] rounded-full flex items-center justify-center text-white shadow-[0_8px_20px_rgba(7,193,96,0.3)] animate-pulse">
+                              <i data-lucide="headphones" class="w-6 h-6"></i>
+                           </div>
+                        ` : '<div class="text-[12px] text-gray-400 font-medium tracking-widest px-4">一起阅读中...</div>'}
+                        <button class="w-24 py-3 bg-gray-800 rounded-[14px] text-[14px] font-bold text-white active:scale-95 transition-transform shadow-md" onclick="window.wxActions.nextBookPage()">下一页</button>
+                     </div>
+                  </div>
+                `;
+            }
+        })() : ''}
       </div>
     `;
 }
@@ -3485,9 +3706,13 @@ export function renderWeChatApp(store) {
         </div>
 
         <div class="bg-white mx-3 rounded-[16px] shadow-sm mb-6 border border-gray-100 overflow-hidden">
-           <div class="px-4 py-4 flex justify-between items-center cursor-pointer active:bg-gray-50 transition-colors" onclick="window.wxActions.openView('wallet')">
-              <div class="flex items-center"><i data-lucide="wallet" class="text-gray-600 mr-3 w-5 h-5"></i><span class="text-[15px] text-gray-800 font-bold">服务 / 钱包</span></div>
+           <div class="px-4 py-4 border-b border-gray-50 flex justify-between items-center cursor-pointer active:bg-gray-50 transition-colors" onclick="window.wxActions.openView('wallet')">
+              <div class="flex items-center"><i data-lucide="wallet" class="text-gray-600 mr-3 w-5 h-5"></i><span class="text-[15px] text-gray-800 font-bold">钱包</span></div>
               <i data-lucide="chevron-right" class="text-gray-300 w-4 h-4"></i>
+           </div>
+           <div class="px-4 py-4 flex justify-between items-center cursor-pointer active:bg-gray-50 transition-colors" onclick="window.wxActions.openBookshelf()">
+              <div class="flex items-center"><i data-lucide="library" class="text-gray-600 mr-3 w-5 h-5"></i><span class="text-[15px] text-gray-800 font-bold">书架</span></div>
+              <div class="flex items-center"><span class="text-[12px] font-bold text-gray-400 mr-2">${store.books ? store.books.length : 0} 本</span><i data-lucide="chevron-right" class="text-gray-300 w-4 h-4"></i></div>
            </div>
         </div>
       </div>

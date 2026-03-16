@@ -140,6 +140,10 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
           finalSystemPrompt += `\n\n【状态继承指示】：距离你上次回复不到1小时。你刚才的内心状态是：心情 ${pt.mood}/100，情绪 [${pt.emotion}]，当前动作 [${pt.status}]。请注意客观事实的连贯性（如无特殊原因，不要发生场景瞬移或性格突变）。`;
       }
   }
+  // 🌟 一起看书状态继承与阅读引擎
+  if (store.activeReading && store.activeReading.active) {
+      finalSystemPrompt += `\n\n【正在一起看书】\n你们目前正在一起阅读书籍《${store.activeReading.bookName}》。\n下面是当前你们正在看的这一页的内容：\n\`\`\`text\n${store.activeReading.text}\n\`\`\`\n❗请你结合上述书本内容，自然地与用户进行探讨、吐槽或共情。`;
+  }
 
   finalSystemPrompt += `\n\n【绝密指令：心声面板同步】
 在你的所有回复的最末尾（必须另起一行），你必须附带当前这一刻你的真实内心状态数据！
