@@ -47,7 +47,7 @@ export async function buildLLMPayload(charId, history, isOffline = false) {
   }
 
   systemRules += `
-【你的特殊交互超能力】（❗必须独占一行触发，若想同时附带普通文字，必须换行另起一行！）：
+【你的特殊交互超能力】（❗必须独占一行触发，若想同时附带普通文字，必须换行另起一行！换行后的普通文字也要按照要求断句！）：
    - 发语音：[语音]: 你要说的话
    - 发照片：[虚拟照片]: 照片画面描述
    ${emojiRule}
