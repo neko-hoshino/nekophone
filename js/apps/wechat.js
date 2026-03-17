@@ -2041,11 +2041,42 @@ window.wxActions = {
 
       const finalMsgs = [];
       msgsToPush.forEach((m, index) => {
-        finalMsgs.push({ 
-          id: Date.now() + index, sender: m.sender || char.name, text: m.text, isMe: false, source: 'wechat', 
-          isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime(),
-          isIntercepted: char.isBlocked ? true : false 
-        });
+        // 🌟 核心劈气泡引擎：强行拦截所有文本，把换行符劈成独立气泡！
+        if (m.msgType === 'text' && !isOffline) {
+            // 兼容真实的回车符，以及大模型搞错的反斜杠 \n 和斜杠 /n
+            const safeText = m.text.replace(/\\n/g, '\n').replace(/\/n/g, '\n');
+            const lines = safeText.split('\n').filter(l => l.trim());
+
+            lines.forEach((line, subIdx) => {
+                let textToPush = line.trim();
+                let senderName = m.sender || char.name;
+
+                // 顺手补一个群聊发言人识别（防止超能力前后的文字没被切开解析）
+                if (chat.isGroup) {
+                    const match = textToPush.match(/^([^:：\[\]]{1,15})[:：]\s*(.*)$/);
+                    if (match) {
+                        senderName = match[1].trim();
+                        textToPush = match[2].trim();
+                    }
+                }
+
+                finalMsgs.push({
+                    // 🌟 错开 id 防止渲染覆盖
+                    id: Date.now() + index * 100 + subIdx, 
+                    sender: senderName, text: textToPush, isMe: false, source: 'wechat', 
+                    isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, 
+                    transferData: m.transferData, transferState: m.transferState, time: getNowTime(),
+                    isIntercepted: char.isBlocked ? true : false 
+                });
+            });
+        } else {
+            // 非文本内容（如照片、语音）或线下模式，原样放行
+            finalMsgs.push({ 
+              id: Date.now() + index * 100, sender: m.sender || char.name, text: m.text, isMe: false, source: 'wechat', 
+              isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime(),
+              isIntercepted: char.isBlocked ? true : false 
+            });
+        }
       });
 
       if (char.isBlocked && msgsToPush.length > 0) {
