@@ -4406,7 +4406,7 @@ window.syncCloudMailbox = async () => {
     const sub = await reg.pushManager.getSubscription();
     if (!sub) return;
 
-    const res = await fetch('[https://neko-hoshino.duckdns.org/sync-mailbox](https://neko-hoshino.duckdns.org/sync-mailbox)', {
+    const res = await fetch('https://neko-hoshino.duckdns.org/sync-mailbox', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-secret-token': localStorage.getItem('neko_server_pwd') || '' },
         body: JSON.stringify({ endpoint: sub.endpoint })
