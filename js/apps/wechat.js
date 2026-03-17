@@ -1828,314 +1828,6 @@ window.wxActions = {
           delegatedToCloud = true; 
           return; 
       }
-      
-      // 🌟 物理切除世界书里的 `{思考链}` 
-      replyText = replyText.replace(/`\{[\s\S]*?\}`/gi, '').trim();
-
-      const thoughtRegex = /\[心声\]\s*(\{.*?\})/s;
-      const thoughtMatch = replyText.match(thoughtRegex);
-      if (thoughtMatch) {
-          try {
-              chat.latestInnerThought = JSON.parse(thoughtMatch[1]);
-              chat.latestInnerThoughtTime = Date.now(); 
-          } catch(e) {}
-          replyText = replyText.replace(thoughtRegex, '').trim();
-      }
-
-      let remainingText = replyText
-          .replace(/\[\d{1,2}:\d{2}\][:：]?\s*/g, '')
-          .replace(/\[系统提示.*?\][:：]?\s*/g, '')
-          .replace(/\[好友申请\][:：]?\s*/g, '')
-          .trim();
-
-      let codeBlocks = [];
-      
-      remainingText = remainingText.replace(/```[a-z]*\n?([\s\S]*?)```/gi, (match, code) => {
-          let id = `__CODE_BLOCK_${codeBlocks.length}__`;
-          // 🌟 核心防爆护盾：给提取出来的 HTML 强行套上 white-space: normal! 
-          // 这样它就彻底免疫了外部 whitespace-pre-wrap 的破坏，代码里怎么 \n 都不会断层！
-          codeBlocks.push(`<div style="white-space: normal !important; line-height: 1.5;">${code.trim()}</div>`); 
-          return `\n${id}\n`;
-      });
-      
-      remainingText = remainingText.replace(/(<div[\s\S]*?<\/div>)/gi, (match) => {
-          let id = `__CODE_BLOCK_${codeBlocks.length}__`;
-          // 🌟 同样给裸露的 div 套上护盾
-          codeBlocks.push(`<div style="white-space: normal !important; line-height: 1.5;">${match.trim()}</div>`); 
-          return `\n${id}\n`;
-      });
-
-      let msgsToPush = [];
-      let delayedActions = [];
-      let hasSystemAction = false;
-      
-      if (/\[发起(语音|视频)?通话\]/.test(remainingText)) {
-        if (wxState.view === 'call') {
-          remainingText = remainingText.replace(/\[发起(语音|视频)?通话\][:：]?\s*/g, '').trim();
-        } else {
-          const match = remainingText.match(/\[发起(语音|视频)?通话\]/);
-          let parts = remainingText.split(/\[发起(语音|视频)?通话\][:：]?\s*/);
-          if (parts[0].trim()) { chat.messages.push({ id: Date.now(), sender: char.name, text: parts[0].trim(), isMe: false, source: 'wechat', isOffline: false, msgType: 'text', time: getNowTime() }); }
-          wxState.pendingCallMsg = parts[2] ? parts[2].trim() : '';
-          wxState.view = 'incomingCall'; wxState.callType = match[1] === '视频' ? 'video' : 'voice'; wxState.isTyping = false; 
-          try { 
-            const ap = store.appearance || {};
-            wxState.ringtone.src = ap.callSound || 'https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3';
-            wxState.ringtone.play(); 
-          } catch(e){}
-          return window.render(); 
-        }
-      }
-      
-      if (/\[(语音|视频)?通话(已)?结束\]/.test(remainingText)) { delayedActions.push('end_call'); remainingText = remainingText.replace(/\[(语音|视频)?通话(已)?结束\][:：]?\s*/g, '').trim(); }
-      if (/\[(点击收款|接收转账)\]/.test(remainingText)) { delayedActions.push('accept_transfer'); remainingText = remainingText.replace(/\[(点击收款|接收转账)\][:：]?\s*/g, '').trim(); }
-      
-      if (/\[(?:发朋友圈|发布朋友圈)\]/.test(remainingText)) {
-        const match = remainingText.match(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*([^\n\[\]]+)/);
-        if (match) {
-          store.moments = store.moments || [];
-          store.moments.push({ id: Date.now(), senderId: char.id, senderName: char.name, avatar: char.avatar, text: match[1].trim(), imageUrl: null, time: '刚刚', likes: [], comments: [] });
-          hasSystemAction = true;
-        }
-        remainingText = remainingText.replace(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*[^\n\[\]]+/, '').trim();
-      }
-      
-      if (/\[更换头像\]/.test(remainingText)) {
-        const match = remainingText.match(/\[更换头像\][:：]?\s*([^\n\[\]]+)/);
-        if (match) {
-          let newAvatar = match[1].trim();
-          if (newAvatar.includes('最新图片')) {
-            const lastImgMsg = chat.messages.slice().reverse().find(m => m.msgType === 'real_image');
-            newAvatar = (lastImgMsg && lastImgMsg.imageUrl) ? lastImgMsg.imageUrl : '❓';
-          }
-          char.avatar = newAvatar;
-          chat.messages.push({ id: Date.now() + 150, sender: 'system', text: `${char.name} 更改了TA的头像`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
-          hasSystemAction = true;
-        }
-        remainingText = remainingText.replace(/\[更换头像\][:：]?\s*[^\n\[\]]+/, '').trim();
-      }
-
-      if (/\[(?:发送表情|表情包)\]/.test(remainingText)) {
-        const match = remainingText.match(/\[(?:发送表情|表情包)\][:：]?\s*([^\n\[\]]+)/);
-        if (match) {
-          const emojiName = match[1].trim();
-          let foundUrl = '';
-          for (let libId of (char.mountedEmojis || [])) {
-             const lib = (store.emojiLibs || []).find(l => l.id === libId);
-             if (lib) {
-                 const ep = lib.emojis.find(e => (typeof e === 'object' ? e.name : '') === emojiName);
-                 if (ep) { foundUrl = ep.url; break; }
-             }
-          }
-          if (foundUrl) {
-              chat.messages.push({ id: Date.now() + 150, sender: char.name, text: `[表情包] ${emojiName}`, imageUrl: foundUrl, isMe: false, source: 'wechat', isOffline: false, msgType: 'emoji', time: getNowTime() });
-              hasSystemAction = true;
-          }
-        }
-        remainingText = remainingText.replace(/\[(?:发送表情|表情包)\][:：]?\s*[^\n\[\]]*/, '').trim();
-      }
-
-      if (/\[修改备注\]/.test(remainingText)) {
-        const match = remainingText.match(/\[修改备注\][:：]?\s*([^\n\[\]]+)/);
-        if (match) {
-          // 🌟 修复3：修改专属备注
-          chat.myRemark = match[1].trim().substring(0, 15);
-          chat.messages.push({ id: Date.now() + 160, sender: 'system', text: `${char.name} 将你的备注修改为“${chat.myRemark}”`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
-          hasSystemAction = true;
-        }
-        remainingText = remainingText.replace(/\[修改备注\][:：]?\s*[^\n\[\]]+/, '').trim();
-      }
-
-      if (/\[撤回上一条消息\]/.test(remainingText)) {
-        const aiMsgs = chat.messages.filter(m => !m.isMe && m.msgType !== 'system' && m.msgType !== 'recall_system');
-        if (aiMsgs.length > 0) {
-          const lastAiMsg = aiMsgs[aiMsgs.length - 1];
-          lastAiMsg.recalledText = lastAiMsg.text; 
-          lastAiMsg.text = `${char.name} 撤回了一条消息`;
-          lastAiMsg.msgType = 'recall_system'; 
-          lastAiMsg.quote = null;
-        }
-        remainingText = remainingText.replace(/\[撤回上一条消息\][:：]?\s*/, '').trim();
-        hasSystemAction = true;
-      }
-
-      if (/\[戳一戳\]/.test(remainingText)) {
-        const verb = char.nudgeAIVerb || '拍了拍';
-        const suffix = char.nudgeAISuffix || '';
-        chat.messages.push({ id: Date.now() + 50, sender: 'system', text: `${char.name}${verb}了我${suffix}`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
-        remainingText = remainingText.replace(/\[戳一戳\][:：]?\s*/g, '').trim();
-        hasSystemAction = true;
-      }
-
-      if (wxState.view === 'chatRoom') remainingText = remainingText.replace(/\*[^*]*\*/g, '').replace(/[(（][^)）]*[)）]/g, '').trim();
-
-      if (/\[发起转账\]/.test(remainingText)) {
-        let parts = remainingText.split(/\[发起转账\][:：]?\s*/);
-        if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-        let nextLines = parts[1].split('\n');
-        const tStr = nextLines[0] || '';
-        const amount = (tStr.match(/金额[:：]?\s*(\d+(\.\d+)?)/) || [])[1] || '520.00';
-        const note = (tStr.match(/备注[:：]?\s*([^，,。\]\n]+)/) || [])[1] || '转账给你';
-        msgsToPush.push({ msgType: 'transfer', text: `[收到转账] 金额：${amount}元，备注：${note}`, transferData: { amount, note }, transferState: 'pending' });
-        let restText = nextLines.slice(1).join('\n').trim();
-        if (restText) msgsToPush.push({ msgType: 'text', text: restText });
-      } else if (/\[语音\]/.test(remainingText)) {
-        let parts = remainingText.split(/\[语音\][:：]?\s*/);
-        if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-        let nextLines = parts[1].split('\n');
-        if (nextLines[0].trim()) msgsToPush.push({ msgType: 'voice', text: nextLines[0].trim() });
-        let restText = nextLines.slice(1).join('\n').trim();
-        if (restText) msgsToPush.push({ msgType: 'text', text: restText });
-      } else if (/\[虚拟照片\]/.test(remainingText)) {
-        let parts = remainingText.split(/\[虚拟照片\][:：]?\s*/);
-        if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-        let nextLines = parts[1].split('\n');
-        if (nextLines[0].trim()) msgsToPush.push({ msgType: 'virtual_image', text: nextLines[0].trim() });
-        let restText = nextLines.slice(1).join('\n').trim();
-        if (restText) msgsToPush.push({ msgType: 'text', text: restText });
-      } else if (/\[发送定位\]/.test(remainingText)) {
-        let parts = remainingText.split(/\[发送定位\][:：]?\s*/);
-        if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-        let nextLines = parts[1].split('\n');
-        if (nextLines[0].trim()) msgsToPush.push({ msgType: 'location', text: nextLines[0].trim() });
-        let restText = nextLines.slice(1).join('\n').trim();
-        if (restText) msgsToPush.push({ msgType: 'text', text: restText });
-      } else {
-        if (remainingText.trim()) {
-          if (isOffline) { 
-            let finalOfflineText = remainingText.trim();
-            codeBlocks.forEach((code, idx) => {
-                finalOfflineText = finalOfflineText.replace(`__CODE_BLOCK_${idx}__`, `<br/><div class="mc-html-card my-2 w-full overflow-hidden">${code}</div><br/>`);
-            });
-            msgsToPush.push({ msgType: 'text', text: finalOfflineText, sender: char.name });
-          } else {
-            let parts = remainingText.split('\n').filter(p => p.trim());
-            let currentSpeakerName = char.name;
-            
-            parts.forEach(p => {
-              let textToPush = p;
-              if (chat.isGroup) {
-                  const match = p.match(/^([^:：\[\]]{1,15})[:：]\s*(.*)$/);
-                  if (match) {
-                      const possibleName = match[1].trim();
-                      const isMember = chat.memberIds.some(id => {
-                          const c = store.contacts.find(x => x.id === id);
-                          return c && (c.name === possibleName || c.name.includes(possibleName) || possibleName.includes(c.name));
-                      });
-                      if (isMember || possibleName === char.name) {
-                          currentSpeakerName = possibleName;
-                          textToPush = match[2].trim();
-                      }
-                  }
-              }
-              if (textToPush) {
-                  const fragments = textToPush.split(/(\*[^*]+\*)/); 
-                  fragments.forEach(frag => {
-                      const t = frag.trim(); if (!t) return;
-                      let blockMatch = t.match(/__CODE_BLOCK_(\d+)__/);
-                      if (blockMatch) { msgsToPush.push({ sender: currentSpeakerName, msgType: 'html_card', text: codeBlocks[parseInt(blockMatch[1])] }); return; }
-                      if (t.startsWith('*') && t.endsWith('*') && isCall) msgsToPush.push({ sender: currentSpeakerName, msgType: 'action', text: t.slice(1, -1) });
-                      else msgsToPush.push({ sender: currentSpeakerName, msgType: 'text', text: t });
-                  });
-              }
-            });
-          }
-        }
-      }
-
-      const finalMsgs = [];
-      msgsToPush.forEach((m, index) => {
-        // 🌟 核心劈气泡引擎：强行拦截所有文本，把换行符劈成独立气泡！
-        if (m.msgType === 'text' && !isOffline) {
-            // 兼容真实的回车符，以及大模型搞错的反斜杠 \n 和斜杠 /n
-            const safeText = m.text.replace(/\\n/g, '\n').replace(/\/n/g, '\n');
-            const lines = safeText.split('\n').filter(l => l.trim());
-
-            lines.forEach((line, subIdx) => {
-                let textToPush = line.trim();
-                let senderName = m.sender || char.name;
-
-                // 顺手补一个群聊发言人识别（防止超能力前后的文字没被切开解析）
-                if (chat.isGroup) {
-                    const match = textToPush.match(/^([^:：\[\]]{1,15})[:：]\s*(.*)$/);
-                    if (match) {
-                        senderName = match[1].trim();
-                        textToPush = match[2].trim();
-                    }
-                }
-
-                finalMsgs.push({
-                    // 🌟 错开 id 防止渲染覆盖
-                    id: Date.now() + index * 100 + subIdx, 
-                    sender: senderName, text: textToPush, isMe: false, source: 'wechat', 
-                    isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, 
-                    transferData: m.transferData, transferState: m.transferState, time: getNowTime(),
-                    isIntercepted: char.isBlocked ? true : false 
-                });
-            });
-        } else {
-            // 非文本内容（如照片、语音）或线下模式，原样放行
-            finalMsgs.push({ 
-              id: Date.now() + index * 100, sender: m.sender || char.name, text: m.text, isMe: false, source: 'wechat', 
-              isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime(),
-              isIntercepted: char.isBlocked ? true : false 
-            });
-        }
-      });
-
-      if (char.isBlocked && msgsToPush.length > 0) {
-         finalMsgs.push({ id: Date.now() + 999, sender: 'system', text: '好友申请', msgType: 'friend_request', isMe: false, time: getNowTime() });
-      }
-
-      for (let i = 0; i < finalMsgs.length; i++) {
-         const newMsg = finalMsgs[i];
-         chat.messages.push(newMsg);
-
-         if (isActive) { 
-             saveScroll(); 
-             window.render(); 
-             restoreScroll(); 
-             window.wxActions.scrollToBottom(); 
-         }
-
-         let callAudioPlayed = false;
-
-         if (char.minimaxVoiceId && store.minimaxConfig?.enabled !== false && store.minimaxConfig?.apiKey) {
-             if (isCall && newMsg.msgType === 'text') {
-                 const url = await fetchMinimaxVoice(newMsg.text, char.minimaxVoiceId);
-                 if (url && wxState.view === 'call') { 
-                    newMsg.audioUrl = url; 
-                    await new Promise(resolve => { 
-                        if (!window.wxCallPlayer) window.wxCallPlayer = new Audio();
-                        window.wxCallPlayer.src = url;
-                        window.wxCallPlayer.onended = resolve;
-                        window.wxCallPlayer.onerror = resolve;
-                        window.wxCallPlayer.play().catch(() => resolve()); 
-                    });
-                    callAudioPlayed = true;
-                 }
-             } else if (newMsg.msgType === 'voice') {
-                 (async () => {
-                    const url = await fetchMinimaxVoice(newMsg.text, char.minimaxVoiceId);
-                    if (url) { newMsg.audioUrl = url; if(isActive) window.render(); }
-                 })();
-             }
-         }
-
-         if (!isCall && newMsg.msgType !== 'system' && newMsg.msgType !== 'friend_request' && newMsg.msgType !== 'recall_system') {
-             try { const ap = store.appearance || {}; new Audio(ap.newMsgSound || 'https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3').play().catch(()=>{}); } catch(e) {}
-         }
-
-         // 🌟 修复8：切出后台再回来，瞬间读完，不再卡死流式输出！
-         if (i < finalMsgs.length - 1 && !callAudioPlayed && !document.hidden) {
-             await new Promise(resolve => setTimeout(resolve, Math.min(Math.max(newMsg.text.length * 60, 600), 2500)));
-         }
-      }
-
-      if (msgsToPush.length === 0 && !hasSystemAction) {
-        chat.messages.push({ id: Date.now() + 100, sender: char.name, text: `[系统] API返回了空消息或被规则拦截，请重roll`, isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'text', time: getNowTime() });
-      }
-
     } catch (error) { 
       let rawErr = error ? (error.message || error.toString()) : "未知网络错误";
       const errMsg = rawErr.replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -4414,73 +4106,243 @@ window.syncCloudMailbox = async () => {
     const data = await res.json();
     if (!data.messages || data.messages.length === 0) return;
 
-    let shouldRender = false;
-
-    data.messages.forEach(msg => {
-        if (!msg.charId) return;
+    // 🌟 核心升级：使用 for...of 保证语音和打字延迟能够“顺序执行”
+    for (const msg of data.messages) {
+        if (!msg.charId) continue;
         const parts = msg.charId.split('|');
         const chatId = parts[0];
         const charId = parts[1] || chatId;
-        const isOfflineMsg = parts[2] === '1';
+        const isOffline = parts[2] === '1';
 
         const chat = store.chats.find(c => c.charId === chatId);
-        if (!chat) return;
+        const char = store.contacts.find(c => c.id === charId);
+        if (!chat || !char) continue;
 
-        // 🌟 核心防爆：极其安全地解除“正在输入中”的卡死状态
+        const isActive = typeof wxState !== 'undefined' && wxState.activeChatId === chatId;
+        const isCall = typeof wxState !== 'undefined' && wxState.view === 'call' && isActive && !chat.isGroup;
+
+        // 🌟 安全解除“正在输入中”
         if (typeof wxState !== 'undefined' && wxState.typingStatus) wxState.typingStatus[chatId] = false;
-        if (window.wxState && window.wxState.typingStatus) window.wxState.typingStatus[chatId] = false;
 
-        const safeText = (msg.text || '').replace(/\\n/g, '\n').replace(/\/n/g, '\n').replace(/`\{[\s\S]*?\}`/gi, '').trim();
-        const lines = safeText.split('\n').filter(l => l.trim());
-        
-        lines.forEach((line, subIdx) => {
-            let textToPush = line.trim();
-            let senderName = store.contacts.find(c => c.id === charId)?.name || '未知';
+        let replyText = msg.text || '';
+        replyText = replyText.replace(/\\n/g, '\n').replace(/\/n/g, '\n').replace(/`\{[\s\S]*?\}`/gi, '').trim();
 
-            if (chat.isGroup) {
-                const match = textToPush.match(/^([^:：\[\]]{1,15})[:：]\s*(.*)$/);
-                if (match) { senderName = match[1].trim(); textToPush = match[2].trim(); }
+        // 🌟 1. 提取心声面板
+        const thoughtRegex = /\[心声\]\s*(\{.*?\})/s;
+        const thoughtMatch = replyText.match(thoughtRegex);
+        if (thoughtMatch) {
+            try { chat.latestInnerThought = JSON.parse(thoughtMatch[1]); chat.latestInnerThoughtTime = Date.now(); } catch(e) {}
+            replyText = replyText.replace(thoughtRegex, '').trim();
+        } else {
+            const thoughtIndex = replyText.lastIndexOf('[心声]');
+            if (thoughtIndex !== -1) {
+                const jsonMatch = replyText.substring(thoughtIndex).match(/\{[\s\S]*\}/);
+                if (jsonMatch) { try { chat.latestInnerThought = JSON.parse(jsonMatch[0]); chat.latestInnerThoughtTime = Date.now(); } catch(e){} }
+                replyText = replyText.substring(0, thoughtIndex).trim();
             }
+        }
 
-            // 🌟 修复虚拟照片：加上 \n\n 前后空行，逼迫 Markdown 引擎乖乖将其渲染为高级卡片！
-            const photoMatch = textToPush.match(/\[虚拟照片\][:：]?\s*(.*)/);
-            if (photoMatch) {
-                textToPush = "\n\n```html\n" + `<div class="bg-gray-50/80 p-3.5 rounded-2xl border border-gray-200/60 flex flex-col items-center shadow-sm my-1 mx-2"><i data-lucide="camera" class="w-8 h-8 text-blue-400 mb-2 drop-shadow-sm"></i><span class="text-[11px] text-gray-400 font-extrabold mb-1 tracking-widest uppercase">Virtual Photo</span><span class="text-[14px] text-gray-800 text-center font-serif italic font-medium leading-relaxed">"${photoMatch[1]}"</span></div>` + "\n```\n\n";
-            }
+        // 🌟 2. 净化时间戳
+        let remainingText = replyText.replace(/\[\d{1,2}:\d{2}\][:：]?\s*/g, '').replace(/\[系统提示.*?\][:：]?\s*/g, '').replace(/\[好友申请\][:：]?\s*/g, '').trim();
 
-            chat.messages.push({
-                id: msg.timestamp + subIdx,
-                sender: senderName,
-                text: textToPush,
-                isMe: false,
-                source: 'wechat',
-                isOffline: isOfflineMsg,
-                msgType: 'text',
-                time: new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-            });
+        // 🌟 3. 提取 HTML 保护罩
+        let codeBlocks = [];
+        remainingText = remainingText.replace(/```[a-z]*\n?([\s\S]*?)```/gi, (match, code) => {
+            let id = `__CODE_BLOCK_${codeBlocks.length}__`;
+            codeBlocks.push(`<div style="white-space: normal !important; line-height: 1.5;">${code.trim()}</div>`); 
+            return `\n${id}\n`;
         });
-        shouldRender = true;
-    });
+        remainingText = remainingText.replace(/(<div[\s\S]*?<\/div>)/gi, (match) => {
+            let id = `__CODE_BLOCK_${codeBlocks.length}__`;
+            codeBlocks.push(`<div style="white-space: normal !important; line-height: 1.5;">${match.trim()}</div>`); 
+            return `\n${id}\n`;
+        });
 
-    if (shouldRender) {
-        if (typeof window.render === 'function') window.render();
-        if (window.wxActions && window.wxActions.scrollToBottom) window.wxActions.scrollToBottom();
+        let msgsToPush = [];
+        let hasSystemAction = false;
+
+        // 🌟 4. 解析全量超能力（各种系统指令）
+        if (/\[发起(语音|视频)?通话\]/.test(remainingText)) {
+            const match = remainingText.match(/\[发起(语音|视频)?通话\]/);
+            let parts = remainingText.split(/\[发起(语音|视频)?通话\][:：]?\s*/);
+            if (parts[0].trim()) chat.messages.push({ id: Date.now(), sender: char.name, text: parts[0].trim(), isMe: false, source: 'wechat', msgType: 'text', time: getNowTime() });
+            if (isActive) {
+                wxState.pendingCallMsg = parts[2] ? parts[2].trim() : '';
+                wxState.view = 'incomingCall'; wxState.callType = match[1] === '视频' ? 'video' : 'voice';
+                try { wxState.ringtone.src = store.appearance?.callSound || 'https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3'; wxState.ringtone.play(); } catch(e){}
+                window.render(); continue;
+            }
+            remainingText = '';
+        }
+        
+        if (/\[(语音|视频)?通话(已)?结束\]/.test(remainingText)) remainingText = remainingText.replace(/\[(语音|视频)?通话(已)?结束\][:：]?\s*/g, '').trim();
+        if (/\[(点击收款|接收转账)\]/.test(remainingText)) remainingText = remainingText.replace(/\[(点击收款|接收转账)\][:：]?\s*/g, '').trim();
+        
+        if (/\[(?:发朋友圈|发布朋友圈)\]/.test(remainingText)) {
+            const match = remainingText.match(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*([^\n\[\]]+)/);
+            if (match) {
+                store.moments = store.moments || [];
+                store.moments.push({ id: Date.now(), senderId: char.id, senderName: char.name, avatar: char.avatar, text: match[1].trim(), imageUrl: null, time: '刚刚', likes: [], comments: [] });
+                hasSystemAction = true;
+            }
+            remainingText = remainingText.replace(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*[^\n\[\]]+/, '').trim();
+        }
+        
+        if (/\[更换头像\]/.test(remainingText)) {
+            const match = remainingText.match(/\[更换头像\][:：]?\s*([^\n\[\]]+)/);
+            if (match) { char.avatar = match[1].trim(); chat.messages.push({ id: Date.now(), sender: 'system', text: `${char.name} 更改了头像`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() }); hasSystemAction = true; }
+            remainingText = remainingText.replace(/\[更换头像\][:：]?\s*[^\n\[\]]+/, '').trim();
+        }
+
+        if (/\[(?:发送表情|表情包)\]/.test(remainingText)) {
+            const match = remainingText.match(/\[(?:发送表情|表情包)\][:：]?\s*([^\n\[\]]+)/);
+            if (match) {
+                const emojiName = match[1].trim(); let foundUrl = '';
+                for (let libId of (char.mountedEmojis || [])) {
+                    const lib = (store.emojiLibs || []).find(l => l.id === libId);
+                    if (lib) { const ep = lib.emojis.find(e => (typeof e === 'object' ? e.name : '') === emojiName); if (ep) { foundUrl = ep.url; break; } }
+                }
+                if (foundUrl) { chat.messages.push({ id: Date.now(), sender: char.name, text: `[表情包] ${emojiName}`, imageUrl: foundUrl, isMe: false, source: 'wechat', msgType: 'emoji', time: getNowTime() }); hasSystemAction = true; }
+            }
+            remainingText = remainingText.replace(/\[(?:发送表情|表情包)\][:：]?\s*[^\n\[\]]*/, '').trim();
+        }
+
+        if (/\[修改备注\]/.test(remainingText)) {
+            const match = remainingText.match(/\[修改备注\][:：]?\s*([^\n\[\]]+)/);
+            if (match) { chat.myRemark = match[1].trim().substring(0, 15); chat.messages.push({ id: Date.now(), sender: 'system', text: `${char.name} 将你的备注修改为“${chat.myRemark}”`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() }); hasSystemAction = true; }
+            remainingText = remainingText.replace(/\[修改备注\][:：]?\s*[^\n\[\]]+/, '').trim();
+        }
+
+        if (/\[撤回上一条消息\]/.test(remainingText)) {
+            const aiMsgs = chat.messages.filter(m => !m.isMe && m.msgType !== 'system' && m.msgType !== 'recall_system');
+            if (aiMsgs.length > 0) {
+                const lastAiMsg = aiMsgs[aiMsgs.length - 1]; lastAiMsg.recalledText = lastAiMsg.text; lastAiMsg.text = `${char.name} 撤回了一条消息`; lastAiMsg.msgType = 'recall_system'; lastAiMsg.quote = null;
+            }
+            remainingText = remainingText.replace(/\[撤回上一条消息\][:：]?\s*/, '').trim(); hasSystemAction = true;
+        }
+
+        if (/\[戳一戳\]/.test(remainingText)) {
+            chat.messages.push({ id: Date.now(), sender: 'system', text: `${char.name}${char.nudgeAIVerb || '拍了拍'}了我${char.nudgeAISuffix || ''}`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() });
+            remainingText = remainingText.replace(/\[戳一戳\][:：]?\s*/g, '').trim(); hasSystemAction = true;
+        }
+
+        if (isActive && typeof wxState !== 'undefined' && wxState.view === 'chatRoom') remainingText = remainingText.replace(/\*[^*]*\*/g, '').replace(/[(（][^)）]*[)）]/g, '').trim();
+
+        // 🌟 5. 解析气泡与附件 (语音、虚拟照片、转账、定位)
+        if (/\[发起转账\]/.test(remainingText)) {
+            let parts = remainingText.split(/\[发起转账\][:：]?\s*/);
+            if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+            let nextLines = parts[1].split('\n');
+            const amount = (nextLines[0].match(/金额[:：]?\s*(\d+(\.\d+)?)/) || [])[1] || '520.00';
+            const note = (nextLines[0].match(/备注[:：]?\s*([^，,。\]\n]+)/) || [])[1] || '转账给你';
+            msgsToPush.push({ msgType: 'transfer', text: `[收到转账]`, transferData: { amount, note }, transferState: 'pending' });
+            if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
+        } else if (/\[语音\]/.test(remainingText)) {
+            let parts = remainingText.split(/\[语音\][:：]?\s*/);
+            if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+            let nextLines = parts[1].split('\n');
+            if (nextLines[0].trim()) msgsToPush.push({ msgType: 'voice', text: nextLines[0].trim() });
+            if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
+        } else if (/\[虚拟照片\]/.test(remainingText)) {
+            let parts = remainingText.split(/\[虚拟照片\][:：]?\s*/);
+            if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+            let nextLines = parts[1].split('\n');
+            if (nextLines[0].trim()) msgsToPush.push({ msgType: 'virtual_image', text: nextLines[0].trim() });
+            if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
+        } else if (/\[发送定位\]/.test(remainingText)) {
+            let parts = remainingText.split(/\[发送定位\][:：]?\s*/);
+            if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+            let nextLines = parts[1].split('\n');
+            if (nextLines[0].trim()) msgsToPush.push({ msgType: 'location', text: nextLines[0].trim() });
+            if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
+        } else {
+            if (remainingText.trim()) {
+                if (isOffline) { 
+                    let finalOfflineText = remainingText.trim();
+                    codeBlocks.forEach((code, idx) => { finalOfflineText = finalOfflineText.replace(`__CODE_BLOCK_${idx}__`, `<br/><div class="mc-html-card my-2 w-full overflow-hidden">${code}</div><br/>`); });
+                    msgsToPush.push({ msgType: 'text', text: finalOfflineText, sender: char.name });
+                } else {
+                    let parts = remainingText.split('\n').filter(p => p.trim());
+                    let currentSpeakerName = char.name;
+                    parts.forEach(p => {
+                        let textToPush = p;
+                        if (chat.isGroup) {
+                            const match = p.match(/^([^:：\[\]]{1,15})[:：]\s*(.*)$/);
+                            if (match) { currentSpeakerName = match[1].trim(); textToPush = match[2].trim(); }
+                        }
+                        if (textToPush) {
+                            const fragments = textToPush.split(/(\*[^*]+\*)/); 
+                            fragments.forEach(frag => {
+                                const t = frag.trim(); if (!t) return;
+                                let blockMatch = t.match(/__CODE_BLOCK_(\d+)__/);
+                                if (blockMatch) { msgsToPush.push({ sender: currentSpeakerName, msgType: 'html_card', text: codeBlocks[parseInt(blockMatch[1])] }); return; }
+                                if (t.startsWith('*') && t.endsWith('*') && isCall) msgsToPush.push({ sender: currentSpeakerName, msgType: 'action', text: t.slice(1, -1) });
+                                else msgsToPush.push({ sender: currentSpeakerName, msgType: 'text', text: t });
+                            });
+                        }
+                    });
+                }
+            }
+        }
+
+        // 🌟 6. 装配切割好的气泡
+        const finalMsgs = [];
+        msgsToPush.forEach((m, index) => {
+            if (m.msgType === 'text' && !isOffline) {
+                const lines = m.text.split('\n').filter(l => l.trim());
+                lines.forEach((line, subIdx) => {
+                    finalMsgs.push({ id: Date.now() + index * 100 + subIdx, sender: m.sender || char.name, text: line.trim(), isMe: false, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime() });
+                });
+            } else {
+                finalMsgs.push({ id: Date.now() + index * 100, sender: m.sender || char.name, text: m.text, isMe: false, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime() });
+            }
+        });
+
+        // 🌟 7. 推送气泡上屏，并附带灵魂的“打字延迟”和“语音播放”
+        for (let i = 0; i < finalMsgs.length; i++) {
+            const newMsg = finalMsgs[i];
+            chat.messages.push(newMsg);
+
+            if (isActive) { 
+                if(typeof saveScroll === 'function') saveScroll(); 
+                if(typeof window.render === 'function') window.render(); 
+                if(typeof restoreScroll === 'function') restoreScroll(); 
+                if(window.wxActions && window.wxActions.scrollToBottom) window.wxActions.scrollToBottom(); 
+            }
+
+            let callAudioPlayed = false;
+            // 处理 Minimax 语音
+            if (char.minimaxVoiceId && store.minimaxConfig?.enabled !== false && store.minimaxConfig?.apiKey) {
+                if (isCall && newMsg.msgType === 'text') {
+                    const url = await fetchMinimaxVoice(newMsg.text, char.minimaxVoiceId);
+                    if (url && typeof wxState !== 'undefined' && wxState.view === 'call') { 
+                        newMsg.audioUrl = url; 
+                        await new Promise(resolve => { 
+                            if (!window.wxCallPlayer) window.wxCallPlayer = new Audio();
+                            window.wxCallPlayer.src = url; window.wxCallPlayer.onended = resolve; window.wxCallPlayer.onerror = resolve; window.wxCallPlayer.play().catch(() => resolve()); 
+                        });
+                        callAudioPlayed = true;
+                    }
+                } else if (newMsg.msgType === 'voice') {
+                    const url = await fetchMinimaxVoice(newMsg.text, char.minimaxVoiceId);
+                    if (url) { newMsg.audioUrl = url; if(isActive && typeof window.render === 'function') window.render(); }
+                }
+            }
+
+            if (!isCall && newMsg.msgType !== 'system' && newMsg.msgType !== 'recall_system') {
+                try { new Audio(store.appearance?.newMsgSound || 'https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3').play().catch(()=>{}); } catch(e) {}
+            }
+
+            // 完美的排队延迟感（如果切到后台则秒发）
+            if (i < finalMsgs.length - 1 && !callAudioPlayed && !document.hidden) {
+                await new Promise(resolve => setTimeout(resolve, Math.min(Math.max(newMsg.text.length * 60, 600), 2500)));
+            }
+        }
     }
   } catch (e) { console.error('同步信箱失败:', e); }
 };
 
-// 🌟 防爆废弃壳
 window.checkAutoMsg = async () => {}; 
-
-// 🌟 【绝对不能删的生命线】：每 15 秒自动去云端邮箱看一眼！
 setInterval(window.syncCloudMailbox, 15000); 
-
-// 🌟 切回页面时立刻查收
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') window.syncCloudMailbox();
-});
-
-// 🌟 刚打开网页时也立刻查收（防止有之前遗留的信息）
-window.addEventListener('load', () => {
-  setTimeout(window.syncCloudMailbox, 2000);
-});
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') window.syncCloudMailbox(); });
+window.addEventListener('load', () => { setTimeout(window.syncCloudMailbox, 2000); });
