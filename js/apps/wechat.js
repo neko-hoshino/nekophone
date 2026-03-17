@@ -2142,7 +2142,7 @@ window.wxActions = {
       wxState.showPlusMenu = false; wxState.showEmojiMenu = false;
       chat.messages.push({ 
         id: Date.now(), sender: document.hidden ? 'system' : char.name, 
-        text: document.hidden ? `连接被系统强行中断。请长按重roll。` : `[系统] 请求失败: ${errMsg} (请长按重roll)`, 
+        text: document.hidden ? `连接被系统强行中断。请重roll。` : `[系统] 请求失败: ${errMsg} (请重roll)`, 
         isMe: document.hidden, source: 'wechat', isOffline: isOffline, msgType: document.hidden ? 'system' : 'text', time: getNowTime() 
       });
     } finally {
@@ -4398,6 +4398,7 @@ const planCloudBrain = async (delayMinutes, char, llmMessages, routingId) => {
       throw new Error(errData.error || `云端服务器拒绝了请求 (HTTP状态码: ${res.status})`);
   }
 };
+// ==================== 以下代码必须放在 wechat.js 的最最最底部 ====================
 
 window.syncCloudMailbox = async () => {
   try {
@@ -4405,7 +4406,7 @@ window.syncCloudMailbox = async () => {
     const sub = await reg.pushManager.getSubscription();
     if (!sub) return;
 
-    const res = await fetch('https://neko-hoshino.duckdns.org/sync-mailbox', {
+    const res = await fetch('[https://neko-hoshino.duckdns.org/sync-mailbox](https://neko-hoshino.duckdns.org/sync-mailbox)', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-secret-token': localStorage.getItem('neko_server_pwd') || '' },
         body: JSON.stringify({ endpoint: sub.endpoint })
@@ -4416,41 +4417,37 @@ window.syncCloudMailbox = async () => {
     let shouldRender = false;
 
     data.messages.forEach(msg => {
+        if (!msg.charId) return;
         const parts = msg.charId.split('|');
         const chatId = parts[0];
-        const charId = parts[1];
+        const charId = parts[1] || chatId;
         const isOfflineMsg = parts[2] === '1';
 
         const chat = store.chats.find(c => c.charId === chatId);
         if (!chat) return;
 
-        // 🌟 核心解锁：只要收到信箱消息（不管是成功还是报错），立刻强制解除“正在输入中”的卡死状态！
-        if (window.wxState.typingStatus) {
-            window.wxState.typingStatus[chatId] = false;
-        }
+        // 🌟 核心防爆：极其安全地解除“正在输入中”的卡死状态
+        if (typeof wxState !== 'undefined' && wxState.typingStatus) wxState.typingStatus[chatId] = false;
+        if (window.wxState && window.wxState.typingStatus) window.wxState.typingStatus[chatId] = false;
 
-        // 把收到的原始文本进行安全处理，并切除思考链
         const safeText = (msg.text || '').replace(/\\n/g, '\n').replace(/\/n/g, '\n').replace(/`\{[\s\S]*?\}`/gi, '').trim();
-
-        // 🌟 气泡切割机上线！
         const lines = safeText.split('\n').filter(l => l.trim());
+        
         lines.forEach((line, subIdx) => {
             let textToPush = line.trim();
             let senderName = store.contacts.find(c => c.id === charId)?.name || '未知';
 
-            // 识别群聊发言人
             if (chat.isGroup) {
                 const match = textToPush.match(/^([^:：\[\]]{1,15})[:：]\s*(.*)$/);
                 if (match) { senderName = match[1].trim(); textToPush = match[2].trim(); }
             }
 
-            // 🌟 虚拟照片视觉拦截器：把它变成一张绝美的 HTML 拍立得卡片！
+            // 🌟 修复虚拟照片：加上 \n\n 前后空行，逼迫 Markdown 引擎乖乖将其渲染为高级卡片！
             const photoMatch = textToPush.match(/\[虚拟照片\][:：]?\s*(.*)/);
             if (photoMatch) {
-                textToPush = "```html\n" + `<div class="bg-gray-50/80 p-3.5 rounded-2xl border border-gray-200/60 flex flex-col items-center shadow-sm my-1 mx-2"><i data-lucide="camera" class="w-8 h-8 text-blue-400 mb-2 drop-shadow-sm"></i><span class="text-[11px] text-gray-400 font-extrabold mb-1 tracking-widest uppercase">Virtual Photo</span><span class="text-[14px] text-gray-800 text-center font-serif italic font-medium leading-relaxed">"${photoMatch[1]}"</span></div>` + "\n```";
+                textToPush = "\n\n```html\n" + `<div class="bg-gray-50/80 p-3.5 rounded-2xl border border-gray-200/60 flex flex-col items-center shadow-sm my-1 mx-2"><i data-lucide="camera" class="w-8 h-8 text-blue-400 mb-2 drop-shadow-sm"></i><span class="text-[11px] text-gray-400 font-extrabold mb-1 tracking-widest uppercase">Virtual Photo</span><span class="text-[14px] text-gray-800 text-center font-serif italic font-medium leading-relaxed">"${photoMatch[1]}"</span></div>` + "\n```\n\n";
             }
 
-            // 塞入聊天记录
             chat.messages.push({
                 id: msg.timestamp + subIdx,
                 sender: senderName,
@@ -4462,87 +4459,28 @@ window.syncCloudMailbox = async () => {
                 time: new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
             });
         });
-
         shouldRender = true;
     });
 
     if (shouldRender) {
-        window.render();
-        window.wxActions.scrollToBottom();
+        if (typeof window.render === 'function') window.render();
+        if (window.wxActions && window.wxActions.scrollToBottom) window.wxActions.scrollToBottom();
     }
   } catch (e) { console.error('同步信箱失败:', e); }
 };
 
-// 🌟 云端独立托管引擎：接管后台计算、免打扰与早安唤醒逻辑
-window.scheduleCloudTask = async (chatId) => {
-  try {
-    const chat = store.chats.find(c => c.charId === chatId);
-    if (!chat || !chat.messages || chat.messages.length === 0) return;
+// 🌟 防爆废弃壳
+window.checkAutoMsg = async () => {}; 
 
-    const targetObj = chat.isGroup ? chat : store.contacts.find(c => c.id === chat.charId);
-    if (!targetObj || !targetObj.autoMsgEnabled) return;
-
-    const charIdForLLM = chat.isGroup ? chat.memberIds[Math.floor(Math.random() * chat.memberIds.length)] : chat.charId;
-    const char = store.contacts.find(c => c.id === charIdForLLM);
-    if (!char) return;
-
-    let aiConsecutiveCount = 0;
-    for (let i = chat.messages.length - 1; i >= 0; i--) {
-        if (!chat.messages[i].isMe) aiConsecutiveCount++; else break;
-    }
-    if (aiConsecutiveCount >= 5) return; // 防连发刷屏
-
-    let multiplier = 1;
-    if (aiConsecutiveCount >= 2) multiplier = Math.pow(2, aiConsecutiveCount - 1);
-    const targetColdMinutes = (targetObj.isBlocked ? 5 : (targetObj.autoMsgInterval || 30)) * multiplier;
-    
-    let delayMinutes = targetColdMinutes * (0.8 + Math.random() * 0.4);
-
-    // 🌟 核心：0:00 - 8:00 免打扰 & 早上唤醒逻辑
-    const now = new Date();
-    let targetTime = new Date(now.getTime() + delayMinutes * 60000);
-    const targetHour = targetTime.getHours();
-    
-    if (targetHour >= 0 && targetHour < 8) {
-        // 落在半夜，强行把时间推迟到早上的 8:00 ~ 8:30 之间！
-        targetTime.setHours(8, Math.floor(Math.random() * 30), 0, 0);
-        delayMinutes = (targetTime.getTime() - now.getTime()) / 60000;
-    }
-
-    const realTimeStr = Math.floor(delayMinutes) < 60 ? `${Math.floor(delayMinutes)}分钟` : `${Math.floor(delayMinutes / 60)}小时${Math.floor(delayMinutes % 60)}分钟`;
-    
-    let customPrompt = "";
-    if (chat.isGroup) {
-        customPrompt = `(系统自动触发：距离上次对话客观流逝了 ${realTimeStr}。请作为群聊导演，安排群内角色们主动开启一个新的话题打破冷场。如果当前是早上，请自然地发个早安。自然一点，符合群设定，不要发长篇大论。)`;
-    } else {
-        customPrompt = targetObj.isBlocked 
-            ? `(系统自动触发：你处于被【拉黑】状态！过去真实的 ${realTimeStr}。请试图挽回。)`
-            : `(系统自动触发：距离上次客观流逝 ${realTimeStr}。请结合时间主动搭话。比如如果是早上就自然地发个早安。自然一点。)`;
-    }
-
-    const tempHistory = [...chat.messages, { id: Date.now(), sender: store.personas[0].name, text: customPrompt, isMe: true, isHidden: true, msgType: 'text' }];
-    
-    let groupInfo = null;
-    if (chat.isGroup) {
-        const allNames = chat.memberIds.map(id => store.contacts.find(c => c.id === id)?.name).filter(Boolean).join('、');
-        groupInfo = { id: chat.charId, name: chat.groupName, allNames: allNames, notice: chat.groupNotice || '' };
-    }
-
-    const { buildLLMPayload } = await import('../utils/llm.js');
-    const llmMessages = await buildLLMPayload(char.id, tempHistory, false, false, groupInfo, null);
-    const routingId = chat.charId + '|' + char.id + '|0';
-    
-    // 发送给 Server.js 的 /auto-plan 托管理由
-    planCloudBrain(delayMinutes, char, llmMessages, routingId);
-  } catch (e) { console.error('云端闹钟投递失败:', e); }
-};
-
-window.checkAutoMsg = async () => {};
-
+// 🌟 【绝对不能删的生命线】：每 15 秒自动去云端邮箱看一眼！
 setInterval(window.syncCloudMailbox, 15000); 
+
+// 🌟 切回页面时立刻查收
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible') {
-    window.syncCloudMailbox();
-    window.checkAutoMsg();
-  }
+  if (document.visibilityState === 'visible') window.syncCloudMailbox();
+});
+
+// 🌟 刚打开网页时也立刻查收（防止有之前遗留的信息）
+window.addEventListener('load', () => {
+  setTimeout(window.syncCloudMailbox, 2000);
 });
