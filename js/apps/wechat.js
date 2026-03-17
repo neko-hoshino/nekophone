@@ -4401,42 +4401,76 @@ const planCloudBrain = async (delayMinutes, char, llmMessages, routingId) => {
 
 window.syncCloudMailbox = async () => {
   try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.getSubscription();
-      if (!sub) return;
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return;
 
-      const res = await fetch('https://neko-hoshino.duckdns.org/sync-mailbox', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-secret-token': localStorage.getItem('neko_server_pwd') || '' },
-          body: JSON.stringify({ endpoint: sub.endpoint })
-      });
-      
-      if (!res.ok) return;
+    const res = await fetch('https://neko-hoshino.duckdns.org/sync-mailbox', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-secret-token': localStorage.getItem('neko_server_pwd') || '' },
+        body: JSON.stringify({ endpoint: sub.endpoint })
+    });
+    const data = await res.json();
+    if (!data.messages || data.messages.length === 0) return;
 
-      const data = await res.json();
-      for (const m of data.messages) {
-          let targetChatId = m.charId;
-          let speakerId = m.charId;
-          let isOff = false; // 🌟 接收是否为线下模式的坐标
-          if (m.charId.includes('|')) {
-              const parts = m.charId.split('|');
-              targetChatId = parts[0];
-              speakerId = parts[1];
-              if (parts[2] === '1') isOff = true;
-          }
+    let shouldRender = false;
 
-          const chat = store.chats.find(c => c.charId === targetChatId);
-          if (chat) {
-              let safeText = m.text;
-              if (safeText.includes('[系统] 云端请求失败')) {
-                  safeText = safeText.replace(/</g, '&lt;').replace(/>/g, '&gt;');
-                  window.actions.showToast('⚠️ 云端遇到了错误');
-              }
-              // 🌟 核心防错：带着线下坐标送入 getReply
-              window.wxActions.getReply(true, speakerId, null, safeText, targetChatId, isOff);
-          }
-      }
-  } catch(e) {}
+    data.messages.forEach(msg => {
+        const parts = msg.charId.split('|');
+        const chatId = parts[0];
+        const charId = parts[1];
+        const isOfflineMsg = parts[2] === '1';
+
+        const chat = store.chats.find(c => c.charId === chatId);
+        if (!chat) return;
+
+        // 🌟 核心解锁：只要收到信箱消息（不管是成功还是报错），立刻强制解除“正在输入中”的卡死状态！
+        if (window.wxState.typingStatus) {
+            window.wxState.typingStatus[chatId] = false;
+        }
+
+        // 把收到的原始文本进行安全处理，并切除思考链
+        const safeText = (msg.text || '').replace(/\\n/g, '\n').replace(/\/n/g, '\n').replace(/`\{[\s\S]*?\}`/gi, '').trim();
+
+        // 🌟 气泡切割机上线！
+        const lines = safeText.split('\n').filter(l => l.trim());
+        lines.forEach((line, subIdx) => {
+            let textToPush = line.trim();
+            let senderName = store.contacts.find(c => c.id === charId)?.name || '未知';
+
+            // 识别群聊发言人
+            if (chat.isGroup) {
+                const match = textToPush.match(/^([^:：\[\]]{1,15})[:：]\s*(.*)$/);
+                if (match) { senderName = match[1].trim(); textToPush = match[2].trim(); }
+            }
+
+            // 🌟 虚拟照片视觉拦截器：把它变成一张绝美的 HTML 拍立得卡片！
+            const photoMatch = textToPush.match(/\[虚拟照片\][:：]?\s*(.*)/);
+            if (photoMatch) {
+                textToPush = "```html\n" + `<div class="bg-gray-50/80 p-3.5 rounded-2xl border border-gray-200/60 flex flex-col items-center shadow-sm my-1 mx-2"><i data-lucide="camera" class="w-8 h-8 text-blue-400 mb-2 drop-shadow-sm"></i><span class="text-[11px] text-gray-400 font-extrabold mb-1 tracking-widest uppercase">Virtual Photo</span><span class="text-[14px] text-gray-800 text-center font-serif italic font-medium leading-relaxed">"${photoMatch[1]}"</span></div>` + "\n```";
+            }
+
+            // 塞入聊天记录
+            chat.messages.push({
+                id: msg.timestamp + subIdx,
+                sender: senderName,
+                text: textToPush,
+                isMe: false,
+                source: 'wechat',
+                isOffline: isOfflineMsg,
+                msgType: 'text',
+                time: new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+            });
+        });
+
+        shouldRender = true;
+    });
+
+    if (shouldRender) {
+        window.render();
+        window.wxActions.scrollToBottom();
+    }
+  } catch (e) { console.error('同步信箱失败:', e); }
 };
 
 // 🌟 云端独立托管引擎：接管后台计算、免打扰与早安唤醒逻辑
