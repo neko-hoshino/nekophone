@@ -1818,10 +1818,14 @@ window.wxActions = {
           // 🌟 把抓到的 readingInfo 传给大模型
           const llmMessages = await buildLLMPayload(charId, chat.messages, isOffline, isCall, groupInfo, readingInfo);
           
-          delegatedToCloud = true; 
+          // 🌟 满足你的硬核架构：全面交由云端排队代跑！
           if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
-          // 🌟 核心防错：向云端发送精确的时空坐标
-          planCloudBrain(0, char, llmMessages, chat.charId + '|' + char.id + '|' + (isOffline ? '1' : '0'));
+          
+          // ⚠️ 极其核心的 await 拦截：绝不允许它偷偷溜走！如果它敢报错，直接会被最下面的 catch 抓去弹红字！
+          await planCloudBrain(0, char, llmMessages, chat.charId + '|' + char.id + '|' + (isOffline ? '1' : '0'));
+          
+          // 只有服务器明确返回了 200 OK 接单成功，才允许打上“已托管”标记！
+          delegatedToCloud = true; 
           return; 
       }
       
@@ -4369,24 +4373,30 @@ export function renderWeChatApp(store) {
 // ================= 🧠 云端通用大脑 & 信箱同步引擎 =================
 
 const planCloudBrain = async (delayMinutes, char, llmMessages, routingId) => {
-  try {
-      const reg = await navigator.serviceWorker.ready;
-      const sub = await reg.pushManager.getSubscription();
-      if (!sub || !store.apiConfig?.apiKey) return;
+  // 🚨 移除静默 try-catch，让错误能直接抛给 UI 界面！
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  
+  if (!store.apiConfig?.apiKey) throw new Error("缺少 API Key 配置，云端无法请求大模型");
+  if (!sub) throw new Error("未绑定设备推送凭证！云端不知道把消息发给谁，请先在右上角授权通知！");
 
-      await fetch('https://neko-hoshino.duckdns.org/auto-plan', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'x-secret-token': localStorage.getItem('neko_server_pwd') || '' },
-          body: JSON.stringify({
-              delayMinutes: delayMinutes,
-              title: char.name,
-              charId: routingId || char.id, // 🌟 发送路由加密 ID
-              endpoint: sub.endpoint,
-              apiConfig: store.apiConfig, 
-              llmMessages: llmMessages    
-          })
-      });
-  } catch (e) { console.error('云端大脑连接失败:', e); }
+  const res = await fetch('https://neko-hoshino.duckdns.org/auto-plan', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-secret-token': localStorage.getItem('neko_server_pwd') || '' },
+      body: JSON.stringify({
+          delayMinutes: delayMinutes,
+          title: char.name,
+          charId: routingId || char.id, 
+          endpoint: sub.endpoint,
+          apiConfig: store.apiConfig, 
+          llmMessages: llmMessages    
+      })
+  });
+  
+  if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `云端服务器拒绝了请求 (HTTP状态码: ${res.status})`);
+  }
 };
 
 window.syncCloudMailbox = async () => {
