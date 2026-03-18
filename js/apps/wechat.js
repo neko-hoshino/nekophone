@@ -1890,13 +1890,13 @@ export function renderWeChatApp(store) {
     let v = val || defaultVal || '';
     if (v.length > 100 && !v.startsWith('http') && !v.startsWith('data:')) v = 'data:image/jpeg;base64,' + v;
     if (v.includes('http') || v.startsWith('data:')) {
-      // 🌟 移除了这里的 rounded-full，让外层的 div 来决定它是圆的还是方的
-      return `<img src="${v}" class="w-full h-full object-cover ${isBg ? 'opacity-40' : ''}" />`;
+      // 🌟 开启异步解码和懒加载，杜绝滑动和渲染时的卡顿！
+      return `<img src="${v}" decoding="async" loading="lazy" class="w-full h-full object-cover ${isBg ? 'opacity-40' : ''}" />`;
     }
     
     // 如果是真实的图片（带链接或 Base64）
     if (v.includes('http') || v.startsWith('data:')) {
-      return `<img src="${v}" class="w-full h-full object-cover ${isBg ? '' : 'rounded-full'}" />`;
+      return `<img src="${v}" decoding="async" loading="lazy" class="w-full h-full object-cover ${isBg ? '' : 'rounded-full'}" />`;
     }
     
     // 如果是 Emoji 或普通文字（加入 overflow-hidden 防止任何意外溢出）
@@ -2494,7 +2494,7 @@ export function renderWeChatApp(store) {
                 return `
                 <div class="flex flex-col items-center">
                   <div class="relative aspect-square w-full bg-gray-100 rounded-[12px] border border-gray-200 flex items-center justify-center overflow-hidden shadow-sm group">
-                    <img src="${ep.url}" class="w-full h-full object-cover" />
+                    <img src="${ep.url}" decoding="async" loading="lazy" class="w-full h-full object-cover" />
                     <div class="absolute top-1 right-1 bg-black/60 rounded-full p-1 cursor-pointer active:scale-90 shadow-md transition-transform hover:bg-red-500" onclick="window.wxActions.deleteEmojiUrl(${idx})"><i data-lucide="x" class="text-white w-3 h-3"></i></div>
                   </div>
                   <span class="text-[10px] text-gray-500 mt-1.5 truncate w-full text-center font-medium">${shortName}</span>
@@ -2521,7 +2521,7 @@ export function renderWeChatApp(store) {
             <div class="mt-4 flex flex-wrap gap-3">
                ${wxState.tempMomentImage ? `
                  <div class="w-24 h-24 bg-gray-100 rounded-[8px] overflow-hidden relative shadow-sm">
-                   <img src="${wxState.tempMomentImage}" class="w-full h-full object-cover" />
+                   <img src="${wxState.tempMomentImage}" decoding="async" loading="lazy" class="w-full h-full object-cover" />
                    <div class="absolute top-1 right-1 bg-black/50 rounded-full p-1 cursor-pointer active:scale-90" onclick="window.wxActions.clearTempMomentImage()"><i data-lucide="x" class="text-white w-3 h-3"></i></div>
                  </div>
                ` : wxState.tempMomentVirtual !== null && wxState.tempMomentVirtual !== undefined ? `
@@ -2782,7 +2782,7 @@ export function renderWeChatApp(store) {
                       <div class="flex items-center justify-between bg-white border border-gray-100 p-3 rounded-xl shadow-sm">
                          <div class="flex items-center space-x-3">
                             <div class="w-10 h-10 rounded-lg bg-gray-50 border border-gray-200 overflow-hidden flex items-center justify-center relative cursor-pointer" onclick="document.getElementById('offline-bg-upload').click()">
-                               ${targetObj.offlineBg ? `<img src="${targetObj.offlineBg}" class="w-full h-full object-cover">` : `<i data-lucide="plus" class="text-gray-400"></i>`}
+                               ${targetObj.offlineBg ? `<img src="${targetObj.offlineBg}" decoding="async" loading="lazy" class="w-full h-full object-cover">` : `<i data-lucide="plus" class="text-gray-400"></i>`}
                             </div>
                             <span class="text-[12px] font-bold text-gray-600">${targetObj.offlineBg ? '已设置专属背景' : '默认纯色背景'}</span>
                          </div>
@@ -2959,7 +2959,7 @@ export function renderWeChatApp(store) {
   // 💬 场景 4：正常的微信聊天室
   if (wxState.view === 'chatRoom') {
     let lastRenderedTime = ''; 
-    const messagesHtml = chatData.messages.filter(m => !m.isOffline && !m.isHidden).map(msg => {
+    const messagesHtml = chatData.messages.filter(m => !m.isOffline && !m.isHidden).map((msg, index, array) => {
       // 🌟 找到发送者的角色数据（群聊时动态查找，单聊时直接用 char）
       const senderChar = (isGroup && !msg.isMe) ? store.contacts.find(c => c.name === msg.sender) : char;
       const senderAvatar = senderChar ? senderChar.avatar : '';
@@ -3065,7 +3065,7 @@ export function renderWeChatApp(store) {
         maxWidthClass = 'max-w-[40%]';
         bubbleClass = 'mc-bubble-img bg-white p-1 rounded-xl shadow-sm border border-gray-100'; 
         bubbleStyle = ''; 
-        contentHtml = `<img src="${msg.imageUrl}" class="w-full h-auto rounded-lg object-cover max-h-[200px] cursor-pointer" onclick="window.actions.showToast('查看大图')" alt="照片" />`;
+        contentHtml = `<img src="${msg.imageUrl}" decoding="async" loading="lazy" class="w-full h-auto rounded-lg object-cover max-h-[200px] cursor-pointer" onclick="window.actions.showToast('查看大图')" alt="照片" />`;
       } else if (msg.msgType === 'location') {
         maxWidthClass = 'max-w-[65%]';
         bubbleClass = 'mc-bubble-location bg-white rounded-[12px] shadow-sm border border-gray-100 overflow-hidden p-0 cursor-pointer active:scale-95 transition-transform';
@@ -3116,7 +3116,7 @@ export function renderWeChatApp(store) {
         const reqState = msg.reqState || 'pending';
         contentHtml = `
           <div class="bg-white rounded-[16px] shadow-sm border border-gray-100 p-5 w-[280px] flex flex-col items-center">
-             <div class="w-12 h-12 rounded-full overflow-hidden border border-gray-100 mb-2"><img src="${char?.avatar || ''}" class="w-full h-full object-cover"></div>
+             <div class="w-12 h-12 rounded-full overflow-hidden border border-gray-100 mb-2"><img src="${char?.avatar || ''}" decoding="async" loading="lazy" class="w-full h-full object-cover"></div>
              <span class="text-[15px] font-bold text-gray-800 mb-1">${char?.name || '角色'} 申请添加你为朋友</span>
              ${reqState === 'pending' ? `
              <div class="flex space-x-3 w-full">
@@ -3143,7 +3143,7 @@ export function renderWeChatApp(store) {
         maxWidthClass = 'max-w-[25%]';
         bubbleClass = 'bg-transparent shadow-none'; 
         bubbleStyle = ''; 
-        contentHtml = `<img src="${msg.imageUrl}" class="w-full h-auto object-contain cursor-pointer drop-shadow-md" />`;
+        contentHtml = `<img src="${msg.imageUrl}" decoding="async" loading="lazy" class="w-full h-auto object-contain cursor-pointer drop-shadow-md" />`;
       } else {
         bubbleClass = `mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-wrap break-words text-[15px] ${msg.isMe ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`;
         bubbleStyle = '';
@@ -3165,9 +3165,10 @@ export function renderWeChatApp(store) {
         `;
       }
 
-      // 🌟气泡组装 (把 quoteHtmlOut 和 voiceTextOut 独立于 mc-bubble 外)
+      // 🌟 性能优化：只有最后 3 条消息才触发浮出动画，历史记录直接静态渲染，极大减轻手机负担！
+      const animationClass = (index >= array.length - 3) ? 'animate-in fade-in slide-in-from-bottom-2 duration-300' : '';
       return `${timeHtml}
-      <div class="mc-msg-row ${msg.isMe ? 'mc-is-me' : 'mc-is-ai'} flex items-start w-full animate-in fade-in duration-300 mb-3 ${wxState.isMultiSelecting ? 'pl-2 cursor-pointer' : ''}" ${wxState.isMultiSelecting ? `onclick="window.wxActions.toggleSelectMsg(${msg.id})"` : ''}>
+      <div class="mc-msg-row ${msg.isMe ? 'mc-is-me' : 'mc-is-ai'} flex items-start w-full ${animationClass} mb-3 ${wxState.isMultiSelecting ? 'pl-2 cursor-pointer' : ''}" ${wxState.isMultiSelecting ? `onclick="window.wxActions.toggleSelectMsg(${msg.id})"` : ''}>
         
         ${checkboxHtml}
         
@@ -3297,6 +3298,20 @@ export function renderWeChatApp(store) {
         <style>
           ${chatData.isGroup ? (chatData.customCSS || '') : (char?.customCSS || '')}
           ${char?.bgImage ? `:root { --chat-bg-image: url('${char.bgImage}'); }` : (store.bgImage ? `:root { --chat-bg-image: url('${store.bgImage}'); }` : '')}
+          
+          /* 🌟 核心性能优化 1：强制开启 iOS 原生丝滑滚动 */
+          .hide-scrollbar { -webkit-overflow-scrolling: touch; }
+          
+          /* 🌟 核心性能优化 2：强迫手机显卡(GPU)接管聊天列表和气泡的渲染，防止重排掉帧 */
+          #chat-scroll, .mc-msg-row { transform: translateZ(0); will-change: transform; }
+          
+          /* 🌟 核心性能优化 3：移动端自适应降级毛玻璃，拯救手机发烫和滑动卡顿 */
+          @media (max-width: 768px) {
+             .backdrop-blur-md, .backdrop-blur-2xl, .backdrop-blur-xl {
+                 backdrop-filter: blur(10px) !important;
+                 -webkit-backdrop-filter: blur(10px) !important;
+             }
+          }
         </style>
 
         <div class="absolute inset-0 z-[-1]" style="background: var(--chat-bg-overlay); pointer-events: none;"></div>
@@ -3414,7 +3429,7 @@ export function renderWeChatApp(store) {
               activeGroup.emojis.forEach(ep => {
                  const shortName = ep.name.length > 5 ? ep.name.substring(0,5) + '...' : ep.name;
                  eHtml += '<div class="mc-emoji-item flex flex-col items-center cursor-pointer active:scale-95 transition-transform" onclick="window.wxActions.sendEmoji(\'' + ep.url + '\', \'' + ep.name + '\')">';
-                 eHtml += '<div class="w-[3.5rem] h-[3.5rem] rounded-[12px] overflow-hidden flex items-center justify-center p-1"><img src="' + ep.url + '" class="w-full h-full object-contain drop-shadow-sm" /></div>';
+                 eHtml += '<div class="w-[3.5rem] h-[3.5rem] rounded-[12px] overflow-hidden flex items-center justify-center p-1"><img src="' + ep.url + '" decoding="async" loading="lazy" class="w-full h-full object-contain drop-shadow-sm" /></div>';
                  eHtml += '<span class="text-[10px] text-gray-500 mt-1.5 truncate w-full text-center">' + shortName + '</span>';
                  eHtml += '</div>';
               });
@@ -3803,7 +3818,7 @@ export function renderWeChatApp(store) {
           <div class="flex-1 flex flex-col min-w-0">
             <span class="text-[#576b95] font-medium text-[15px] mb-1">${m.senderName}</span>
             ${m.text ? `<span class="text-gray-800 text-[15px] leading-relaxed break-words whitespace-pre-wrap">${m.text}</span>` : ''}
-            ${m.imageUrl ? `<img src="${m.imageUrl}" class="mt-2 max-w-[70%] max-h-48 object-cover rounded-[4px] border border-gray-100" onclick="window.actions.showToast('查看大图')" />` : ''}
+            ${m.imageUrl ? `<img src="${m.imageUrl}" decoding="async" loading="lazy" class="mt-2 max-w-[70%] max-h-48 object-cover rounded-[4px] border border-gray-100" onclick="window.actions.showToast('查看大图')" />` : ''}
             ${m.virtualImageText ? `
               <div class="mt-2 w-48 min-h-[12rem] bg-white cursor-pointer select-none rounded-[4px] shadow-sm overflow-hidden border border-gray-200 relative" onclick="const overlay = this.querySelector('.img-overlay'); overlay.classList.toggle('opacity-0'); overlay.classList.toggle('pointer-events-none');">
                 <div class="absolute inset-0 p-4 overflow-y-auto text-[13px] text-gray-700 leading-relaxed text-left bg-white hide-scrollbar">
@@ -3834,7 +3849,7 @@ export function renderWeChatApp(store) {
       <div id="moments-scroll" class="flex-1 overflow-y-auto bg-white hide-scrollbar relative pb-10" onclick="if(wxState.activeMomentMenuId) window.wxActions.toggleMomentMenu(null)">
          <input type="file" id="upload-moment-bg" accept="image/*" class="hidden" onchange="window.wxActions.handleMomentBgUpload(event)" />
          <div class="relative h-60 bg-gray-200 flex items-center justify-center overflow-visible cursor-pointer" onclick="document.getElementById('upload-moment-bg').click()">
-            <img src="${store.momentBg}" class="w-full h-full object-cover" />
+            <img src="${store.momentBg}" decoding="async" loading="lazy" class="w-full h-full object-cover" />
             <div class="absolute inset-x-0 bottom-[-20px] flex justify-end items-end px-4">
                <span class="text-white font-bold text-[20px] mr-4 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] pb-6">${my.name}</span>
                <div class="w-16 h-16 rounded-[12px] overflow-hidden border-2 border-white shadow-md bg-white flex items-center justify-center z-10">${getVidHtml(my.avatar, false)}</div>
