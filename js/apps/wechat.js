@@ -2698,11 +2698,12 @@ export function renderWeChatApp(store) {
                  let menuHtml = '';
                  if (wxState.activeMenuMsgId === msg.id) {
                    menuHtml = `
-                     <div class="absolute z-[100] top-full left-1/2 -translate-x-1/2 mt-2 bg-[#2c2c2c] text-white rounded-[12px] px-1 py-0.5 flex items-center shadow-2xl animate-in zoom-in-95 duration-150 whitespace-nowrap border border-white/10" onclick="event.stopPropagation()">
-                       ${(!msg.isMe && !isHistory) ? `<div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.rerollReply(${msg.id})"><i data-lucide="refresh-cw" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">重roll</span></div>` : ''}
-                       <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.openEditMessageModal(${msg.id})"><i data-lucide="edit" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">编辑</span></div>
-                       <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.startMultiSelect(${msg.id})"><i data-lucide="check-square" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">多选</span></div>
-                       <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.deleteMessage(${msg.id})"><i data-lucide="trash-2" class="w-[18px] h-[18px] mb-1 text-red-400"></i><span class="text-[10px] text-red-400 scale-90">删除</span></div>
+                     <div class="fixed inset-0 z-[90] bg-transparent" onclick="window.wxActions.closeContextMenu()" ontouchstart="event.preventDefault(); window.wxActions.closeContextMenu()"></div>
+                     <div class="absolute z-[100] top-full left-1/2 -translate-x-1/2 mt-2 bg-[#2c2c2c] text-white rounded-[12px] px-1 py-0.5 flex items-center shadow-2xl animate-in zoom-in-95 duration-150 whitespace-nowrap border border-white/10" onclick="event.stopPropagation()" ontouchstart="event.stopPropagation()">
+                       ${(!msg.isMe && !isHistory) ? `<div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.rerollReply(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.rerollReply(${msg.id})"><i data-lucide="refresh-cw" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">重roll</span></div>` : ''}
+                       <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.openEditMessageModal(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.openEditMessageModal(${msg.id})"><i data-lucide="edit" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">编辑</span></div>
+                       <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.startMultiSelect(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.startMultiSelect(${msg.id})"><i data-lucide="check-square" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">多选</span></div>
+                       <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.deleteMessage(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.deleteMessage(${msg.id})"><i data-lucide="trash-2" class="w-[18px] h-[18px] mb-1 text-red-400"></i><span class="text-[10px] text-red-400 scale-90">删除</span></div>
                      </div>
                    `;
                  }
@@ -3158,13 +3159,14 @@ export function renderWeChatApp(store) {
       let menuHtml = '';
       if (wxState.activeMenuMsgId === msg.id) {
         menuHtml = `
-          <div class="mc-context-menu absolute z-[100] bottom-[105%] ${msg.isMe ? 'right-0 origin-bottom-right' : 'left-0 origin-bottom-left'} bg-[#2c2c2c] text-white rounded-[12px] px-1 py-0.5 flex items-center shadow-2xl animate-in zoom-in-95 duration-150 whitespace-nowrap border border-white/10" onclick="event.stopPropagation()">
-            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.quoteMessage(${msg.id})"><i data-lucide="quote" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">引用</span></div>
-            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.favoriteMessage(${msg.id})"><i data-lucide="star" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">收藏</span></div>
-            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.startMultiSelect(${msg.id})"><i data-lucide="check-square" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">多选</span></div>
-            ${msg.isMe ? `<div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.recallMessage(${msg.id})"><i data-lucide="undo-2" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">撤回</span></div>` : ''}
-            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.openEditMessageModal(${msg.id})"><i data-lucide="edit" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">编辑</span></div>
-            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.deleteMessage(${msg.id})"><i data-lucide="trash-2" class="w-[18px] h-[18px] mb-1 text-red-400"></i><span class="text-[10px] text-red-400 scale-90">删除</span></div>
+          <div class="fixed inset-0 z-[90] bg-transparent" onclick="window.wxActions.closeContextMenu()" ontouchstart="event.preventDefault(); window.wxActions.closeContextMenu()"></div>
+          <div class="mc-context-menu absolute z-[100] bottom-[105%] ${msg.isMe ? 'right-0 origin-bottom-right' : 'left-0 origin-bottom-left'} bg-[#2c2c2c] text-white rounded-[12px] px-1 py-0.5 flex items-center shadow-2xl animate-in zoom-in-95 duration-150 whitespace-nowrap border border-white/10" onclick="event.stopPropagation()" ontouchstart="event.stopPropagation()">
+            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer active:bg-white/20 rounded-lg transition-colors" onclick="window.wxActions.quoteMessage(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.quoteMessage(${msg.id})"><i data-lucide="quote" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">引用</span></div>
+            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer active:bg-white/20 rounded-lg transition-colors" onclick="window.wxActions.favoriteMessage(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.favoriteMessage(${msg.id})"><i data-lucide="star" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">收藏</span></div>
+            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer active:bg-white/20 rounded-lg transition-colors" onclick="window.wxActions.startMultiSelect(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.startMultiSelect(${msg.id})"><i data-lucide="check-square" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">多选</span></div>
+            ${msg.isMe ? `<div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer active:bg-white/20 rounded-lg transition-colors" onclick="window.wxActions.recallMessage(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.recallMessage(${msg.id})"><i data-lucide="undo-2" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">撤回</span></div>` : ''}
+            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer active:bg-white/20 rounded-lg transition-colors" onclick="window.wxActions.openEditMessageModal(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.openEditMessageModal(${msg.id})"><i data-lucide="edit" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">编辑</span></div>
+            <div class="mc-context-item flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer active:bg-white/20 rounded-lg transition-colors" onclick="window.wxActions.deleteMessage(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.deleteMessage(${msg.id})"><i data-lucide="trash-2" class="w-[18px] h-[18px] mb-1 text-red-400"></i><span class="text-[10px] text-red-400 scale-90">删除</span></div>
           </div>
         `;
       }
@@ -3214,7 +3216,7 @@ export function renderWeChatApp(store) {
       { id: 'mc-tool-offline', icon: 'coffee', label: '线下剧情', action: "window.wxActions.enterOffline()", hideInGroup: false },
       { id: 'mc-tool-read', icon: 'book-open', label: '一起看书', action: "window.wxActions.openBookSelectModal()", hideInGroup: true }
     ].filter(item => !(isGroup && item.hideInGroup)).map(item => `
-      <div class="mc-tool-item flex flex-col items-center justify-center space-y-1.5 cursor-pointer active:scale-95 transition-transform" onclick="${item.action}">
+      <div class="mc-tool-item flex flex-col items-center justify-center space-y-1.5 cursor-pointer active:scale-95 transition-transform" onclick="${item.action}" ontouchend="event.preventDefault(); ${item.action}">
         <div class="${item.id} w-14 h-14 flex items-center justify-center">
           <i data-lucide="${item.icon}" class="text-gray-800" style="width: 28px; height: 28px;"></i>
         </div>
@@ -3305,9 +3307,9 @@ export function renderWeChatApp(store) {
           
           /* 🌟 核心性能优化 1：强制开启 iOS 原生丝滑滚动 */
           .hide-scrollbar { -webkit-overflow-scrolling: touch; }
-
-          /* 🌟 物理防塌陷装甲：给所有聊天气泡里的图片设定最小高度，绝不允许它在重绘时变成 0 导致算错滚动条！ */
-          .mc-msg-row img { min-height: 40px; }
+          
+          /* 🌟 核心性能优化 2：仅对滚动容器进行 GPU 加速，释放气泡显存，解决卡顿和层级穿透 */
+          #chat-scroll { transform: translateZ(0); }
           
           /* 🌟 核心性能优化 3：移动端自适应降级毛玻璃，拯救手机发烫和滑动卡顿 */
           @media (max-width: 768px) {
@@ -3319,7 +3321,6 @@ export function renderWeChatApp(store) {
         </style>
 
         <div class="absolute inset-0 z-[-1]" style="background: var(--chat-bg-overlay); pointer-events: none;"></div>
-        ${wxState.activeMenuMsgId ? `<div class="absolute inset-0 z-[90]" onclick="window.wxActions.closeContextMenu()" ontouchstart="window.wxActions.closeContextMenu()"></div>` : ''}
         
         <div class="mc-topbar backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200/50 z-10 sticky top-0 transition-colors ${wxState.isMultiSelecting ? 'bg-[#f3f3f3]' : 'bg-gray-100/90'}">
           ${(() => {
