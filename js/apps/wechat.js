@@ -1865,6 +1865,23 @@ export function renderWeChatApp(store) {
   const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
   const myAvatar = boundPersona.avatar;
 
+  // 🌟 提取全局复用的重roll导演弹窗
+  const globalRerollModalHtml = wxState.showRerollModal ? `
+  <div class="mc-modal-overlay absolute inset-0 z-[999] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeRerollModal()" ontouchstart="event.preventDefault(); window.wxActions.closeRerollModal()">
+      <div class="mc-modal-content bg-[#f6f6f6] w-full rounded-[24px] overflow-hidden shadow-2xl flex flex-col" onclick="event.stopPropagation()" ontouchstart="event.stopPropagation()">
+          <div class="px-6 pt-6 pb-4">
+              <h3 class="text-[18px] font-extrabold text-gray-800 mb-2 flex items-center"><i data-lucide="refresh-cw" class="w-5 h-5 mr-2 text-blue-500"></i>定向重新生成</h3>
+              <p class="text-[13px] text-gray-500 mb-4">告诉角色你希望它怎么修改这条回复（留空则默认按原语境重试）。</p>
+              <textarea id="reroll-input" class="w-full h-24 bg-gray-50/50 border border-gray-200/60 rounded-[12px] p-3 text-[14px] text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all resize-none hide-scrollbar" placeholder="例如：语气再稍微温柔一点..."></textarea>
+          </div>
+          <div class="flex border-t border-gray-100/80 bg-gray-50/50">
+              <button class="flex-1 py-3.5 text-[15px] font-bold text-gray-500 active:bg-gray-100 transition-colors" onclick="window.wxActions.closeRerollModal()" ontouchend="event.preventDefault(); window.wxActions.closeRerollModal()">取消</button>
+              <div class="w-px bg-gray-100/80"></div>
+              <button class="flex-1 py-3.5 text-[15px] font-extrabold text-blue-500 active:bg-blue-50 transition-colors" onclick="window.wxActions.submitReroll()" ontouchend="event.preventDefault(); window.wxActions.submitReroll()">确认</button>
+          </div>
+      </div>
+  </div>
+  ` : '';
 
   // 📷 头像渲染辅助函数：修复了强制圆形导致视频也变圆的问题
   const getVidHtml = (val, defaultVal, isBg) => {
@@ -2853,6 +2870,8 @@ export function renderWeChatApp(store) {
           </div>
         ` : ''}
 
+        ${globalRerollModalHtml}
+
       </div>
     `;
   }
@@ -2934,6 +2953,8 @@ export function renderWeChatApp(store) {
             </div>
           </div>
         `}
+
+        ${globalRerollModalHtml}
       </div>
     `;
   }
@@ -3517,22 +3538,7 @@ export function renderWeChatApp(store) {
           </div>
         ` : ''}
 
-        ${wxState.showRerollModal ? `
-        <div class="mc-modal-overlay absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeRerollModal()" ontouchstart="event.preventDefault(); window.wxActions.closeRerollModal()">
-            <div class="mc-modal-content bg-[#f6f6f6] w-full rounded-[24px] overflow-hidden shadow-2xl flex flex-col" onclick="event.stopPropagation()" ontouchstart="event.stopPropagation()">
-                <div class="px-6 pt-6 pb-4">
-                    <h3 class="text-[18px] font-extrabold text-gray-800 mb-2 flex items-center"><i data-lucide="refresh-cw" class="w-5 h-5 mr-2 text-blue-500"></i>定向重新生成</h3>
-                    <p class="text-[13px] text-gray-500 mb-4">告诉角色你希望它怎么修改这条回复（留空则默认按原语境重试）。</p>
-                    <textarea id="reroll-input" class="w-full h-24 bg-gray-50/50 border border-gray-200/60 rounded-xl p-3 text-[14px] text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all resize-none hide-scrollbar" placeholder="例如：语气再稍微温柔一点..."></textarea>
-                </div>
-                <div class="flex border-t border-gray-100/80 bg-gray-50/50">
-                    <button class="flex-1 py-3.5 text-[15px] font-bold text-gray-500 active:bg-gray-100 transition-colors" onclick="window.wxActions.closeRerollModal()" ontouchend="event.preventDefault(); window.wxActions.closeRerollModal()">取消</button>
-                    <div class="w-px bg-gray-100/80"></div>
-                    <button class="flex-1 py-3.5 text-[15px] font-extrabold text-blue-500 active:bg-blue-50 transition-colors" onclick="window.wxActions.submitReroll()" ontouchend="event.preventDefault(); window.wxActions.submitReroll()">确认</button>
-                </div>
-            </div>
-        </div>
-        ` : ''}
+        ${globalRerollModalHtml}
 
         ${wxState.showInnerThoughtModal ? (() => {
             const charId = wxState.showInnerThoughtModal;

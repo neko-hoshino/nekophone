@@ -143,7 +143,7 @@ export function renderWorldbookApp(store) {
                     </div>
                  </div>
                  <div class="flex items-center space-x-3 shrink-0" onclick="event.stopPropagation()">
-                    <input type="checkbox" class="ios-switch" ${item.enabled ? 'checked' : ''} onchange="window.wbActions.toggleEnable(${item.id})" />
+                    ${wbState.activeTab !== 'local' ? `<input type="checkbox" class="ios-switch" ${item.enabled ? 'checked' : ''} onchange="window.wbActions.toggleEnable(${item.id})" />` : ''}
                     <div class="p-1.5 rounded-full hover:bg-red-50 active:scale-90 transition-transform cursor-pointer" onclick="window.wbActions.deleteEntry(${item.id})">
                        <i data-lucide="trash-2" class="w-4 h-4 text-red-400"></i>
                     </div>
