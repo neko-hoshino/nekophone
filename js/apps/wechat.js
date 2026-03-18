@@ -13,24 +13,28 @@ const formatTimeElapsed = (ts) => {
   return Math.floor(diff / 86400000) + '天前';
 };
 
-// 🌟 修复6 & 7：真正的全局滚动记忆系统
+// 🌟 修复6 & 7：真正的全局滚动记忆系统 (终极防跳版)
 let savedScrollPositions = {};
 const saveScroll = () => {
   ['chat-scroll', 'offline-scroll', 'wechat-group-scroll', 'wechat-favorites-scroll', 'moments-scroll', 'book-read-scroll'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) savedScrollPositions[id] = el.scrollTop;
+    // 🌟 核心：同时记录距离顶部的距离，和距离【底部】的距离！
+    if (el) savedScrollPositions[id] = { top: el.scrollTop, bottom: el.scrollHeight - el.scrollTop };
   });
 };
 const restoreScroll = () => {
-  // 🌟 纯同步执行，彻底剥离 setTimeout，并覆写全局变量防止 main.js 异步回弹！
   Object.keys(savedScrollPositions).forEach(id => {
     const el = document.getElementById(id);
-    if (el) {
-      el.style.scrollBehavior = 'auto'; // 强制关闭默认平滑滚动
-      el.scrollTop = savedScrollPositions[id];
-      // 致命一击：同步改写 main.js 的记忆，让它下一帧老老实实呆在原地
+    if (el && savedScrollPositions[id]) {
+      el.style.scrollBehavior = 'auto'; 
+      // 🌟 致命一击：聊天列表强制以底部为参照物进行恢复，哪怕底栏高度变了也绝对不跳！
+      if (id === 'chat-scroll' || id === 'offline-scroll') {
+          el.scrollTop = el.scrollHeight - savedScrollPositions[id].bottom;
+      } else {
+          el.scrollTop = savedScrollPositions[id].top;
+      }
       if (window.globalScrollStates && window.globalScrollStates[id]) {
-          window.globalScrollStates[id].top = savedScrollPositions[id];
+          window.globalScrollStates[id].top = el.scrollTop;
       }
     }
   });
@@ -3302,9 +3306,6 @@ export function renderWeChatApp(store) {
           /* 🌟 核心性能优化 1：强制开启 iOS 原生丝滑滚动 */
           .hide-scrollbar { -webkit-overflow-scrolling: touch; }
           
-          /* 🌟 核心性能优化 2：强迫手机显卡(GPU)接管聊天列表和气泡的渲染，防止重排掉帧 */
-          #chat-scroll, .mc-msg-row { transform: translateZ(0); will-change: transform; }
-          
           /* 🌟 核心性能优化 3：移动端自适应降级毛玻璃，拯救手机发烫和滑动卡顿 */
           @media (max-width: 768px) {
              .backdrop-blur-md, .backdrop-blur-2xl, .backdrop-blur-xl {
@@ -4239,6 +4240,38 @@ window.syncCloudMailbox = async () => {
         if (/\[戳一戳\]/.test(remainingText)) {
             chat.messages.push({ id: Date.now(), sender: 'system', text: `${char.name}${char.nudgeAIVerb || '拍了拍'}了我${char.nudgeAISuffix || ''}`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() });
             remainingText = remainingText.replace(/\[戳一戳\][:：]?\s*/g, '').trim(); hasSystemAction = true;
+        }
+
+        // 🌟 解析 AI 的主动闹钟超能力（倒计时与定时发送）
+        let customAlarmMinutes = null;
+        if (/\[设置闹钟\][:：]?\s*(\d+(\.\d+)?)/.test(remainingText)) {
+            const match = remainingText.match(/\[设置闹钟\][:：]?\s*(\d+(\.\d+)?)/);
+            customAlarmMinutes = parseFloat(match[1]);
+            remainingText = remainingText.replace(/\[设置闹钟\][:：]?\s*\d+(\.\d+)?/, '').trim();
+        }
+        if (/\[定时发送\][:：]?\s*(\d{1,2}[:：]\d{2})/.test(remainingText)) {
+            const match = remainingText.match(/\[定时发送\][:：]?\s*(\d{1,2}[:：]\d{2})/);
+            const timeStr = match[1].replace('：', ':');
+            const [th, tm] = timeStr.split(':').map(Number);
+            const now = new Date();
+            let targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), th, tm, 0);
+            if (targetDate.getTime() <= now.getTime()) targetDate.setDate(targetDate.getDate() + 1); // 自动推延到明天
+            customAlarmMinutes = (targetDate.getTime() - now.getTime()) / 60000;
+            remainingText = remainingText.replace(/\[定时发送\][:：]?\s*\d{1,2}[:：]\d{2}/, '').trim();
+        }
+
+        // 🌟 如果解析到了闹钟，立刻向云端服务器投递定时唤醒任务！
+        if (customAlarmMinutes && customAlarmMinutes > 0) {
+            setTimeout(async () => {
+                try {
+                    const promptMsg = `(系统自动触发：你设定的 ${customAlarmMinutes < 60 ? Math.ceil(customAlarmMinutes) + '分钟' : (customAlarmMinutes/60).toFixed(1) + '小时'} 后的闹钟已到。请主动发消息找用户，可以叫醒ta或者提醒ta约定的事。注意：符合语境，直接说话，绝不许包含系统标签。)`;
+                    const tempHistory = [...chat.messages, { id: Date.now(), sender: store.personas[0].name, text: promptMsg, isMe: true, isHidden: true, msgType: 'text' }];
+                    const { buildLLMPayload } = await import('../utils/llm.js');
+                    const llmMessages = await buildLLMPayload(char.id, tempHistory, false, false, null, null);
+                    // 借用云端托管理由引擎
+                    planCloudBrain(customAlarmMinutes, char, llmMessages, chat.charId + '|' + char.id + '|0');
+                } catch(e) { console.error('智能闹钟投递失败', e); }
+            }, 1000);
         }
 
         if (isActive && typeof wxState !== 'undefined' && wxState.view === 'chatRoom') remainingText = remainingText.replace(/\*[^*]*\*/g, '').replace(/[(（][^)）]*[)）]/g, '').trim();
