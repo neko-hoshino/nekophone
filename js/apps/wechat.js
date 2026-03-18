@@ -4273,7 +4273,9 @@ window.syncCloudMailbox = async () => {
                     const { buildLLMPayload } = await import('../utils/llm.js');
                     const llmMessages = await buildLLMPayload(char.id, tempHistory, false, false, null, null);
                     // 借用云端托管理由引擎
-                    planCloudBrain(customAlarmMinutes, char, llmMessages, chat.charId + '|' + char.id + '|0');
+                    // 🌟 核心进化：在标识符前加上 'ALARM|' 前缀！
+// 这样云端就会把它当成一条完全独立的 VIP 线程，哪怕你们疯狂聊天，也绝不会打碎这个闹钟！
+planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '|' + char.id + '|0');
                 } catch(e) { console.error('智能闹钟投递失败', e); }
             }, 1000);
         }
