@@ -570,29 +570,6 @@ window.wxActions = {
     store.contacts.forEach(c => { if (c.groupId === groupId) c.groupId = 'default'; });
     window.render();
   },
-  rerollReply: (targetMsgId = null) => {
-    saveScroll();
-    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
-    if (!chat || chat.messages.length === 0) return;
-    if (targetMsgId) {
-        // 线下剧情的精准重roll：以你点击的这条消息为界，斩断它和后面的所有时间线
-        const targetIndex = chat.messages.findIndex(m => m.id === targetMsgId);
-        if (targetIndex > -1) {
-            chat.messages = chat.messages.slice(0, targetIndex);
-        }
-    } else {
-        // 经典的常规重roll：从最后一条开始往回删，直到露出你的上一句话
-        if (chat.messages[chat.messages.length - 1].isMe) return window.actions.showToast('只能重roll对方的回复哦');
-        while (chat.messages.length > 0 && !chat.messages[chat.messages.length - 1].isMe) {
-          chat.messages.pop();
-        }
-    }
-    wxState.showPlusMenu = false; 
-    wxState.activeMenuMsgId = null; // 顺手关掉长按菜单
-    window.render();
-    restoreScroll();
-    window.wxActions.getReply(); // 召唤大模型重新续写时间线
-  },
   // ================= 🚀 发起新聊天/群聊 向导动作 =================
   toggleNewChatModal: () => { 
     wxState.showNewChatModal = !wxState.showNewChatModal; 
@@ -3540,6 +3517,23 @@ export function renderWeChatApp(store) {
           </div>
         ` : ''}
 
+        ${wxState.showRerollModal ? `
+        <div class="mc-modal-overlay absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.wxActions.closeRerollModal()" ontouchstart="event.preventDefault(); window.wxActions.closeRerollModal()">
+            <div class="mc-modal-content bg-[#f6f6f6] w-full rounded-[24px] overflow-hidden shadow-2xl flex flex-col" onclick="event.stopPropagation()" ontouchstart="event.stopPropagation()">
+                <div class="px-6 pt-6 pb-4">
+                    <h3 class="text-[18px] font-extrabold text-gray-800 mb-2 flex items-center"><i data-lucide="refresh-cw" class="w-5 h-5 mr-2 text-blue-500"></i>定向重新生成</h3>
+                    <p class="text-[13px] text-gray-500 mb-4">告诉角色你希望它怎么修改这条回复（留空则默认按原语境重试）。</p>
+                    <textarea id="reroll-input" class="w-full h-24 bg-gray-50/50 border border-gray-200/60 rounded-xl p-3 text-[14px] text-gray-700 placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500/50 transition-all resize-none hide-scrollbar" placeholder="例如：语气再稍微温柔一点..."></textarea>
+                </div>
+                <div class="flex border-t border-gray-100/80 bg-gray-50/50">
+                    <button class="flex-1 py-3.5 text-[15px] font-bold text-gray-500 active:bg-gray-100 transition-colors" onclick="window.wxActions.closeRerollModal()" ontouchend="event.preventDefault(); window.wxActions.closeRerollModal()">取消</button>
+                    <div class="w-px bg-gray-100/80"></div>
+                    <button class="flex-1 py-3.5 text-[15px] font-extrabold text-blue-500 active:bg-blue-50 transition-colors" onclick="window.wxActions.submitReroll()" ontouchend="event.preventDefault(); window.wxActions.submitReroll()">确认</button>
+                </div>
+            </div>
+        </div>
+        ` : ''}
+
         ${wxState.showInnerThoughtModal ? (() => {
             const charId = wxState.showInnerThoughtModal;
             const chat = store.chats.find(c => c.charId === charId);
@@ -4110,6 +4104,96 @@ const planCloudBrain = async (delayMinutes, char, llmMessages, routingId) => {
       throw new Error(errData.error || `云端服务器拒绝了请求 (HTTP状态码: ${res.status})`);
   }
 };
+
+// ==================== 🌟 终极定向重roll 引擎 (兼容经典退回逻辑) ====================
+
+window.wxActions.rerollReply = (msgId) => {
+    wxState.rerollTargetId = msgId; // 如果是线上 + 号菜单触发，这里就是 undefined，完美兼容！
+    wxState.showRerollModal = true;
+    
+    // 关掉所有可能碍事的菜单 (修正为正确的状态变量名)
+    window.wxActions.closeContextMenu(); 
+    wxState.showPlusMenu = false; 
+    wxState.showEmojiMenu = false;
+    
+    if (typeof window.render === 'function') window.render();
+};
+
+window.wxActions.closeRerollModal = () => {
+    wxState.showRerollModal = false;
+    if (typeof window.render === 'function') window.render();
+};
+
+window.wxActions.submitReroll = async () => {
+    const msgId = wxState.rerollTargetId;
+    const inputEl = document.getElementById('reroll-input');
+    const requirement = inputEl ? inputEl.value.trim() : '';
+    window.wxActions.closeRerollModal();
+
+    // 1. 找到当前聊天的 Chat 对象
+    let chat;
+    if (msgId) {
+        chat = store.chats.find(c => c.messages.some(m => m.id === msgId));
+    } else {
+        chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    }
+    if (!chat || chat.messages.length === 0) return;
+
+    // 2. 完美还原你的经典删除逻辑！
+    if (msgId) {
+        // 【线下剧情模式】的精准重roll：以你点击的这条消息为界，斩断它和后面的所有时间线
+        const targetIndex = chat.messages.findIndex(m => m.id === msgId);
+        if (targetIndex > -1) {
+            chat.messages = chat.messages.slice(0, targetIndex);
+        }
+    } else {
+        // 【线上模式】的常规重roll：从最后一条开始往回删，直到露出你的上一句话
+        if (chat.messages[chat.messages.length - 1].isMe) {
+            return window.actions.showToast('只能重roll对方的回复哦');
+        }
+        while (chat.messages.length > 0 && !chat.messages[chat.messages.length - 1].isMe) {
+            chat.messages.pop();
+        }
+    }
+
+    // 3. 亮起“正在输入中...”的指示灯
+    wxState.typingStatus = wxState.typingStatus || {};
+    wxState.typingStatus[chat.charId] = true;
+    if (typeof window.render === 'function') window.render();
+    if (window.wxActions && window.wxActions.scrollToBottom) window.wxActions.scrollToBottom();
+
+    try {
+        const { buildLLMPayload } = await import('../utils/llm.js');
+        const parts = chat.charId.split('|');
+        const charId = parts.length > 1 ? parts[1] : parts[0];
+        const char = store.contacts.find(c => c.id === charId);
+        
+        let tempHistory = [...chat.messages];
+        
+        // 🌟 核心魔法：偷偷给大模型塞一张“导演纸条”
+        if (requirement) {
+            tempHistory.push({
+                id: Date.now(),
+                sender: store.personas[0].name, 
+                text: `(系统提示：用户对你的上一条回复不满意，要求重新生成。用户的修改要求是：“${requirement}”。请直接输出修改后的回复，绝不允许包含这句系统标签和任何多余的解释！)`,
+                isMe: true,
+                isHidden: true, 
+                msgType: 'text'
+            });
+        }
+
+        // 修正为准确的线下模式判定名
+        const isOffline = wxState.view === 'offlineStory';
+        const llmMessages = await buildLLMPayload(char.id, tempHistory, isOffline, false, chat.isGroup ? chat : null, null);
+        
+        // 发送给云端代跑
+        await planCloudBrain(0, char, llmMessages, chat.charId + '|' + char.id + '|' + (isOffline ? '1' : '0'));
+    } catch (e) {
+        console.error('重roll请求失败', e);
+        wxState.typingStatus[chat.charId] = false;
+        if (typeof window.render === 'function') window.render();
+    }
+};
 // ==================== 以下代码必须放在 wechat.js 的最最最底部 ====================
 
 window.syncCloudMailbox = async () => {
@@ -4123,6 +4207,12 @@ window.syncCloudMailbox = async () => {
         headers: { 'Content-Type': 'application/json', 'x-secret-token': localStorage.getItem('neko_server_pwd') || '' },
         body: JSON.stringify({ endpoint: sub.endpoint })
     });
+    // 🌟 核心防爆装甲：如果自己的服务器重启或 Nginx 返回了 HTML，静默拦截，不再报错死机！
+    if (!res.ok) {
+        const errText = await res.text();
+        console.warn(`[系统] 信箱同步暂时受阻 (HTTP ${res.status})，服务器可能正在重启或被 Nginx 拦截。详情:`, errText.substring(0, 80));
+        return; // 直接退出，等下个15秒再试，绝不强行 parse JSON！
+    }
     const data = await res.json();
     if (!data.messages || data.messages.length === 0) return;
 
