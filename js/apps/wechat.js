@@ -86,7 +86,26 @@ async function fetchMinimaxVoice(text, voiceId) {
 async function triggerAutoMemory(charId, msgs) {
   if (!store.apiConfig?.apiKey) return;
   try {
-    const logText = msgs.map(m => `${m.sender}: ${m.msgType==='text' ? m.text : '[' + m.msgType + ']'}`).join('\n');
+    // 🌟 修复：动态获取绑定的马甲名字，并正确解析多媒体消息
+    const char = store.contacts.find(c => c.id === charId);
+    const chat = store.chats.find(c => c.charId === charId);
+    const pId = (chat?.isGroup ? chat.boundPersonaId : char?.boundPersonaId) || store.personas[0].id;
+    const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
+    const myName = boundPersona.name;
+    const defaultName = store.personas[0].name;
+
+    const logText = msgs.map(m => {
+        let senderName = m.sender === defaultName ? myName : m.sender;
+        let content = m.text;
+        if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
+        else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
+        else if (m.msgType === 'location') content = `[定位] ${m.text}`;
+        else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
+        else if (m.msgType === 'real_image') content = `[真实照片]`;
+        else if (m.msgType === 'emoji') content = `[表情包]`;
+        else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
+        return `${senderName}: ${content}`;
+    }).join('\n');
     
     const promptStr = `【后台任务】请判断以下近期的对话记录中，是否包含剧情进展、情感转折或新设定。
 如果只是毫无营养的日常闲聊（如早安、吃了吗等），请务必只输出“无”这一个字。
@@ -910,15 +929,32 @@ window.wxActions = {
     window.render();
     try {
       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+      const char = store.contacts.find(c => c.id === wxState.activeChatId);
       // 过滤掉系统消息，只取真实的对话
       const validMsgs = chat.messages.filter(m => !m.isHidden && !(m.msgType || '').includes('system'));
-      // 直接精确截取指定条数的消息
       const msgCount = wxState.extractMemoryConfig.msgCount;
       const msgs = validMsgs.slice(-msgCount);
-      const logText = msgs.map(m => `${m.sender}: ${m.msgType==='text' ? m.text : '[' + m.msgType + ']'}`).join('\n');
-      
-      const promptStr = `【任务】请提取并总结以下对话记录。\n要求：${wxState.extractMemoryConfig.type === 'core' ? '总结出这段对话中体现的【核心人物关系】或【不可磨灭的重大背景状态】。' : '客观地总结刚刚这段剧情中【发生了什么事】。'}\n直接输出总结内容，不加引号，不带“总结”、“这段对话”等废话，务必控制在50字以内。\n\n【对话记录】\n${logText}`;
 
+      // 🌟 修复：动态获取绑定的马甲名字，并还原多媒体消息的描述
+      const pId = chat.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+      const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
+      const myName = boundPersona.name;
+      const defaultName = store.personas[0].name;
+
+      const logText = msgs.map(m => {
+          let senderName = m.sender === defaultName ? myName : m.sender;
+          let content = m.text;
+          if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
+          else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
+          else if (m.msgType === 'location') content = `[定位] ${m.text}`;
+          else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
+          else if (m.msgType === 'real_image') content = `[真实照片]`;
+          else if (m.msgType === 'emoji') content = `[表情包]`;
+          else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
+          return `${senderName}: ${content}`;
+      }).join('\n');
+        
+      const promptStr = `【任务】请提取并总结以下对话记录。\n要求：${wxState.extractMemoryConfig.type === 'core' ? '总结出这段对话中体现的【核心人物关系】或【不可磨灭的重大背景状态】。' : '客观地总结刚刚这段剧情中【发生了什么事】。'}\n直接输出总结内容，不加引号，不带“总结”、“这段对话”等废话，务必控制在50字以内。\n(注：用户的名字是 ${myName})\n\n【对话记录】\n${logText}`;
       const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
           body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.3 })
@@ -1816,8 +1852,17 @@ window.wxActions = {
           }
 
           const { buildLLMPayload } = await import('../utils/llm.js');
+          // 🌟 修复：发送给大模型前，把纯文本的描述还原成带有标签的特殊格式，让 AI 知道这是多媒体消息！
+          const tempHistory = chat.messages.map(m => {
+              let formattedText = m.text;
+              if (m.msgType === 'virtual_image') formattedText = `[发送了一张虚拟照片] 画面描述：${m.text}`;
+              else if (m.msgType === 'voice') formattedText = `[发送了一条语音] 语音内容：${m.text}`;
+              else if (m.msgType === 'location') formattedText = `[发送了一个定位] 位置信息：${m.text}`;
+              return { ...m, text: formattedText };
+          });
+
           // 🌟 把抓到的 readingInfo 传给大模型
-          const llmMessages = await buildLLMPayload(charId, chat.messages, isOffline, isCall, groupInfo, readingInfo);
+          const llmMessages = await buildLLMPayload(charId, tempHistory, isOffline, isCall, groupInfo, readingInfo);
           
           // 🌟 满足你的硬核架构：全面交由云端排队代跑！
           if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
@@ -2736,7 +2781,9 @@ export function renderWeChatApp(store) {
                      if ((line.startsWith('“') && line.endsWith('”')) || (line.startsWith('"') && line.endsWith('"')) || (line.startsWith('「') && line.endsWith('」'))) {
                          return `<p class="mc-offline-dialogue my-2.5 leading-relaxed">${line}</p>`;
                      } else if (line.startsWith('（') && line.endsWith('）')) {
-                         return `<p class="mc-offline-thought my-2.5 leading-relaxed">${line}</p>`;
+                         // 🌟 极致美学：用 slice(1, -1) 物理切除前后的括号，只把纯净的心声文字渲染出来！
+                         const pureThought = line.slice(1, -1);
+                         return `<p class="mc-offline-thought my-2.5 leading-relaxed">${pureThought}</p>`;
                      } else {
                          return `<p class="mc-offline-desc my-1.5 leading-relaxed">${line}</p>`;
                      }
@@ -4157,7 +4204,14 @@ window.scheduleCloudTask = async (charId) => {
 
     try {
         const { buildLLMPayload } = await import('../utils/llm.js');
-        let tempHistory = [...chat.messages];
+        // 🌟 修复：把纯文本的描述还原成带有标签的特殊格式
+        let tempHistory = chat.messages.map(m => {
+            let formattedText = m.text;
+            if (m.msgType === 'virtual_image') formattedText = `[发送了一张虚拟照片] 画面描述：${m.text}`;
+            else if (m.msgType === 'voice') formattedText = `[发送了一条语音] 语音内容：${m.text}`;
+            else if (m.msgType === 'location') formattedText = `[发送了一个定位] 位置信息：${m.text}`;
+            return { ...m, text: formattedText };
+        });
         
         // 🌟 手机前端时间判定：0点到8点免打扰！
         const now = new Date();
@@ -4252,7 +4306,14 @@ window.wxActions.submitReroll = async () => {
         const charId = parts.length > 1 ? parts[1] : parts[0];
         const char = store.contacts.find(c => c.id === charId);
         
-        let tempHistory = [...chat.messages];
+        // 🌟 修复：把纯文本的描述还原成带有标签的特殊格式
+        let tempHistory = chat.messages.map(m => {
+            let formattedText = m.text;
+            if (m.msgType === 'virtual_image') formattedText = `[发送了一张虚拟照片] 画面描述：${m.text}`;
+            else if (m.msgType === 'voice') formattedText = `[发送了一条语音] 语音内容：${m.text}`;
+            else if (m.msgType === 'location') formattedText = `[发送了一个定位] 位置信息：${m.text}`;
+            return { ...m, text: formattedText };
+        });
         
         // 🌟 核心魔法：偷偷给大模型塞一张“导演纸条”
         if (requirement) {
@@ -4303,7 +4364,13 @@ window.syncCloudMailbox = async () => {
     // 🌟 核心升级：使用 for...of 保证语音和打字延迟能够“顺序执行”
     for (const msg of data.messages) {
         if (!msg.charId) continue;
-        const parts = msg.charId.split('|');
+        
+        // 🌟 史诗级修复：剥离 AUTO| 和 ALARM| 前缀，防止找不到聊天室导致消息被无情吞噬！
+        let rawCharId = msg.charId;
+        if (rawCharId.startsWith('AUTO|')) rawCharId = rawCharId.substring(5);
+        if (rawCharId.startsWith('ALARM|')) rawCharId = rawCharId.substring(6);
+        
+        const parts = rawCharId.split('|');
         const chatId = parts[0];
         const charId = parts[1] || chatId;
         const isOffline = parts[2] === '1';
@@ -4561,9 +4628,9 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
                 try { new Audio(store.appearance?.newMsgSound || 'https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3').play().catch(()=>{}); } catch(e) {}
             }
 
-            // 完美的排队延迟感（如果切到后台则秒发）
+            // 🌟 削减做作的排队延迟，极速上屏！
             if (i < finalMsgs.length - 1 && !callAudioPlayed && !document.hidden) {
-                await new Promise(resolve => setTimeout(resolve, Math.min(Math.max(newMsg.text.length * 60, 600), 2500)));
+                await new Promise(resolve => setTimeout(resolve, 300));
             }
         }
         
@@ -4574,6 +4641,6 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
 };
 
 window.checkAutoMsg = async () => {}; 
-setInterval(window.syncCloudMailbox, 15000); 
+setInterval(window.syncCloudMailbox, 5000); // 🌟 加快信箱拉取频率，告别慢半拍！ 
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') window.syncCloudMailbox(); });
 window.addEventListener('load', () => { setTimeout(window.syncCloudMailbox, 2000); });
