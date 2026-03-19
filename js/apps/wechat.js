@@ -414,8 +414,13 @@ window.wxActions = {
   // 去掉自动获取回复的逻辑，让它像文字一样可以暂存
   sendEmoji: (url, name = '表情') => {
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    // 🌟 获取正确的马甲名字
+        // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
+      const charObj = store.contacts.find(c => c.id === chat.charId);
+      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
     if (chat) {
-      chat.messages.push({ id: Date.now(), sender: store.personas[0].name, text: `[表情包] ${name}`, imageUrl: url, isMe: true, source: 'wechat', isOffline: false, msgType: 'emoji', time: getNowTime() });
+      chat.messages.push({ id: Date.now(), sender: boundPersona.name, text: `[表情包] ${name}`, imageUrl: url, isMe: true, source: 'wechat', isOffline: false, msgType: 'emoji', time: getNowTime() });
       wxState.showEmojiMenu = false; window.render(); window.wxActions.scrollToBottom();
     }
   },
@@ -866,10 +871,14 @@ window.wxActions = {
     } else {
       // 生成微信原生的聊天记录卡片数据
       const sourceCharName = store.contacts.find(c => c.id === sourceChat.charId)?.name || '对方';
-      const title = store.personas[0].name + '与' + sourceCharName + '的聊天记录';
-      
+      // 🌟 获取正确的马甲名字
+      // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
+      const charObj = store.contacts.find(c => c.id === chat.charId);
+      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+      const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
+      const title = boundPersona.name + '与' + sourceCharName + '的聊天记录';
       const previewLines = msgsToForward.slice(0, 4).map(m => {
-        let senderName = m.isMe ? store.personas[0].name : sourceCharName;
+        let senderName = m.isMe ? boundPersona.name : sourceCharName;
         let content = m.text;
         if (m.msgType === 'emoji' || m.msgType === 'real_image') content = '[图片]';
         if (m.msgType === 'voice') content = '[语音]';
@@ -880,13 +889,13 @@ window.wxActions = {
       }).join('\n');
 
       const fullContent = msgsToForward.map(m => {
-        let senderName = m.isMe ? store.personas[0].name : sourceCharName;
+        let senderName = m.isMe ? boundPersona.name : sourceCharName;
         return `${senderName}: ${m.text}`;
       }).join('\n');
       
       targetChat.messages.push({
         id: Date.now(), 
-        sender: store.personas[0].name,
+        sender: boundPersona.name,
         text: `[聊天记录详细内容]\n${fullContent}`,
         isMe: true, 
         source: 'wechat', 
@@ -928,33 +937,33 @@ window.wxActions = {
     wxState.isExtracting = true;
     window.render();
     try {
-      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
-      const char = store.contacts.find(c => c.id === wxState.activeChatId);
-      // 过滤掉系统消息，只取真实的对话
-      const validMsgs = chat.messages.filter(m => !m.isHidden && !(m.msgType || '').includes('system'));
-      const msgCount = wxState.extractMemoryConfig.msgCount;
-      const msgs = validMsgs.slice(-msgCount);
+        const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+        const char = store.contacts.find(c => c.id === wxState.activeChatId);
+        // 过滤掉系统消息，只取真实的对话
+        const validMsgs = chat.messages.filter(m => !m.isHidden && !(m.msgType || '').includes('system'));
+        const msgCount = wxState.extractMemoryConfig.msgCount;
+        const msgs = validMsgs.slice(-msgCount);
 
-      // 🌟 修复：动态获取绑定的马甲名字，并还原多媒体消息的描述
-      const pId = chat.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
-      const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
-      const myName = boundPersona.name;
-      const defaultName = store.personas[0].name;
+        // 🌟 修复：动态获取绑定的马甲名字，并还原多媒体消息的描述
+        const pId = chat.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
+        const myName = boundPersona.name;
+        const defaultName = store.personas[0].name;
 
-      const logText = msgs.map(m => {
-          let senderName = m.sender === defaultName ? myName : m.sender;
-          let content = m.text;
-          if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
-          else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
-          else if (m.msgType === 'location') content = `[定位] ${m.text}`;
-          else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
-          else if (m.msgType === 'real_image') content = `[真实照片]`;
-          else if (m.msgType === 'emoji') content = `[表情包]`;
-          else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
-          return `${senderName}: ${content}`;
-      }).join('\n');
+        const logText = msgs.map(m => {
+            let senderName = m.sender === defaultName ? myName : m.sender;
+            let content = m.text;
+            if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
+            else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
+            else if (m.msgType === 'location') content = `[定位] ${m.text}`;
+            else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
+            else if (m.msgType === 'real_image') content = `[真实照片]`;
+            else if (m.msgType === 'emoji') content = `[表情包]`;
+            else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
+            return `${senderName}: ${content}`;
+        }).join('\n');
         
-      const promptStr = `【任务】请提取并总结以下对话记录。\n要求：${wxState.extractMemoryConfig.type === 'core' ? '总结出这段对话中体现的【核心人物关系】或【不可磨灭的重大背景状态】。' : '客观地总结刚刚这段剧情中【发生了什么事】。'}\n直接输出总结内容，不加引号，不带“总结”、“这段对话”等废话，务必控制在50字以内。\n(注：用户的名字是 ${myName})\n\n【对话记录】\n${logText}`;
+        const promptStr = `【任务】请提取并总结以下对话记录。\n要求：${wxState.extractMemoryConfig.type === 'core' ? '总结出这段对话中体现的【核心人物关系】或【不可磨灭的重大背景状态】。' : '客观地总结刚刚这段剧情中【发生了什么事】。'}\n直接输出总结内容，不加引号，不带“总结”、“这段对话”等废话，务必控制在50字以内。\n(注：用户的名字是 ${myName})\n\n【对话记录】\n${logText}`;
       const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
           body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.3 })
@@ -1271,7 +1280,12 @@ window.wxActions = {
   toggleMomentMenu: (id) => { saveScroll(); wxState.activeMomentMenuId = wxState.activeMomentMenuId === id ? null : id; window.render(); restoreScroll(); },
   likeMoment: (id) => {
     saveScroll();
-    const m = store.moments.find(x => x.id === id); const myName = store.personas[0].name;
+    // 🌟 获取正确的马甲名字
+        // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
+      const charObj = store.contacts.find(c => c.id === chat.charId);
+      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
+    const m = store.moments.find(x => x.id === id); const myName = boundPersona.name;
     if (m.likes.includes(myName)) m.likes = m.likes.filter(n => n !== myName); else m.likes.push(myName);
     wxState.activeMomentMenuId = null; window.render(); restoreScroll();
   },
@@ -1280,7 +1294,7 @@ window.wxActions = {
   submitMomentComment: async () => {
     saveScroll(); // 锁定滚动
     const text = document.getElementById('moment-comment-input').value.trim(); if (!text) return;
-    const m = store.moments.find(x => x.id === wxState.momentInput.momentId); const my = store.personas[0];
+    const m = store.moments.find(x => x.id === wxState.momentInput.momentId); const my = boundPersona;
     m.comments.push({ id: Date.now(), senderId: my.id, senderName: my.name, replyTo: wxState.momentInput.replyTo, text: text });
     const replyTarget = wxState.momentInput.replyTo; wxState.momentInput.active = false; window.render(); restoreScroll();
     
@@ -1545,8 +1559,13 @@ window.wxActions = {
           quoteData = { sender: qMsg.sender, text: shortText };
         }
       }
+      // 🌟 动态获取当前马甲
+      // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
+      const charObj = store.contacts.find(c => c.id === chat.charId);
+      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+      const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
       chat.messages.push({
-        id: Date.now(), sender: store.personas[0].name, text: text,
+        id: Date.now(), sender: boundPersona.name, text: text,
         isMe: true, source: 'wechat', 
         isOffline: isOffline, 
         isCallMsg: isCall, msgType: 'text', time: getNowTime(),
@@ -1585,8 +1604,13 @@ window.wxActions = {
     const file = event.target.files[0]; if (!file) return;
     window.actions.compressImage(file, (base64) => {
       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+      // 🌟 获取正确的马甲名字
+        // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
+      const charObj = store.contacts.find(c => c.id === chat.charId);
+      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
       if (chat) {
-        chat.messages.push({ id: Date.now(), sender: store.personas[0].name, text: '发送了一张真实照片', imageUrl: base64, isMe: true, source: 'wechat', isOffline: false, msgType: 'real_image', time: getNowTime() });
+        chat.messages.push({ id: Date.now(), sender: boundPersona.name, text: '发送了一张真实照片', imageUrl: base64, isMe: true, source: 'wechat', isOffline: false, msgType: 'real_image', time: getNowTime() });
         wxState.showPlusMenu = false; window.render(); window.wxActions.scrollToBottom();
       }
     });
@@ -1597,6 +1621,11 @@ window.wxActions = {
     saveScroll(); // 修复弹窗操作导致的滚动跳跃
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     const msg = chat.messages.find(m => m.id === wxState.activeTransferId);
+    // 🌟 获取正确的马甲名字
+        // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
+      const charObj = store.contacts.find(c => c.id === chat.charId);
+      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
     if (!msg) return;
 
     msg.transferState = action === 'accept' ? 'accepted' : 'returned';
@@ -1606,7 +1635,7 @@ window.wxActions = {
       if (msg.isMe) { store.wallet.balance -= amount; store.wallet.transactions.push({ type: 'out', amount, title: `转账给对方`, date: new Date().toISOString() });
       } else { store.wallet.balance += amount; store.wallet.transactions.push({ type: 'in', amount, title: `收到转账`, date: new Date().toISOString() }); }
     }
-    const sysText = action === 'accept' ? `${msg.isMe ? '对方' : store.personas[0].name} 已收款` : `${msg.isMe ? '对方' : store.personas[0].name} 已退还了转账`;
+    const sysText = action === 'accept' ? `${msg.isMe ? '对方' : boundPersona.name} 已收款` : `${msg.isMe ? '对方' : boundPersona.name} 已退还了转账`;
     chat.messages.push({ id: Date.now(), sender: 'system', text: sysText, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
     wxState.activeTransferId = null; window.render(); restoreScroll();
   },
@@ -1614,12 +1643,17 @@ window.wxActions = {
   sendVirtualMedia: () => {
     // 发送消息不需要记忆位置，直接滚到底部
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    // 🌟 获取正确的马甲名字
+        // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
+      const charObj = store.contacts.find(c => c.id === chat.charId);
+      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
     if (!chat) return;
     if (wxState.virtualModalType === 'transfer') {
       const amount = document.getElementById('transfer-amount').value.trim();
       const note = document.getElementById('transfer-note').value.trim() || '转账';
       if (!amount || isNaN(amount) || Number(amount) <= 0) return window.actions.showToast('请输入有效的金额！');
-      chat.messages.push({ id: Date.now(), sender: store.personas[0].name, text: `[发起转账] 金额：${amount}元，备注：${note}`, transferData: { amount, note }, transferState: 'pending', isMe: true, source: 'wechat', isOffline: false, msgType: 'transfer', time: getNowTime() });
+      chat.messages.push({ id: Date.now(), sender: boundPersona.name, text: `[发起转账] 金额：${amount}元，备注：${note}`, transferData: { amount, note }, transferState: 'pending', isMe: true, source: 'wechat', isOffline: false, msgType: 'transfer', time: getNowTime() });
     } else {
       const input = document.getElementById('virtual-input');
       const desc = input.value.trim();
@@ -1630,7 +1664,7 @@ window.wxActions = {
       if (wxState.virtualModalType === 'voice') mType = 'voice';
       if (wxState.virtualModalType === 'location') mType = 'location'; // 🌟 发送定位
       
-      chat.messages.push({ id: Date.now(), sender: store.personas[0].name, text: desc, isMe: true, source: 'wechat', isOffline: false, msgType: mType, time: getNowTime() });
+      chat.messages.push({ id: Date.now(), sender: boundPersona.name, text: desc, isMe: true, source: 'wechat', isOffline: false, msgType: mType, time: getNowTime() });
     }
     wxState.virtualModalType = 'none'; 
     window.render(); 
@@ -1772,6 +1806,11 @@ window.wxActions = {
   getReply: async (isAuto = false, targetSpeakerId = null, customPrompt = null, preGeneratedText = null, explicitChatId = null, explicitIsOffline = null) => {
     const chatId = explicitChatId || wxState.activeChatId;
     const chat = store.chats.find(c => c.charId === chatId);
+    // 🌟 获取正确的马甲名字
+        // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
+      const charObj = store.contacts.find(c => c.id === chat.charId);
+      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
     if (!chat) return;
 
     let charId = targetSpeakerId;
@@ -1802,7 +1841,7 @@ window.wxActions = {
     if (isAuto || customPrompt) {
       hiddenMsgId = Date.now();
       chat.messages.push({ 
-        id: hiddenMsgId, sender: store.personas[0].name, 
+        id: hiddenMsgId, sender: boundPersona.name, 
         text: customPrompt || "(系统自动触发：请主动搭话)", 
         isMe: true, source: 'wechat', isOffline: isOffline, msgType: 'text', isHidden: true 
       });
@@ -4188,6 +4227,11 @@ const planCloudBrain = async (delayMinutes, char, llmMessages, routingId) => {
 // 🌟 终极时空巡逻员：由手机前端判断时间，绝对没有时差！
 window.scheduleCloudTask = async (charId) => {
     const chat = store.chats.find(c => c.charId === charId);
+    // 🌟 获取正确的马甲名字
+        // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
+      const charObj = store.contacts.find(c => c.id === chat.charId);
+      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
     if (!chat) return;
     
     let speakerChar = null;
@@ -4223,13 +4267,13 @@ window.scheduleCloudTask = async (charId) => {
             delayMinutes = (targetDate.getTime() - now.getTime()) / 60000;
             
             tempHistory.push({
-                id: Date.now(), sender: store.personas[0].name,
+                id: Date.now(), sender: boundPersona.name,
                 text: `(系统强制插播：现在已经是第二天早上8点多了，免打扰模式结束。请立刻根据你的设定和昨晚的聊天上下文，自然地跟用户发个早安！绝对不要在回复中带有系统提示标签，直接像真人一样说话。)`,
                 isMe: true, isHidden: true, msgType: 'text'
             });
         } else {
             tempHistory.push({
-                id: Date.now(), sender: store.personas[0].name,
+                id: Date.now(), sender: boundPersona.name,
                 text: `(系统自动触发：用户已经有 ${Math.round(delayMinutes)} 分钟没有理你了。请结合当前语境主动发一条消息找用户搭话。符合你的性格，可以直接开启新话题，绝不可包含系统标签。)`,
                 isMe: true, isHidden: true, msgType: 'text'
             });
@@ -4305,6 +4349,11 @@ window.wxActions.submitReroll = async () => {
         const parts = chat.charId.split('|');
         const charId = parts.length > 1 ? parts[1] : parts[0];
         const char = store.contacts.find(c => c.id === charId);
+        // 🌟 获取正确的马甲名字
+        // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
+      const charObj = store.contacts.find(c => c.id === chat.charId);
+      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
         
         // 🌟 修复：把纯文本的描述还原成带有标签的特殊格式
         let tempHistory = chat.messages.map(m => {
@@ -4319,7 +4368,7 @@ window.wxActions.submitReroll = async () => {
         if (requirement) {
             tempHistory.push({
                 id: Date.now(),
-                sender: store.personas[0].name, 
+                sender: boundPersona.name, 
                 text: `(系统提示：用户对你的上一条回复不满意，要求重新生成。用户的修改要求是：“${requirement}”。请直接输出修改后的回复，绝不允许包含这句系统标签和任何多余的解释！也不允许把这句话当成用户说的话来回复！)`,
                 isMe: true,
                 isHidden: true, 
@@ -4504,13 +4553,17 @@ window.syncCloudMailbox = async () => {
             customAlarmMinutes = (targetDate.getTime() - now.getTime()) / 60000;
             remainingText = remainingText.replace(/\[定时发送\][:：]?\s*\d{1,2}[:：]\d{2}/, '').trim();
         }
-
+        // 🌟 获取正确的马甲名字
+        // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
+      const charObj = store.contacts.find(c => c.id === chat.charId);
+      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
         // 🌟 如果解析到了闹钟，立刻向云端服务器投递定时唤醒任务！
         if (customAlarmMinutes && customAlarmMinutes > 0) {
             setTimeout(async () => {
                 try {
                     const promptMsg = `(系统自动触发：你设定的 ${customAlarmMinutes < 60 ? Math.ceil(customAlarmMinutes) + '分钟' : (customAlarmMinutes/60).toFixed(1) + '小时'} 后的闹钟已到。请主动发消息找用户，可以叫醒ta或者提醒ta约定的事。注意：符合语境，直接说话，绝不许包含系统标签。)`;
-                    const tempHistory = [...chat.messages, { id: Date.now(), sender: store.personas[0].name, text: promptMsg, isMe: true, isHidden: true, msgType: 'text' }];
+                    const tempHistory = [...chat.messages, { id: Date.now(), sender: boundPersona.name, text: promptMsg, isMe: true, isHidden: true, msgType: 'text' }];
                     const { buildLLMPayload } = await import('../utils/llm.js');
                     const llmMessages = await buildLLMPayload(char.id, tempHistory, false, false, null, null);
                     // 借用云端托管理由引擎
