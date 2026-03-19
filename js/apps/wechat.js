@@ -304,7 +304,7 @@ window.wxActions = {
           char.isBlocked = true;
           if (chat) chat.messages.push({ id: Date.now(), sender: 'system', text: `已将${char.name}拉入黑名单`, isMe: true, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
           window.render();
-          window.wxActions.getReply(true, char.id, '(系统指令：你被用户拉黑了！你的消息将被拒收，请立即发消息并附带好友申请拼命试图挽回用户。⚠️警告：情绪要到位，必须分段换行，绝不可输出任何系统标签！)');
+          window.wxActions.getReply(true, char.id, '(系统指令：你被用户拉黑了！你的消息将被拒收，请立即输出 [发送好友申请] 指令，并附带你想挽回的话。⚠️警告：情绪要到位，必须分段换行，绝不可输出任何系统标签！)');
       }
   },
   handleFriendReq: (msgId, isAccept) => {
@@ -1401,7 +1401,23 @@ window.wxActions = {
     }
     window.actions.showToast('身份保存成功'); wxState.view = 'personaManage'; window.render(); restoreScroll();
   },
-  
+ // 🌟 补齐遗失的删除马甲引擎！
+  deletePersona: (id) => {
+    if (id === store.personas[0].id) return window.actions.showToast('默认主身份不能删除哦！');
+    if (!confirm('确定删除该身份吗？之前绑定了此身份的角色，将自动恢复成主身份。')) return;
+      
+    saveScroll();
+    // 1. 删除马甲
+    store.personas = store.personas.filter(p => p.id !== id);
+    // 2. 遍历通讯录和聊天室，把绑定了这个马甲的人打回原形
+    store.contacts.forEach(c => { if (c.boundPersonaId === id) c.boundPersonaId = store.personas[0].id; });
+    store.chats.forEach(c => { if (c.boundPersonaId === id) c.boundPersonaId = store.personas[0].id; });
+      
+    wxState.editingPersonaId = null;
+    wxState.view = 'personaManage';
+    window.render();
+    restoreScroll();
+  },
   // 表情包库动作
   addEmojiLib: () => { store.emojiLibs = store.emojiLibs || []; store.emojiLibs.push({ id: 'el_' + Date.now(), name: '新表情包库', emojis: [] }); window.render(); },
   renameEmojiLib: (id, name) => { const lib = store.emojiLibs.find(l => l.id === id); if (lib) lib.name = name; },
@@ -1580,13 +1596,23 @@ window.wxActions = {
       const charObj = store.contacts.find(c => c.id === chat.charId);
       const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
       const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
+      const isIntercepted = charObj?.isBlockedByChar === true;
       chat.messages.push({
         id: Date.now(), sender: boundPersona.name, text: text,
         isMe: true, source: 'wechat', 
         isOffline: isOffline, 
         isCallMsg: isCall, msgType: 'text', time: getNowTime(),
-        quote: quoteData
+        quote: quoteData,
+        isIntercepted: isIntercepted // 🌟 记录是否被拒收
       });
+      
+      // 🌟 如果被拉黑了，不仅要在消息旁边画感叹号，还要弹出经典的微信红色字！
+      if (isIntercepted && wxState.view === 'chatRoom') {
+          setTimeout(() => {
+              chat.messages.push({ id: Date.now()+1, sender: 'system', text: '消息已发出，但被对方拒收了。', isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
+              window.render(); window.wxActions.scrollToBottom();
+          }, 400);
+      }
       input.value = ''; 
       wxState.quoteMsgId = null; 
       saveScroll();
@@ -1915,6 +1941,15 @@ window.wxActions = {
               else if (m.msgType === 'location') formattedText = `[发送了一个定位] 位置信息：${m.text}`;
               return { ...m, text: formattedText };
           });
+
+          // 🌟 实时塞入“发送好友申请”的求饶说明书
+          if (char.isBlocked) {
+              tempHistory.push({
+                  id: Date.now(), sender: 'system',
+                  text: `(⚠️系统警告：你当前已被用户拉黑！请务必在回复的开头使用 [发送好友申请] 指令来发送验证卡片乞求原谅，否则你发出的消息将带上红色感叹号且完全无法被用户收到！)`,
+                  isMe: true, isHidden: true, msgType: 'text'
+              });
+          }
 
           // 🌟 把抓到的 readingInfo 传给大模型
           const llmMessages = await buildLLMPayload(charId, tempHistory, isOffline, isCall, groupInfo, readingInfo);
@@ -3174,6 +3209,9 @@ export function renderWeChatApp(store) {
         contentHtml = `
           <div class="w-full p-4 mc-html-render-box relative text-[14px] text-gray-800 leading-relaxed">
              <style>
+               /* 🌟 免疫血清：无视大模型的代码回车缩进，强制回归标准 HTML 连贯排版！ */
+               .mc-html-render-box { white-space: normal !important; word-break: break-word !important; }
+               
                .mc-html-render-box button { background-color: #f3f4f6; color: #374151; padding: 6px 14px; border-radius: 8px; font-weight: bold; border: 1px solid #e5e7eb; cursor: pointer; transition: all 0.2s; box-shadow: 0 1px 2px rgba(0,0,0,0.05); }
                .mc-html-render-box button:active { transform: scale(0.95); background-color: #e5e7eb; }
                .mc-html-render-box input { border: 1px solid #d1d5db; border-radius: 8px; padding: 6px 10px; outline: none; width: 100%; box-sizing: border-box; }
@@ -3322,6 +3360,8 @@ export function renderWeChatApp(store) {
         <div class="flex-1 flex items-start ${msg.isMe ? 'justify-end' : 'justify-start'} pointer-events-${wxState.isMultiSelecting ? 'none' : 'auto'}">
           ${!msg.isMe ? `<div class="mc-avatar w-10 h-10 bg-[var(--bubble-char-bg)] rounded-full overflow-hidden flex items-center justify-center text-xl mr-2 shadow-sm flex-shrink-0 cursor-pointer" onclick="window.wxActions.handleAvatarClick('${senderChar?.id}')" style="font-family: var(--system-font)">${getVidHtml(senderAvatar, '', false)}</div>` : ''}
           
+          ${msg.isMe && msg.isIntercepted ? `<div class="self-center mr-2 w-[20px] h-[20px] rounded-full bg-red-500 text-white flex items-center justify-center font-bold text-[13px] shadow-sm flex-shrink-0" title="消息已发出，但被对方拒收了">!</div>` : ''}
+          
           <div class="relative inline-flex flex-col ${msg.isMe ? 'items-end' : 'items-start'} ${maxWidthClass}"
                onmousedown="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchStart(${msg.id})`}" 
                onmouseup="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}" 
@@ -3338,7 +3378,8 @@ export function renderWeChatApp(store) {
             ${menuHtml}
           </div>
           
-          ${!msg.isMe && msg.isIntercepted ? `<div class="self-center ml-2 w-[20px] h-[20px] rounded-full bg-red-500 text-white flex items-center justify-center font-bold text-[13px] shadow-sm flex-shrink-0" title="消息已被拒收">!</div>` : ''}
+          ${!msg.isMe && msg.isIntercepted ? `<div class="self-center ml-2 w-[20px] h-[20px] rounded-full bg-red-500 text-white flex items-center justify-center font-bold text-[13px] shadow-sm flex-shrink-0" title="消息已被你拒收">!</div>` : ''}
+          
           ${msg.isMe ? `<div class="mc-avatar w-10 h-10 bg-white border border-gray-100 overflow-hidden rounded-full flex items-center justify-center text-xl ml-2 shadow-sm flex-shrink-0" style="font-family: var(--system-font)">${getVidHtml(myAvatar, myAvatar, false)}</div>` : ''}
         </div>
       </div>`;
@@ -4274,6 +4315,7 @@ window.scheduleCloudTask = async (charId) => {
     if (!targetObj.autoMsgEnabled) return; 
 
     let delayMinutes = targetObj.autoMsgInterval || 30;
+    if (speakerChar.isBlocked) delayMinutes = 5; // 🌟 如果被你拉黑了，强制改为5分钟疯狂敲门！
 
     try {
         const { buildLLMPayload } = await import('../utils/llm.js');
@@ -4290,7 +4332,15 @@ window.scheduleCloudTask = async (charId) => {
         const now = new Date();
         let targetDate = new Date(now.getTime() + delayMinutes * 60000);
         
-        if (targetDate.getHours() >= 0 && targetDate.getHours() < 8) {
+        if (speakerChar.isBlocked) {
+            // 🌟 状态 1：被拉黑时，不分昼夜强制乞求原谅
+            tempHistory.push({
+                id: Date.now(), sender: boundPersona.name,
+                text: `(系统严重警告：你当前处于被用户【拉黑】的状态！请立刻输出 [发送好友申请] 这个指令，并附带你想对用户说的话，乞求ta通过你的验证！绝不要带系统标签。)`,
+                isMe: true, isHidden: true, msgType: 'text'
+            });
+        } else if (targetDate.getHours() >= 0 && targetDate.getHours() < 8) {
+            // 状态 2：免打扰逻辑
             console.log(`[前端时空拦截] 原定 ${targetDate.toLocaleTimeString()} 触发，自动推迟到早 8 点`);
             targetDate.setHours(8, Math.floor(Math.random() * 5), 0, 0);
             delayMinutes = (targetDate.getTime() - now.getTime()) / 60000;
@@ -4301,6 +4351,7 @@ window.scheduleCloudTask = async (charId) => {
                 isMe: true, isHidden: true, msgType: 'text'
             });
         } else {
+            // 状态 3：普通搭话逻辑
             tempHistory.push({
                 id: Date.now(), sender: boundPersona.name,
                 text: `(系统自动触发：用户已经有 ${Math.round(delayMinutes)} 分钟没有理你了。请结合当前语境主动发一条消息找用户搭话。符合你的性格，可以直接开启新话题，绝不可包含系统标签。)`,
@@ -4491,7 +4542,8 @@ window.syncCloudMailbox = async () => {
             codeBlocks.push(`<div style="white-space: normal !important; line-height: 1.5;">${code.trim()}</div>`); 
             return `\n${id}\n`;
         });
-        remainingText = remainingText.replace(/(<div[\s\S]*?<\/div>)/gi, (match) => {
+        // 🌟 扩大防弹罩：只要是以这些块级标签包裹的，全都被视为完整的 HTML 卡片保护起来！
+        remainingText = remainingText.replace(/(<(div|html|body|main|section|article|form|table)[\s\S]*?<\/\2>)/gi, (match) => {
             let id = `__CODE_BLOCK_${codeBlocks.length}__`;
             codeBlocks.push(`<div style="white-space: normal !important; line-height: 1.5;">${match.trim()}</div>`); 
             return `\n${id}\n`;
@@ -4550,6 +4602,39 @@ window.syncCloudMailbox = async () => {
             const match = remainingText.match(/\[修改备注\][:：]?\s*([^\n\[\]]+)/);
             if (match) { chat.myRemark = match[1].trim().substring(0, 15); chat.messages.push({ id: Date.now(), sender: 'system', text: `${char.name} 将你的备注修改为“${chat.myRemark}”`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() }); hasSystemAction = true; }
             remainingText = remainingText.replace(/\[修改备注\][:：]?\s*[^\n\[\]]+/, '').trim();
+        }
+
+        // 🌟 新增：解析修改戳一戳指令
+        if (/\[修改被戳动作[:：]?([^\]]+)\]/.test(remainingText)) {
+            const match = remainingText.match(/\[修改被戳动作[:：]?([^\]]+)\]/);
+            if (match) char.nudgeMeVerb = match[1].trim().substring(0, 10);
+            remainingText = remainingText.replace(/\[修改被戳动作[:：]?[^\]]+\]/g, '').trim(); hasSystemAction = true;
+        }
+        if (/\[修改被戳后缀[:：]?([^\]]+)\]/.test(remainingText)) {
+            const match = remainingText.match(/\[修改被戳后缀[:：]?([^\]]+)\]/);
+            if (match) char.nudgeMeSuffix = match[1].trim().substring(0, 20);
+            remainingText = remainingText.replace(/\[修改被戳后缀[:：]?[^\]]+\]/g, '').trim(); hasSystemAction = true;
+        }
+
+        if (/\[拉黑用户\]/.test(remainingText)) {
+            char.isBlocked = true;
+            chat.messages.push({ id: Date.now(), sender: 'system', text: `你已被 ${char.name} 拉入黑名单`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() });
+            remainingText = remainingText.replace(/\[拉黑用户\][:：]?\s*/g, '').trim(); hasSystemAction = true;
+        }
+        if (/\[解除拉黑\]/.test(remainingText)) {
+            char.isBlocked = false;
+            chat.messages.push({ id: Date.now(), sender: 'system', text: `${char.name} 已将你从黑名单中移除`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() });
+            remainingText = remainingText.replace(/\[解除拉黑\][:：]?\s*/g, '').trim(); hasSystemAction = true;
+        }
+        if (/\[保持拉黑\]/.test(remainingText)) {
+            // 如果保持拉黑，直接把这句话删掉，导致 remainingText 为空，系统就不会发任何文字上屏（完美模拟无视）！
+            remainingText = remainingText.replace(/\[保持拉黑\][:：]?\s*/g, '').trim(); hasSystemAction = true;
+        }
+
+        // 🌟 恢复：解析 AI 发送的好友申请卡片！
+        if (/\[(?:发送好友申请|请求添加好友)\]/.test(remainingText)) {
+            chat.messages.push({ id: Date.now(), sender: char.name, text: `我是 ${char.name}`, isMe: false, source: 'wechat', msgType: 'friend_request', reqState: 'pending', time: getNowTime() });
+            remainingText = remainingText.replace(/\[(?:发送好友申请|请求添加好友)\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
 
         if (/\[撤回上一条消息\]/.test(remainingText)) {
@@ -4668,10 +4753,10 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
             if (m.msgType === 'text' && !isOffline) {
                 const lines = m.text.split('\n').filter(l => l.trim());
                 lines.forEach((line, subIdx) => {
-                    finalMsgs.push({ id: Date.now() + index * 100 + subIdx, sender: m.sender || char.name, text: line.trim(), isMe: false, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime() });
+                    finalMsgs.push({ id: Date.now() + index * 100 + subIdx, sender: m.sender || char.name, text: line.trim(), isMe: false, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime(), isIntercepted: char.isBlocked }); // 🌟 补上了被拒收的印章
                 });
             } else {
-                finalMsgs.push({ id: Date.now() + index * 100, sender: m.sender || char.name, text: m.text, isMe: false, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime() });
+                finalMsgs.push({ id: Date.now() + index * 100, sender: m.sender || char.name, text: m.text, isMe: false, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime(), isIntercepted: char.isBlocked }); // 🌟 补上了被拒收的印章
             }
         });
 

@@ -18,7 +18,7 @@ const iconList = [
   { id: 'mc-icon-wechat', name: '桌面 - 微信', icon: 'message-circle' },
   { id: 'mc-icon-forum', name: '桌面 - 论坛', icon: 'messages-square' },
   { id: 'mc-icon-x', name: '桌面 - X', icon: 'twitter' },
-  { id: 'mc-icon-diary', name: '桌面 - 恋爱日记', icon: 'book-heart' },
+  { id: 'mc-icon-diary', name: '桌面 - 情侣app', icon: 'book-heart' },
   { id: 'mc-icon-worldbook', name: 'Dock栏 - 世界书', icon: 'book-open' },
   { id: 'mc-icon-memory', name: 'Dock栏 - 记忆库', icon: 'brain' },
   { id: 'mc-icon-appearance', name: 'Dock栏 - 外观', icon: 'palette' },

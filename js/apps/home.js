@@ -182,7 +182,7 @@ export function renderHomeApp(store) {
                    ${createAppIcon('message-circle', '微信', "window.actions.setCurrentApp('wechat')", 'mc-icon-wechat', isDark)}
                    ${createAppIcon('messages-square', '论坛', "window.actions.showToast('打开论坛')", 'mc-icon-forum', isDark)}
                    ${createAppIcon('twitter', 'X', "window.actions.showToast('打开 X')", 'mc-icon-x', isDark)}
-                   ${createAppIcon('book-heart', '恋爱日记', "window.actions.showToast('打开恋爱日记')", 'mc-icon-diary', isDark)}
+                   ${createAppIcon('book-heart', '情侣app', "window.actions.setCurrentApp('couple')", 'mc-icon-diary', isDark)}
                 </div>
              </div>
 

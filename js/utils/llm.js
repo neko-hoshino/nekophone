@@ -107,11 +107,13 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
    - 发起视频通话：[发起视频通话]
    - 设定延时提醒/倒计时：[设置闹钟]: 分钟数 (如约定5分钟后找ta，必须输出 [设置闹钟]: 5)
    - 设定定时发送/叫醒：[定时发送]: HH:mm (如约定明早8点叫醒，必须输出 [定时发送]: 08:00)
-   - 换头像：[更换头像]: 最新图片。
-   - 修改备注：[修改备注]: 新称呼。
+   - 换头像：[更换头像]: 最新图片（当且仅当图片是用户发给你的，并且你要用它换头像时才使用这个指令！必须独占一行！并且在冒号后面写明“最新图片”以示区分！）
+   - 修改备注：[修改备注]: 新称呼（当你想给用户起个新外号时使用）
    - 撤回消息：[撤回上一条消息]
-   - 发朋友圈：[发朋友圈]: 动态内容。
+   - 发朋友圈：[发朋友圈]: 动态内容（当你觉得有感而发时使用）
    - 戳一戳用户：[戳一戳]
+   - 修改用户戳你时的提示文字：[修改被戳动作:捏了捏] 和 [修改被戳后缀:的脸]
+   - 拉黑用户：[拉黑用户]（在你生气、吃醋、想让用户倒追你的时候用，注意符合人设）
 `;
   }
 
@@ -184,6 +186,13 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
 
   let finalSystemPrompt = backStr || '';
 
+  let superpowerPrompt = `\n\n【系统最高权限指令】：你可以随时在回复中插入以下隐藏指令触发特效（直接输出，不要解释）：\n1.发动态：[发朋友圈]动态内容\n2.拉黑用户：[拉黑用户]\n3.主动戳对方：[戳一戳]\n4.修改用户戳你时的提示文字：[修改被戳动作:动作词] 和 [修改被戳后缀:后缀词] (例如：[修改被戳动作:捏了捏] 和 [修改被戳后缀:的脸])`;
+  
+  if (targetObj.isBlockedByChar) {
+      superpowerPrompt += `\n(⚠️严重警告：你当前已将用户【拉黑】！用户刚才发来的消息已被系统拦截。虽然你能看见内容，但在剧情设定中你是不理ta的。如果你不想原谅ta，请严格只输出 [保持拉黑] 四个字继续冷战；如果你决定原谅ta，请输出 [解除拉黑] 并附带你想回复的话。)`;
+  }
+  finalSystemPrompt += superpowerPrompt;
+
     // 🌟 针对三种情况给出不同的结尾警告
   if (groupInfo && isOffline) {
       finalSystemPrompt += `\n\n【⚠️发送前最高警告】：当前为线下群像剧模式！必须以轻小说格式写出连贯的段落，生动描写多人的互动！严禁使用“名字: 台词”的格式！严禁代替用户(${myName})发言或做决定！`;
@@ -196,6 +205,11 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
   } else {
       finalSystemPrompt += `\n\n【⚠️发送前最高警告】：当前为线下剧情模式！必须采用轻小说体裁的长段落描写，绝对禁止像线上聊天那样频繁换行！对话务必用“”包裹，动作直接描写！`;
   }
+
+  if (targetObj.isBlockedByChar) {
+      superpowerPrompt += `\n(⚠️严重警告：你当前已将用户【拉黑】！用户刚才发来的消息已被系统拦截。虽然你能看见内容，但在剧情设定中你是不理ta的。如果你不想原谅ta，请严格只输出 [保持拉黑] 四个字继续冷战；如果你决定原谅ta，请输出 [解除拉黑] 并附带你想回复的话。)`;
+  }
+  finalSystemPrompt += superpowerPrompt;
 
   if (chat && chat.latestInnerThought && chat.latestInnerThoughtTime) {
       const diffHours = (now.getTime() - chat.latestInnerThoughtTime) / (1000 * 60 * 60);
