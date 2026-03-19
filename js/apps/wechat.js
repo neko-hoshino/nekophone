@@ -241,6 +241,22 @@ window.wxActions = {
     window.render();
     restoreScroll();
   },
+ // 🌟 历史记录懒加载引擎 (带无缝滚动锚定)
+  loadMoreHistory: () => {
+    const scrollId = wxState.view === 'chatRoom' ? 'chat-scroll' : 'offline-scroll';
+    const el = document.getElementById(scrollId);
+    // 记录按下加载前的绝对物理高度
+    const oldScrollHeight = el ? el.scrollHeight : 0;
+    const oldScrollTop = el ? el.scrollTop : 0;
+    // 额度增加 50 条
+    wxState.displayCount = (wxState.displayCount || 50) + 50;
+    window.render();
+    // 渲染完后，瞬间把卷轴推回原来的物理位置，实现 0 闪烁感知！
+    const newEl = document.getElementById(scrollId);
+    if (newEl) {
+      newEl.scrollTop = newEl.scrollHeight - oldScrollHeight + oldScrollTop;
+    }
+  },
   // ================= 🎵 终极语音播放引擎 =================
   playVoiceMsg: (msgId) => {
       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
@@ -311,7 +327,7 @@ window.wxActions = {
       }
   },
   switchTab: (tab) => { wxState.activeTab = tab; window.render(); },
-  openChat: (charId) => { wxState.activeChatId = charId; wxState.view = 'chatRoom'; wxState.showPlusMenu = false; if (window.globalScrollStates) delete window.globalScrollStates['chat-scroll']; window.render(); window.wxActions.scrollToBottom(); },
+  openChat: (charId) => { wxState.activeChatId = charId; wxState.view = 'chatRoom'; wxState.showPlusMenu = false; wxState.displayCount = 50; if (window.globalScrollStates) delete window.globalScrollStates['chat-scroll']; window.render(); window.wxActions.scrollToBottom(); },
   closeChat: () => { wxState.view = 'main'; wxState.activeChatId = null; window.render(); },
   togglePlusMenu: () => { 
     saveScroll(); 
@@ -1737,7 +1753,7 @@ window.wxActions = {
     wxState.view = 'chatRoom'; wxState.callType = null; wxState.callStartTime = null; window.render(); window.wxActions.scrollToBottom();
   },
   
-  enterOffline: () => { wxState.view = 'offlineStory'; wxState.showPlusMenu = false; if (window.globalScrollStates) delete window.globalScrollStates['offline-scroll']; window.render(); window.wxActions.scrollToBottom(); },
+  enterOffline: () => { wxState.view = 'offlineStory'; wxState.showPlusMenu = false; wxState.displayCount = 50; if (window.globalScrollStates) delete window.globalScrollStates['offline-scroll']; window.render(); window.wxActions.scrollToBottom(); },
   exitOffline: () => { wxState.view = 'chatRoom'; window.render(); window.wxActions.scrollToBottom(); },
   
   // 🌟 线下剧情模式专属设置动作
@@ -2785,12 +2801,19 @@ export function renderWeChatApp(store) {
                   }
               }
 
-              offlineMsgs.forEach((msg, index) => {
+              // 🌟 核心切片：根据 displayCount 截断线下剧情，并在顶部加上加载按钮！
+              const displayCount = wxState.displayCount || 50;
+              if (offlineMsgs.length > displayCount) {
+                  html += `<div class="flex justify-center my-3"><div class="text-[11px] font-bold tracking-widest text-gray-600 bg-black/5 px-4 py-1.5 rounded-full cursor-pointer active:scale-90 transition-transform" onclick="window.wxActions.loadMoreHistory()">点击加载更多剧情</div></div>`;
+              }
+              const slicedOfflineMsgs = offlineMsgs.slice(-displayCount);
+
+              slicedOfflineMsgs.forEach((msg, index) => {
                  // 如果这条线下消息发生在最后一次线上聊天之前，它就是被封存的历史！
                  const isHistory = msg.id < lastOnlineMsgId;
                  
                  // 🌟 插入历史记录分割线（在当前剧情的第一句话之前插入）
-                 if (!isHistory && index > 0 && offlineMsgs[index - 1].id < lastOnlineMsgId) {
+                 if (!isHistory && index > 0 && slicedOfflineMsgs[index - 1].id < lastOnlineMsgId) {
                     html += `<div class="text-center text-xs text-gray-400 italic mb-8 mt-4 tracking-widest pointer-events-none">—— 以上为历史记录 ——</div>`;
                  }
 
@@ -2862,7 +2885,7 @@ export function renderWeChatApp(store) {
               });
 
               // 如果当前所有的线下消息全部都是历史记录，把分割线补在最底部！
-              if (offlineMsgs.length > 0 && offlineMsgs[offlineMsgs.length - 1].id < lastOnlineMsgId) {
+              if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length - 1].id < lastOnlineMsgId) {
                   html += `<div class="text-center text-xs text-gray-400 italic mb-8 mt-4 tracking-widest pointer-events-none">—— 以上为历史记录 ——</div>`;
               }
               
@@ -3077,7 +3100,13 @@ export function renderWeChatApp(store) {
   // 💬 场景 4：正常的微信聊天室
   if (wxState.view === 'chatRoom') {
     let lastRenderedTime = ''; 
-    const messagesHtml = chatData.messages.filter(m => !m.isOffline && !m.isHidden).map((msg, index, array) => {
+    
+    // 🌟 核心切片：将线上消息提取出来，根据 displayCount 截断，并在顶部加上加载按钮！
+    const onlineMsgs = chatData.messages.filter(m => !m.isOffline && !m.isHidden);
+    const displayCount = wxState.displayCount || 50;
+    
+    const messagesHtml = (onlineMsgs.length > displayCount ? `<div class="flex justify-center my-2"><div class="text-[11px] font-bold tracking-widest text-gray-600 bg-gray-100/80 px-4 py-1.5 rounded-full cursor-pointer active:scale-90 transition-transform" onclick="window.wxActions.loadMoreHistory()">点击加载更多历史记录</div></div>` : '') + 
+    onlineMsgs.slice(-displayCount).map((msg, index, array) => {
       // 🌟 找到发送者的角色数据（群聊时动态查找，单聊时直接用 char）
       const senderChar = (isGroup && !msg.isMe) ? store.contacts.find(c => c.name === msg.sender) : char;
       const senderAvatar = senderChar ? senderChar.avatar : '';
