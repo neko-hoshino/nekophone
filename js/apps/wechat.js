@@ -1505,6 +1505,7 @@ window.wxActions = {
       window.wxActions.scrollToBottom();
       
       // 🌟 修复暂存机制：如果是线上聊天室，发完就停（仅暂存）；如果是打电话或线下，才自动触发 AI！
+      // 🌟 终极竞速修复：所有场景下，发完消息立刻呼叫 AI 回复！
       if (wxState.view !== 'chatRoom') {
           if (chat.isGroup) {
               const directorId = chat.memberIds[Math.floor(Math.random() * chat.memberIds.length)];
@@ -1513,8 +1514,8 @@ window.wxActions = {
               setTimeout(() => window.wxActions.getReply(false, null, null, null, chat.charId), 500);
           }
       } else {
-          // 🌟 用户在线上发了消息，虽然不立即请求 AI 回复，但必须要向云端投递最新闹钟（砸碎旧闹钟）！
-          window.scheduleCloudTask(chat.charId);
+          // 线上发消息，立刻请求回复（绝不在这里设置冷落闹钟，防止把立刻回复覆盖掉！）
+          setTimeout(() => window.wxActions.getReply(false, null, null, null, chat.charId), 500);
       }
     }
   },
@@ -4110,6 +4111,56 @@ const planCloudBrain = async (delayMinutes, char, llmMessages, routingId) => {
       throw new Error(errData.error || `云端服务器拒绝了请求 (HTTP状态码: ${res.status})`);
   }
 };
+// 🌟 终极时空巡逻员：由手机前端判断时间，绝对没有时差！
+window.scheduleCloudTask = async (charId) => {
+    const chat = store.chats.find(c => c.charId === charId);
+    if (!chat) return;
+    
+    let speakerChar = null;
+    if (chat.isGroup) {
+         const avail = chat.memberIds;
+         if(avail.length > 0) speakerChar = store.contacts.find(c => c.id === avail[Math.floor(Math.random() * avail.length)]);
+    } else { speakerChar = store.contacts.find(c => c.id === charId); }
+    if (!speakerChar) return;
+
+    const targetObj = chat.isGroup ? chat : speakerChar;
+    if (!targetObj.autoMsgEnabled) return; 
+
+    let delayMinutes = targetObj.autoMsgInterval || 30;
+
+    try {
+        const { buildLLMPayload } = await import('../utils/llm.js');
+        let tempHistory = [...chat.messages];
+        
+        // 🌟 手机前端时间判定：0点到8点免打扰！
+        const now = new Date();
+        let targetDate = new Date(now.getTime() + delayMinutes * 60000);
+        
+        if (targetDate.getHours() >= 0 && targetDate.getHours() < 8) {
+            console.log(`[前端时空拦截] 原定 ${targetDate.toLocaleTimeString()} 触发，自动推迟到早 8 点`);
+            targetDate.setHours(8, Math.floor(Math.random() * 5), 0, 0);
+            delayMinutes = (targetDate.getTime() - now.getTime()) / 60000;
+            
+            tempHistory.push({
+                id: Date.now(), sender: store.personas[0].name,
+                text: `(系统强制插播：现在已经是第二天早上8点多了，免打扰模式结束。请立刻根据你的设定和昨晚的聊天上下文，自然地跟用户发个早安！绝对不要在回复中带有系统提示标签，直接像真人一样说话。)`,
+                isMe: true, isHidden: true, msgType: 'text'
+            });
+        } else {
+            tempHistory.push({
+                id: Date.now(), sender: store.personas[0].name,
+                text: `(系统自动触发：用户已经有 ${Math.round(delayMinutes)} 分钟没有理你了。请结合当前语境主动发一条消息找用户搭话。符合你的性格，可以直接开启新话题，绝不可包含系统标签。)`,
+                isMe: true, isHidden: true, msgType: 'text'
+            });
+        }
+
+        const isOffline = typeof wxState !== 'undefined' && wxState.view === 'offlineStory';
+        const llmMessages = await buildLLMPayload(speakerChar.id, tempHistory, isOffline, false, chat.isGroup ? chat : null, null);
+
+        // 使用特殊的 AUTO 前缀，防止被立刻回复的动作误杀
+        await planCloudBrain(delayMinutes, speakerChar, llmMessages, 'AUTO|' + chat.charId + '|' + speakerChar.id + '|' + (isOffline ? '1' : '0'));
+    } catch (e) { console.error('云端定时器刷新失败:', e); }
+};
 
 // ==================== 🌟 终极定向重roll 引擎 (兼容经典退回逻辑) ====================
 
@@ -4181,7 +4232,7 @@ window.wxActions.submitReroll = async () => {
             tempHistory.push({
                 id: Date.now(),
                 sender: store.personas[0].name, 
-                text: `(系统提示：用户对你的上一条回复不满意，要求重新生成。用户的修改要求是：“${requirement}”。请直接输出修改后的回复，绝不允许包含这句系统标签和任何多余的解释！)`,
+                text: `(系统提示：用户对你的上一条回复不满意，要求重新生成。用户的修改要求是：“${requirement}”。请直接输出修改后的回复，绝不允许包含这句系统标签和任何多余的解释！也不允许把这句话当成用户说的话来回复！)`,
                 isMe: true,
                 isHidden: true, 
                 msgType: 'text'
@@ -4488,6 +4539,9 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
                 await new Promise(resolve => setTimeout(resolve, Math.min(Math.max(newMsg.text.length * 60, 600), 2500)));
             }
         }
+        
+        // 🌟 完美接力：AI 消息上屏完毕，立刻启动下一轮的“主动搭话”巡逻！
+        setTimeout(() => { if (typeof window.scheduleCloudTask === 'function') window.scheduleCloudTask(chatId); }, 2000);
     }
   } catch (e) { console.error('同步信箱失败:', e); }
 };
