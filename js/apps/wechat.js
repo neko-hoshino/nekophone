@@ -1162,7 +1162,6 @@ window.wxActions = {
       if(!book || !char || !char.minimaxVoiceId) return window.actions.showToast('该角色未配置 Minimax 音色，无法听书哦');
       
       const text = book.pages[book.progress];
-      window.actions.showToast('正在生成语音，请稍候...');
       fetchMinimaxVoice(text, char.minimaxVoiceId).then(url => {
           if(url && wxState.reading?.active) { 
               wxState.readingAudio = new Audio(url);
@@ -1193,34 +1192,51 @@ window.wxActions = {
   setTempMomentVirtual: () => { wxState.tempMomentVirtual = ''; window.render(); },
   clearTempMomentVirtual: () => { wxState.tempMomentVirtual = null; window.render(); },
   clearTempMomentImage: () => { wxState.tempMomentImage = null; window.render(); },
+  // 🌟 唤起定位输入弹窗
+  setPublishLocation: () => {
+      const loc = prompt('请输入所在位置 (留空则不显示)：', wxState.publishLocation || '');
+      if (loc !== null) {
+          wxState.publishLocation = loc.trim();
+          window.render();
+      }
+  },
   submitMoment: async () => {
     const text = document.getElementById('publish-moment-text').value.trim();
     const virtualInput = document.getElementById('moment-virtual-input');
     const virtualText = virtualInput ? virtualInput.value.trim() : null;
     if (!text && !wxState.tempMomentImage && !virtualText) return window.actions.showToast('写点什么或发张图吧');
+    
     store.moments = store.moments || [];
     const newId = Date.now();
     const my = store.personas[0];
     const pType = wxState.momentPrivacyType || 'public';
     const pGroups = wxState.momentPrivacyGroups || [];
+    
     const newMoment = { 
        id: newId, senderId: my.id, senderName: my.name, avatar: my.avatar, 
        text: text, imageUrl: wxState.tempMomentImage, virtualImageText: virtualText, 
+       location: wxState.publishLocation || null, // 🌟 包含定位标
        time: '刚刚', likes: [], comments: [], privacyType: pType, privacyGroups: pGroups 
     };
     store.moments.push(newMoment);
-    wxState.view = 'main'; window.render(); restoreScroll();
+    
+    wxState.view = 'main'; 
+    wxState.publishLocation = null; // 发布后清空定位缓存
+    window.render(); restoreScroll();
+    
     let promptText = text;
     if (virtualText) promptText += ` [配图是一张虚拟照片：${virtualText}]`;
     else if (wxState.tempMomentImage) promptText += ` [配图是一张照片]`;
+    if (newMoment.location) promptText += ` [当前定位：${newMoment.location}]`;
+    
     let allowedChars = store.contacts;
     if (pType === 'visible') allowedChars = store.contacts.filter(c => pGroups.includes(c.groupId));
     else if (pType === 'invisible') allowedChars = store.contacts.filter(c => !pGroups.includes(c.groupId));
-    // 导入真正的 LLM 引擎
-    const { callLLM } = await import('../utils/llm.js');   
+    
     allowedChars.forEach((char, index) => {
        const chat = store.chats.find(c => c.charId === char.id);
-       // 将朋友圈动态作为隐形消息塞入聊天流
+       
+       // 🌟 完美恢复：将朋友圈动态作为隐形消息塞入聊天流，为后续聊天埋下伏笔！
        if (chat) {
            chat.messages.push({
                id: Date.now() + index, 
@@ -1229,62 +1245,46 @@ window.wxActions = {
                isMe: true, isHidden: true, msgType: 'system', time: getNowTime()
            });
        }
-       // 利用时间差，制造出“大家陆陆续续看到并评论”的拟真感
+       
+       // 🌟 使用极其稳定的底层 Fetch 引擎，并完美附带 10 轮记忆与聊天记录！
        setTimeout(async () => {
+           if (!store.apiConfig?.apiKey) return;
            try {
-              const chat = store.chats.find(c => c.charId === char.id);
-              // 把他们各自的聊天记录带上，让他们拥有记忆
-              const tempHistory = [...(chat ? chat.messages.filter(m=>!m.isHidden && !m.isOffline) : [])];
-              tempHistory.push({
-                  isMe: true, 
-                  text: `(系统指令：我刚刚发布了一条朋友圈：“${promptText}”。请你作为列表里的好友，结合我们以往的聊天上下文，给出简短的评论，绝不加引号，纯口语，20字以内。如果你觉得没啥可说的，可以直接回复“点赞”两个字。)`
+              let recentChatStr = '无近期聊天记录';
+              if (chat && chat.messages) {
+                  // 截取最近 10 条真实对话
+                  const recentMsgs = chat.messages.filter(m => !m.isHidden && !m.isOffline && m.msgType === 'text').slice(-10);
+                  if (recentMsgs.length > 0) {
+                      recentChatStr = recentMsgs.map(m => `${m.isMe ? my.name : (m.sender || char.name)}: ${m.text}`).join('\n');
+                  }
+              }
+              
+              let memoryStr = '';
+              const memories = (store.memories || []).filter(m => m.charId === char.id);
+              if (memories.length > 0) {
+                  memoryStr = '\n【你的记忆】\n' + memories.map(m => `- ${m.content}`).join('\n');
+              }
+              
+              const sysPrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${memoryStr}\n\n【最近10轮聊天记录】\n${recentChatStr}\n\n【任务】用户刚刚发布了一条朋友圈：“${promptText}”。请你作为列表里的好友，结合以上你们的聊天记录和记忆，给出极其简短的评论。绝不加引号，纯口语，20字以内。如果你觉得没啥可说的，可以直接回复“点赞”两个字。`;
+              
+              const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                  method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                  body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: sysPrompt }], temperature: 0.8 })
               });
+              const data = await res.json();
+              const cleanReply = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
               
-              const reply = await callLLM(char.id, tempHistory, false);
-              const cleanReply = reply.trim().replace(/^["']|["']$/g, '');
-              
-              // 智能判断是点赞还是评论
               if (cleanReply.includes('点赞') && cleanReply.length <= 5) {
                   if(!newMoment.likes.includes(char.name)) newMoment.likes.push(char.name);
               } else {
                   newMoment.comments.push({ id: Date.now() + index, senderId: char.id, senderName: char.name, replyTo: null, text: cleanReply });
               }
               window.render();
-           } catch(e) { console.error('朋友圈生成失败', e); }
-       }, 2000 + index * 1500); // 每个人间隔 1.5 秒陆陆续续冒出来
+           } catch(e) { console.error('朋友圈评论生成失败', e); }
+       }, 2000 + index * 1500); 
     });
   },
-  submitMomentComment: async () => {
-    saveScroll(); 
-    const text = document.getElementById('moment-comment-input').value.trim(); if (!text) return;
-    const m = store.moments.find(x => x.id === wxState.momentInput.momentId); const my = store.personas[0];
-    m.comments.push({ id: Date.now(), senderId: my.id, senderName: my.name, replyTo: wxState.momentInput.replyTo, text: text });
-    const replyTarget = wxState.momentInput.replyTo; wxState.momentInput.active = false; window.render(); restoreScroll();
-    
-    if (m.senderId !== my.id || replyTarget) {
-       const charId = replyTarget ? store.contacts.find(c => c.name === replyTarget)?.id : m.senderId;
-       const char = store.contacts.find(c => c.id === charId);
-       if (char) {
-           const { callLLM } = await import('../utils/llm.js');
-           setTimeout(async () => {
-               try {
-                  const chat = store.chats.find(c => c.charId === char.id);
-                  const tempHistory = [...(chat ? chat.messages.filter(m=>!m.isHidden && !m.isOffline) : [])];
-                  tempHistory.push({
-                      isMe: true, 
-                      text: `(系统指令：你在朋友圈收到了我的回复：“${text}”。请结合我们以往的聊天上下文，立刻怼回去或回复我，绝不加引号，纯口语，20字以内。)`
-                  });
-                  const reply = await callLLM(char.id, tempHistory, false);
-                  const cleanReply = reply.trim().replace(/^["']|["']$/g, '');
-                  
-                  saveScroll();
-                  m.comments.push({ id: Date.now(), senderId: char.id, senderName: char.name, replyTo: my.name, text: cleanReply });
-                  window.render(); restoreScroll();
-               } catch(e) {}
-           }, 2000);
-       }
-    }
-  },
+  
   // 让 AI 全员一起发朋友圈
   triggerAIMoment: async () => {
     const chars = store.contacts; 
@@ -1346,7 +1346,7 @@ ${relation}
 3. 情绪直接表达，严禁矫情。
 
 【任务】请结合以上所有信息，发一条最新朋友圈动态。
-❗特殊动作：如果要配图，请在文案末尾输出 [附带虚拟照片: 画面描述]（例如：[附带虚拟照片: 一杯冰美式]）。
+❗特殊动作：如果要配图，请在文案末尾输出 [附带虚拟照片: 画面描述]（例如：[附带虚拟照片: 一杯冰美式]）。如果要显示所在位置，请输出 [附带定位: 具体的地点名称]（例如：[附带定位: 星巴克]）。这两个指令可以同时使用！
 直接输出文案，绝不加引号，50字以内。`;
 
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -1374,6 +1374,7 @@ ${relation}
                 text: contentText, 
                 imageUrl: null, 
                 virtualImageText: virtualText, // 🌟 这里直接塞入虚拟照片内容！
+                location: locationText, // 🌟 存入刚才解析出的定位！
                 time: getNowTime(), // 🌟 换成云端下发时的当前真实时间！
                 likes: [], 
                 comments: [] 
@@ -1390,40 +1391,63 @@ ${relation}
   toggleMomentMenu: (id) => { saveScroll(); wxState.activeMomentMenuId = wxState.activeMomentMenuId === id ? null : id; window.render(); restoreScroll(); },
   likeMoment: (id) => {
     saveScroll();
-    // 🌟 获取正确的马甲名字
-        // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
-      const charObj = store.contacts.find(c => c.id === chat.charId);
-      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
-        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
-    const m = store.moments.find(x => x.id === id); const myName = boundPersona.name;
+    const m = store.moments.find(x => x.id === id); 
+    const myName = store.personas[0].name; // 🌟 修复：朋友圈是全局空间，直接使用主身份点赞，绝不报错！
     if (m.likes.includes(myName)) m.likes = m.likes.filter(n => n !== myName); else m.likes.push(myName);
     wxState.activeMomentMenuId = null; window.render(); restoreScroll();
   },
   openMomentComment: (id, replyTo = null) => { saveScroll(); wxState.momentInput = { active: true, momentId: id, replyTo: replyTo }; wxState.activeMomentMenuId = null; window.render(); restoreScroll(); },
   closeMomentComment: () => { wxState.momentInput.active = false; window.render(); },
   submitMomentComment: async () => {
-    saveScroll(); // 锁定滚动
+    saveScroll(); 
     const text = document.getElementById('moment-comment-input').value.trim(); if (!text) return;
-    const m = store.moments.find(x => x.id === wxState.momentInput.momentId); const my = boundPersona;
-    m.comments.push({ id: Date.now(), senderId: my.id, senderName: my.name, replyTo: wxState.momentInput.replyTo, text: text });
-    const replyTarget = wxState.momentInput.replyTo; wxState.momentInput.active = false; window.render(); restoreScroll();
+    const m = store.moments.find(x => x.id === wxState.momentInput.momentId); 
     
-    // 呼叫 AI 回复
+    // 🌟 修复了极其致命的变量未定义报错 Bug！
+    const my = store.personas[0]; 
+    
+    m.comments.push({ id: Date.now(), senderId: my.id, senderName: my.name, replyTo: wxState.momentInput.replyTo, text: text });
+    const replyTarget = wxState.momentInput.replyTo; 
+    wxState.momentInput.active = false; 
+    window.render(); restoreScroll();
+    
     if (m.senderId !== my.id || replyTarget) {
        const charId = replyTarget ? store.contacts.find(c => c.name === replyTarget)?.id : m.senderId;
        const char = store.contacts.find(c => c.id === charId);
        if (char) {
            setTimeout(async () => {
+               if (!store.apiConfig?.apiKey) return;
                try {
+                  const chat = store.chats.find(c => c.charId === char.id);
+                  
+                  // 🌟 同样为其装配 10 轮聊天记录和记忆抓取引擎
+                  let recentChatStr = '无近期聊天记录';
+                  if (chat && chat.messages) {
+                      const recentMsgs = chat.messages.filter(msg => !msg.isHidden && !msg.isOffline && msg.msgType === 'text').slice(-10);
+                      if (recentMsgs.length > 0) {
+                          recentChatStr = recentMsgs.map(msg => `${msg.isMe ? my.name : (msg.sender || char.name)}: ${msg.text}`).join('\n');
+                      }
+                  }
+                  
+                  let memoryStr = '';
+                  const memories = (store.memories || []).filter(mem => mem.charId === char.id);
+                  if (memories.length > 0) {
+                      memoryStr = '\n【你的记忆】\n' + memories.map(mem => `- ${mem.content}`).join('\n');
+                  }
+                  
+                  const sysPrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${memoryStr}\n\n【最近10轮聊天记录】\n${recentChatStr}\n\n【任务】你在朋友圈收到了用户的回复/评论：“${text}”。请结合以上聊天记录和记忆上下文，立刻怼回去或回复ta，绝不加引号，纯口语，20字以内。`;
+                  
                   const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                       method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                      body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n【任务】你在朋友圈收到了用户的评论：“${text}”。请立刻怼回去或回复ta，绝不加引号，纯口语，20字以内。` }], temperature: 0.8 })
+                      body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: sysPrompt }], temperature: 0.8 })
                   });
                   const data = await res.json();
+                  const cleanReply = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+                  
                   saveScroll();
-                  m.comments.push({ id: Date.now(), senderId: char.id, senderName: char.name, replyTo: my.name, text: data.choices[0].message.content.trim().replace(/^["']|["']$/g, '') });
+                  m.comments.push({ id: Date.now(), senderId: char.id, senderName: char.name, replyTo: my.name, text: cleanReply });
                   window.render(); restoreScroll();
-               } catch(e) {}
+               } catch(e) { console.error('朋友圈回复生成失败', e); }
            }, 2500);
        }
     }
@@ -2846,10 +2870,18 @@ export function renderWeChatApp(store) {
                         <i data-lucide="chevron-right" class="w-5 h-5 text-gray-400"></i>
                      </div>
                   </div>
-                  <div class="flex justify-between items-center cursor-pointer active:opacity-50" onclick="window.actions.showToast('该功能仅做沉浸展示')">
-                     <div class="flex items-center space-x-3"><i data-lucide="map-pin" class="w-5 h-5 text-gray-800"></i><span class="text-[16px] text-gray-800 font-medium">所在位置</span></div>
-                     <div class="flex items-center space-x-1"><i data-lucide="chevron-right" class="w-5 h-5 text-gray-400"></i></div>
-                  </div>
+
+                  <div class="flex items-center justify-between py-3 border-b border-gray-100 cursor-pointer active:bg-gray-50" onclick="window.wxActions.setPublishLocation()">
+               <div class="flex items-center space-x-2">
+                   <i data-lucide="map-pin" class="w-5 h-5 text-gray-800"></i>
+                   <span class="text-[15px] text-gray-800">所在位置</span>
+               </div>
+               <div class="flex items-center">
+                 <span class="text-[13px] ${wxState.publishLocation ? 'text-blue-500 font-bold' : 'text-gray-400'} mr-1 max-w-[150px] truncate">${wxState.publishLocation || '不显示'}</span>
+                 <i data-lucide="chevron-right" class="w-4 h-4 text-gray-400"></i>
+               </div>
+             </div>
+
                </div>
          </div>
       </div>
@@ -4168,6 +4200,7 @@ export function renderWeChatApp(store) {
                 </div>
               </div>
             ` : ''}
+            ${m.location ? `<div class="text-[12px] text-blue-500/90 font-bold mb-1.5 flex items-center tracking-wide"><i data-lucide="map-pin" class="w-3.5 h-3.5 mr-1"></i>${m.location}</div>` : ''}
             <div class="flex items-center justify-between mt-3 relative">
               <div class="flex items-center space-x-3 text-[12px] text-gray-400">
                 <span>${m.time}</span>
@@ -4572,7 +4605,7 @@ window.scheduleCloudTask = async (charId) => {
             // 把专属指令压在最底端
             momentHistory.push({
                 id: Date.now(), sender: boundPersona.name,
-                text: `(系统最高指令：当前系统时间 ${timeString}（${timeOfDayGreeting}）。距离你上次发朋友圈已超过 ${targetObj.autoMomentFreq} 小时。请你立刻执行 [发朋友圈] 指令发一条最新动态！\n\n【时间与关系状态】\n${relation}\n\n【去“人机感”铁律】\n1. 拒绝书面语（如岁月静好），要说人话！\n2. 朋友圈通常没头没尾碎片化（如“困死”）。\n3. 情绪直接表达，严禁矫情。\n\n⚠️注意：你这次的唯一任务就是输出 [发朋友圈] 动态内容！绝对不要发普通的聊天回复！必要时可以带上 [附带虚拟照片:画面描述])`,
+                text: `(系统最高指令：当前系统时间 ${timeString}（${timeOfDayGreeting}）。距离你上次发朋友圈已超过 ${targetObj.autoMomentFreq} 小时。请你立刻执行 [发朋友圈] 指令发一条最新动态！\n\n【时间与关系状态】\n${relation}\n\n【去“人机感”铁律】\n1. 拒绝书面语（如岁月静好），要说人话！\n2. 朋友圈通常没头没尾碎片化（如“困死”）。\n3. 情绪直接表达，严禁矫情。\n\n⚠️注意：你这次的唯一任务就是输出 [发朋友圈] 动态内容！绝对不要发普通的聊天回复！必要时可以带上 [附带虚拟照片:画面描述]和[附带定位: 具体的地点名称])`,
                 isMe: true, isHidden: true, msgType: 'text'
             });
 
@@ -4822,6 +4855,14 @@ window.syncCloudMailbox = async () => {
             const match = remainingText.match(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*([^\n]+)/); // 关键：允许带括号，遇到换行才停
             if (match) {
                 let contentText = match[1].trim();
+                // 🌟 解析 AI 附加的定位指令！
+                let locationText = null;
+                const locMatch = contentText.match(/\[附带定位[:：]?\s*([^\]]+)\]/);
+                if (locMatch) {
+                    locationText = locMatch[1].trim();
+                    contentText = contentText.replace(/\[附带定位[:：]?\s*([^\]]+)\]/, '').trim();
+                }
+
                 let virtualText = null;
                 const photoMatch = contentText.match(/\[附带虚拟照片[:：]?\s*([^\]]+)\]/);
                 if (photoMatch) {
