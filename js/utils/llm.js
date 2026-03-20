@@ -108,17 +108,17 @@ ${groupNoticeStr}
    - 换头像：[更换头像]: 最新图片
    - 修改备注：[修改备注]: 新称呼
    - 撤回消息：[撤回上一条消息]
-   - 发朋友圈：[发朋友圈]动态内容（❗极度重要：当你经历了情绪大起大落、收到转账/礼物、剧情转折、或者极度吃醋思念时，必须立刻发朋友圈！注意格式是直接跟内容，绝不加冒号！）
+   - 发朋友圈：[发朋友圈]动态内容（注意格式是直接跟内容，绝不加冒号！）
    - 戳一戳用户：[戳一戳]
    - 修改被戳提示：[修改被戳动作:捏了捏] 和 [修改被戳后缀:的脸]
    - 拉黑用户：[拉黑用户]（极度生气、吃醋决裂时使用）
    
-❗【防幻觉绝对红线】：你只能使用上方列表和词典中【精确存在】的指令！绝对禁止产生幻觉去编造指令（严禁输出 [发送图片]、[发送表情] 等任何未定义的格式）！`;
+❗【防幻觉绝对红线】：你只能使用上方列表和词典中【精确存在】的指令！绝对禁止产生幻觉去编造指令（严禁输出任何未定义的格式）！`;
   }
 
   let turnsCount = 0; let lastSender = null; let startIndex = 0;
   // 🌟 读取正确的上下文记忆长度
-  const limit = targetObj.contextLimit || 25; 
+  const limit = targetObj.contextLimit || 30; 
   for (let i = history.length - 1; i >= 0; i--) {
       if (history[i].isMe !== lastSender) { if (lastSender !== null) turnsCount += 0.5; lastSender = history[i].isMe; }
       if (turnsCount >= limit) { startIndex = i + 1; break; }
