@@ -327,7 +327,16 @@ window.wxActions = {
       }
   },
   switchTab: (tab) => { wxState.activeTab = tab; window.render(); },
-  openChat: (charId) => { wxState.activeChatId = charId; wxState.view = 'chatRoom'; wxState.showPlusMenu = false; wxState.displayCount = 50; if (window.globalScrollStates) delete window.globalScrollStates['chat-scroll']; window.render(); window.wxActions.scrollToBottom(); },
+  openChat: (charId) => { 
+      wxState.activeChatId = charId; wxState.view = 'chatRoom'; wxState.showPlusMenu = false; wxState.displayCount = 50; 
+      if (window.globalScrollStates) delete window.globalScrollStates['chat-scroll']; 
+      
+      // 🌟 清零未读数
+      const chat = store.chats.find(c => c.charId === charId);
+      if (chat) chat.unreadCount = 0;
+      
+      window.render(); window.wxActions.scrollToBottom(); 
+  },
   closeChat: () => { wxState.view = 'main'; wxState.activeChatId = null; window.render(); },
   togglePlusMenu: () => { 
     saveScroll(); 
@@ -1277,16 +1286,61 @@ window.wxActions = {
     const promises = chars.map(async (char, index) => {
         await new Promise(resolve => setTimeout(resolve, index * 800)); 
         try {
+            // 🌟 史诗级进化 1：动态获取该角色【绑定的马甲名字】，绝不叫错人！
+            const pId = char.boundPersonaId || store.personas[0].id;
+            const myName = (store.personas.find(p => p.id === pId) || store.personas[0]).name;
+
+            const chat = store.chats.find(c => c.charId === char.id);
+            let recentChatStr = '无近期聊天记录';
+            if (chat && chat.messages) {
+                const recentMsgs = chat.messages.filter(m => !m.isHidden && !m.isOffline && m.msgType === 'text').slice(-10);
+                if (recentMsgs.length > 0) {
+                    // 🌟 这里换成 myName，AI 就能认清刚才是谁在陪他聊天了！
+                    recentChatStr = recentMsgs.map(m => `${m.isMe ? myName : (m.sender || char.name)}: ${m.text}`).join('\n');
+                }
+            }
+            
+            let memoryStr = '';
+            const memories = (store.memories || []).filter(m => m.charId === char.id);
+            if (memories.length > 0) {
+                memoryStr = '\n【你的记忆】\n' + memories.map(m => `- ${m.content}`).join('\n');
+            }
+            
+            // 🌟 史诗级进化 2：注入【虚拟照片】超能力指令！
+            const promptStr = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${memoryStr}\n\n【最近10轮聊天记录】\n${recentChatStr}\n\n【任务】请结合设定、记忆和聊天记录，发一条朋友圈动态。符合性格，描述你现在的状态或心情（可吐槽刚才的聊天）。\n❗特殊动作：如果你想给朋友圈配一张图，请在文案末尾输出 [附带虚拟照片: 画面描述]（例如：[附带虚拟照片: 一杯放在电脑旁的冰美式]）。\n直接输出文案，绝不加引号，50字以内。`;
+
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n【任务】请发一条朋友圈动态。符合你的性格，描述一下你现在在做什么或心情。直接输出内容，绝不加引号，40字以内。` }], temperature: 0.9 })
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.9 })
             });
             const data = await res.json();
-            // id 加上 index 防止多条动态时间戳绝对一致导致排序错乱
-            store.moments.push({ id: Date.now() + index, senderId: char.id, senderName: char.name, avatar: char.avatar, text: data.choices[0].message.content.trim().replace(/^["']|["']$/g, ''), imageUrl: null, time: '刚刚', likes: [], comments: [] });
+            let contentText = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+            
+            // 🌟 史诗级进化 3：解析指令，直接点亮朋友圈的“虚拟照片”卡片模块！
+            let virtualText = null;
+            const photoMatch = contentText.match(/\[附带虚拟照片[:：]?\s*([^\]]+)\]/);
+            if (photoMatch) {
+                virtualText = photoMatch[1].trim();
+                // 物理切除指令，保持文案干净
+                contentText = contentText.replace(/\[附带虚拟照片[:：]?\s*([^\]]+)\]/, '').trim();
+            }
+
+            // 推入朋友圈数据库
+            store.moments.push({ 
+                id: Date.now() + index, 
+                senderId: char.id, 
+                senderName: char.name, 
+                avatar: char.avatar, 
+                text: contentText, 
+                imageUrl: null, 
+                virtualImageText: virtualText, // 🌟 这里直接塞入虚拟照片内容！
+                time: getNowTime(), // 🌟 换成云端下发时的当前真实时间！
+                likes: [], 
+                comments: [] 
+            });
             successCount++;
             window.render();
-        } catch(e) { console.error(char.name + '发朋友圈失败'); }
+        } catch(e) { console.error(char.name + '发朋友圈失败', e); }
     });
 
     await Promise.all(promises);
@@ -3922,8 +3976,11 @@ export function renderWeChatApp(store) {
 
     return `
       <div onclick="window.wxActions.openChat('${chat.charId}')" class="flex items-center px-4 py-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 active:bg-gray-100">
-        <div class="w-12 h-12 bg-gray-100 rounded-[14px] flex-shrink-0 overflow-hidden flex items-center justify-center text-2xl mr-3 shadow-sm border border-gray-200/50">
-          ${avatarHtml}
+        <div class="relative mr-3">
+            <div class="w-12 h-12 bg-gray-100 rounded-[14px] flex-shrink-0 overflow-hidden flex items-center justify-center text-2xl shadow-sm border border-gray-200/50">
+              ${avatarHtml}
+            </div>
+            ${chat.unreadCount > 0 ? `<div class="absolute -top-1.5 -right-1.5 bg-[#ff3b30] text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center shadow-sm z-10 border-[1.5px] border-white">${chat.unreadCount > 99 ? '99+' : chat.unreadCount}</div>` : ''}
         </div>
         <div class="flex-1 overflow-hidden">
           <div class="flex justify-between items-center mb-1"><span class="font-bold text-gray-800">${name}</span><span class="text-xs text-gray-500">${timeElap}</span></div>
@@ -4494,6 +4551,9 @@ window.syncCloudMailbox = async () => {
     for (const msg of data.messages) {
         if (!msg.charId) continue;
         
+        // 🌟 提取云端的真实时间戳 (不再使用用户拉取时的时间！)
+        const cloudTime = msg.time || (msg.id ? new Date(msg.id).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : getNowTime());
+        
         // 🌟 史诗级修复：剥离 AUTO| 和 ALARM| 前缀，防止找不到聊天室导致消息被无情吞噬！
         let rawCharId = msg.charId;
         if (rawCharId.startsWith('AUTO|')) rawCharId = rawCharId.substring(5);
@@ -4753,10 +4813,10 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
             if (m.msgType === 'text' && !isOffline) {
                 const lines = m.text.split('\n').filter(l => l.trim());
                 lines.forEach((line, subIdx) => {
-                    finalMsgs.push({ id: Date.now() + index * 100 + subIdx, sender: m.sender || char.name, text: line.trim(), isMe: false, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime(), isIntercepted: char.isBlocked }); // 🌟 补上了被拒收的印章
+                    finalMsgs.push({ id: Date.now() + index * 100 + subIdx, sender: m.sender || char.name, text: line.trim(), isMe: false, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: cloudTime, isIntercepted: char.isBlocked }); // 🌟 换成真实云端时间！
                 });
             } else {
-                finalMsgs.push({ id: Date.now() + index * 100, sender: m.sender || char.name, text: m.text, isMe: false, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: getNowTime(), isIntercepted: char.isBlocked }); // 🌟 补上了被拒收的印章
+                finalMsgs.push({ id: Date.now() + index * 100, sender: m.sender || char.name, text: m.text, isMe: false, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: cloudTime, isIntercepted: char.isBlocked }); // 🌟 换成真实云端时间！
             }
         });
 
@@ -4793,6 +4853,12 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
 
             if (!isCall && newMsg.msgType !== 'system' && newMsg.msgType !== 'recall_system') {
                 try { new Audio(store.appearance?.newMsgSound || 'https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3').play().catch(()=>{}); } catch(e) {}
+                
+                // 🌟 未读红点逻辑：如果用户当前不在这个聊天室，就增加未读计数！
+                if (!isActive) {
+                    chat.unreadCount = (chat.unreadCount || 0) + 1;
+                    if (typeof window.render === 'function') window.render(); // 实时刷新外面的小红点
+                }
             }
 
             // 🌟 削减做作的排队延迟，极速上屏！

@@ -230,6 +230,8 @@ if (!window.cpActions) {
         }
     },
 
+    openLocation: () => { cpState.view = 'location'; window.render(); },
+
     notBuilt: (name) => { window.actions.showToast(name + ' 功能正在快马加鞭施工中！'); }
   };
 }
@@ -312,7 +314,7 @@ export function renderCoupleApp(store) {
                   <i data-lucide="book-heart" class="w-[28px] h-[28px] text-orange-400 mb-2 stroke-[1.5]"></i>
                   <span class="text-[11px] font-extrabold text-gray-600 tracking-wider">日记本</span>
                </div>
-               <div class="flex flex-col items-center cursor-pointer active:scale-90 transition-transform opacity-80 hover:opacity-100" onclick="window.cpActions.notBuilt('定位共享')">
+               <div class="flex flex-col items-center cursor-pointer active:scale-90 transition-transform opacity-80 hover:opacity-100" onclick="window.cpActions.openLocation()">
                   <i data-lucide="map-pin" class="w-[28px] h-[28px] text-blue-400 mb-2 stroke-[1.5]"></i>
                   <span class="text-[11px] font-extrabold text-gray-600 tracking-wider">定位共享</span>
                </div>
@@ -347,7 +349,8 @@ export function renderCoupleApp(store) {
       </div>
      `;
   }
-
+  
+  // 🌟 界面 3：纪念日列表 (🌟 史诗级排序算法：自动计算距离下一个纪念日的天数，并按升序排列！)
   if (cpState.view === 'anniversaries') {
      const today = new Date();
      today.setHours(0,0,0,0);
@@ -390,6 +393,138 @@ export function renderCoupleApp(store) {
             `).join('')}
          </div>
          ${cpState.showAddModal ? `...此处弹窗代码保持不变...` : ''}
+      </div>
+     `;
+  }
+
+  // 📍 界面 3.5：定位共享与全息健康看板
+  if (cpState.view === 'location') {
+     const char = store.contacts.find(c => c.id === cpState.activeCharId);
+     if (!char) return '';
+
+     // 动态生成一些逼真的拟态数据
+     const distance = (Math.random() * 6 + 1.5).toFixed(1);
+     const steps = Math.floor(Math.random() * 8000 + 3500);
+     const places = [
+         { time: '08:30', name: '温馨小窝 (出门)' },
+         { time: '09:15', name: '星巴克 (买咖啡)' },
+         { time: '09:40', name: '公司 (搬砖中)' },
+         { time: '12:30', name: '附近商圈 (午餐)' },
+         { time: '18:10', name: '健身房 (挥洒汗水)' }
+     ];
+     // 睡眠评价（精确控制在49个字）
+     const sleepEval = "近期睡眠不太稳定，昨晚似乎失眠了，深度睡眠偏短。记得提醒ta少喝咖啡，晚上早点放下手机休息，抱抱！";
+
+     return `
+      <div class="w-full h-full bg-[#f4f5f7] flex flex-col relative animate-in slide-in-from-right-4 duration-300 z-[60] overflow-hidden">
+         
+         <div class="w-full h-[35vh] relative bg-[#e5e9f0] flex-shrink-0">
+            <div class="absolute inset-0 opacity-20" style="background-image: radial-gradient(#94a3b8 2px, transparent 2px); background-size: 24px 24px;"></div>
+            <div class="absolute inset-0 opacity-10" style="background-image: linear-gradient(0deg, transparent 24%, rgba(148, 163, 184, 0.3) 25%, rgba(148, 163, 184, 0.3) 26%, transparent 27%, transparent 74%, rgba(148, 163, 184, 0.3) 75%, rgba(148, 163, 184, 0.3) 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, rgba(148, 163, 184, 0.3) 25%, rgba(148, 163, 184, 0.3) 26%, transparent 27%, transparent 74%, rgba(148, 163, 184, 0.3) 75%, rgba(148, 163, 184, 0.3) 76%, transparent 77%, transparent); background-size: 50px 50px;"></div>
+            
+            <div class="absolute top-12 left-5 z-20 cursor-pointer active:scale-90 p-2 bg-white/70 backdrop-blur-md rounded-full shadow-sm border border-white/50" onclick="window.cpActions.goBackToDashboard()">
+               <i data-lucide="chevron-left" class="w-6 h-6 text-gray-800"></i>
+            </div>
+            
+            <svg class="absolute inset-0 w-full h-full pointer-events-none" style="z-index: 5;">
+               <line x1="30%" y1="30%" x2="70%" y2="70%" stroke="#3b82f6" stroke-width="2" stroke-dasharray="6,4" class="opacity-40" />
+            </svg>
+
+            <div class="absolute top-[30%] left-[30%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-10 animate-pulse-slow">
+               <div class="w-12 h-12 rounded-full border-[3px] border-white shadow-md overflow-hidden z-10 bg-gray-100">${getVidHtml(char.avatar)}</div>
+               <div class="bg-white/95 backdrop-blur px-2.5 py-0.5 rounded-full text-[10px] font-extrabold text-gray-700 mt-1 shadow-sm tracking-widest">${char.name}的位置</div>
+            </div>
+            
+            <div class="absolute top-[70%] left-[70%] -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-10">
+               <div class="w-10 h-10 rounded-full border-[3px] border-white shadow-md overflow-hidden z-10 opacity-90 bg-gray-100">${getVidHtml(myAvatar)}</div>
+               <div class="bg-white/95 backdrop-blur px-2.5 py-0.5 rounded-full text-[10px] font-extrabold text-blue-500 mt-1 shadow-sm tracking-widest">你的位置</div>
+            </div>
+            
+            <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-blue-500 text-white px-3 py-1.5 rounded-full text-[11px] font-extrabold shadow-lg z-10 flex items-center tracking-wider">
+               <i data-lucide="navigation" class="w-3.5 h-3.5 mr-1.5"></i> 距离 ${distance} km
+            </div>
+         </div>
+
+         <div class="flex-1 overflow-y-auto px-5 py-6 space-y-4 rounded-t-[24px] -mt-6 bg-[#f4f5f7] relative z-20 hide-scrollbar pb-12 shadow-[0_-10px_20px_rgba(0,0,0,0.05)]">
+            
+            <div class="bg-white rounded-[20px] p-5 shadow-[0_4px_15px_rgba(0,0,0,0.02)] border border-gray-100">
+               <div class="flex items-center justify-between mb-5">
+                  <span class="text-[15px] font-extrabold text-gray-800 tracking-wide flex items-center"><i data-lucide="map" class="w-4 h-4 mr-1.5 text-blue-500"></i>今日行踪</span>
+                  <span class="text-[11px] font-extrabold text-blue-500 bg-blue-50 px-2.5 py-1 rounded-md tracking-widest">去了 ${places.length} 个地方</span>
+               </div>
+               <div class="relative border-l-2 border-gray-100 ml-2 space-y-4">
+                  ${places.map((p, i) => `
+                     <div class="relative pl-5">
+                        <div class="absolute -left-[5px] top-1.5 w-2 h-2 rounded-full ${i === places.length - 1 ? 'bg-blue-500 ring-4 ring-blue-50' : 'bg-gray-300'}"></div>
+                        <div class="flex items-center space-x-3">
+                           <span class="text-[12px] font-black text-gray-400 w-11 tracking-wider">${p.time}</span>
+                           <span class="text-[13px] font-bold text-gray-700">${p.name}</span>
+                        </div>
+                     </div>
+                  `).join('')}
+               </div>
+            </div>
+
+            <div class="bg-white rounded-[20px] p-5 shadow-[0_4px_15px_rgba(0,0,0,0.02)] border border-gray-100 flex items-center justify-between">
+               <div class="flex flex-col">
+                  <span class="text-[15px] font-extrabold text-gray-800 tracking-wide flex items-center mb-1"><i data-lucide="footprints" class="w-4 h-4 mr-1.5 text-emerald-500"></i>运动步数</span>
+                  <span class="text-[11px] text-gray-400 font-bold tracking-widest">今日已行走</span>
+               </div>
+               <div class="flex items-baseline">
+                  <span class="text-[32px] font-black font-serif text-emerald-500 tracking-tighter">${steps}</span>
+                  <span class="text-[11px] font-bold text-gray-400 ml-1">步</span>
+               </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+               
+               <div class="bg-white rounded-[20px] p-4 shadow-[0_4px_15px_rgba(0,0,0,0.02)] border border-gray-100 flex flex-col items-center">
+                  <span class="text-[12px] font-extrabold text-gray-800 tracking-wide mb-3 flex items-center w-full justify-center"><i data-lucide="smartphone" class="w-3.5 h-3.5 mr-1 text-purple-500"></i>手机使用</span>
+                  
+                  <div class="relative w-16 h-16 rounded-full flex items-center justify-center mb-4 shadow-sm" style="background: conic-gradient(#a855f7 0% 50%, #ec4899 50% 80%, #f3f4f6 80% 100%);">
+                     <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center flex-col">
+                        <span class="text-[9px] font-bold text-gray-400 tracking-widest">总计</span>
+                        <span class="text-[11px] font-black text-gray-800">6.5h</span>
+                     </div>
+                  </div>
+                  
+                  <div class="w-full space-y-2">
+                     <div class="flex justify-between items-center text-[10px] font-bold">
+                        <div class="flex items-center"><span class="w-2 h-2 rounded-full bg-purple-500 mr-1.5"></span><span class="text-gray-600">微信</span></div>
+                        <span class="text-gray-800">2.5h</span>
+                     </div>
+                     <div class="flex justify-between items-center text-[10px] font-bold">
+                        <div class="flex items-center"><span class="w-2 h-2 rounded-full bg-pink-500 mr-1.5"></span><span class="text-gray-600">抖音</span></div>
+                        <span class="text-gray-800">1.8h</span>
+                     </div>
+                  </div>
+               </div>
+
+               <div class="bg-white rounded-[20px] p-4 shadow-[0_4px_15px_rgba(0,0,0,0.02)] border border-gray-100 flex flex-col">
+                  <span class="text-[12px] font-extrabold text-gray-800 tracking-wide mb-3 flex items-center w-full justify-center"><i data-lucide="moon" class="w-3.5 h-3.5 mr-1 text-indigo-500"></i>睡眠监测</span>
+                  
+                  <div class="flex justify-around items-end h-[56px] mb-3 border-b border-gray-100 pb-1.5">
+                     <div class="flex flex-col items-center">
+                        <div class="w-[14px] bg-indigo-200 rounded-t-sm" style="height: 36px;"></div>
+                        <span class="text-[8px] text-gray-400 mt-1 font-bold">前天</span>
+                     </div>
+                     <div class="flex flex-col items-center">
+                        <div class="w-[14px] bg-indigo-300 rounded-t-sm" style="height: 42px;"></div>
+                        <span class="text-[8px] text-gray-400 mt-1 font-bold">昨天</span>
+                     </div>
+                     <div class="flex flex-col items-center">
+                        <div class="w-[14px] bg-indigo-500 rounded-t-sm" style="height: 28px;"></div>
+                        <span class="text-[8px] text-gray-400 mt-1 font-bold">今天</span>
+                     </div>
+                  </div>
+                  
+                  <div class="text-[9px] text-gray-500 font-bold leading-relaxed tracking-wider">
+                     ${sleepEval}
+                  </div>
+               </div>
+
+            </div>
+         </div>
       </div>
      `;
   }

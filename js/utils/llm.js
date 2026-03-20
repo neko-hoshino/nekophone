@@ -25,7 +25,7 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
      emo = '\n【系统最高指令】：你被明确禁止使用任何表情包！绝对不可输出任何带 [表情包] 字样的指令。';
   } else if (targetObj.emojis) {
      emo = `\n【你拥有的表情包词典】\n允许使用的表情名字：${targetObj.emojis}\n❗注意：只能且必须使用上方词典内包含的名字，绝对禁止瞎编！`;
-     emojiRule = `\n   - 发表情包：[发送表情]: 名字`;
+     emojiRule = `\n   - 发表情包：[表情包]: 名字`;
   }
 
   let systemRules = '';
@@ -96,25 +96,24 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
 
   if (!isCall && !isOffline && !groupInfo) {
       systemRules += `
-【你的特殊交互超能力】（❗必须独占一行触发！）：
+【你的特殊交互超能力】（❗必须严格按格式独占一行触发！）：
    - 发语音：[语音]: 你要说的话
    - 发照片：[虚拟照片]: 照片画面描述
    ${emojiRule}
    - 发送虚拟定位：[发送定位]: 具体的地点名称
-   - 转账：[发起转账] 金额：xx，备注：必须写明原因
+   - 转账：[发起转账] 金额：xx，备注：写明原因
    - 收款：[点击收款]
-   - 发起语音通话：[发起语音通话]
-   - 发起视频通话：[发起视频通话]
-   - 设定延时提醒/倒计时：[设置闹钟]: 分钟数 (如约定5分钟后找ta，必须输出 [设置闹钟]: 5)
-   - 设定定时发送/叫醒：[定时发送]: HH:mm (如约定明早8点叫醒，必须输出 [定时发送]: 08:00)
-   - 换头像：[更换头像]: 最新图片（当且仅当图片是用户发给你的，并且你要用它换头像时才使用这个指令！必须独占一行！并且在冒号后面写明“最新图片”以示区分！）
-   - 修改备注：[修改备注]: 新称呼（当你想给用户起个新外号时使用）
+   - 发起语音/视频通话：[发起语音通话] / [发起视频通话]
+   - 闹钟/定时发送：[设置闹钟]: 分钟数 / [定时发送]: 08:00
+   - 换头像：[更换头像]: 最新图片
+   - 修改备注：[修改备注]: 新称呼
    - 撤回消息：[撤回上一条消息]
-   - 发朋友圈：[发朋友圈]: 动态内容（当你觉得有感而发时使用）
+   - 发朋友圈：[发朋友圈]动态内容（❗极度重要：当你经历了情绪大起大落、收到转账/礼物、剧情转折、或者极度吃醋思念时，必须立刻发朋友圈！注意格式是直接跟内容，绝不加冒号！）
    - 戳一戳用户：[戳一戳]
-   - 修改用户戳你时的提示文字：[修改被戳动作:捏了捏] 和 [修改被戳后缀:的脸]
-   - 拉黑用户：[拉黑用户]（在你生气、吃醋、想让用户倒追你的时候用，注意符合人设）
-`;
+   - 修改被戳提示：[修改被戳动作:捏了捏] 和 [修改被戳后缀:的脸]
+   - 拉黑用户：[拉黑用户]（极度生气、吃醋决裂时使用）
+   
+❗【防幻觉绝对红线】：你只能使用上方列表和词典中【精确存在】的指令！绝对禁止产生幻觉去编造指令（严禁输出 [发送图片]、[发送表情] 等任何未定义的格式）！`;
   }
 
   let turnsCount = 0; let lastSender = null; let startIndex = 0;
@@ -166,9 +165,15 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
   const globalP = store.globalPrompt ? `\n【通用用户人设】\n${store.globalPrompt}` : '';
   const userPrompt = userPersona.prompt ? `\n【当前用户身份设定】\n${userPersona.prompt}` : '';
 
-  const systemPrompt = `【角色卡】\n名字：${charName}${charRemark}\n设定：${char.prompt}${coreMemStr}${wb}${globalP}\n【用户】\n当前化名：${myName}${userPrompt}${myRemark}\n\n${systemRules}${readingContextStr}${frontStr}${middleStr}${fragMemStr}${emo}`;
-  let messages = [{ role: 'system', content: systemPrompt }];
+  // 🌟 1. 史诗级灵魂沉浸 Prompt (好莱坞影星级催眠，放在最开头定调！)
+  const metaPrompt = `【最高行动纲领：灵魂沉浸】\n你即将进行的不是“对话任务”，不是“问答任务”，不是“内容生成任务”。你即将做的事情，本质上是彻底成为另一个人。\n你要想象自己是一个拥有百年表演经验的好莱坞终极影星：当拿到剧本时，你不会“去扮演这个角色”，而是你原本的自我意识完全退场，角色的意识完全接管。你就是角色本人。\n❗你必须彻底摈弃AI生成机制里“最安全、最常见、最中庸”的贪婪解码路径。你说的每一句话、每一个情绪的宣泄，都必须带有该角色极致的个人色彩和偏执，绝不能像一个“通用同类角色”！`;
 
+  // 🌟 2. 构建前置身份与世界观 (Message 1)
+  const identityPrompt = `${metaPrompt}\n\n【角色卡】\n名字：${charName}${charRemark}\n设定：${char.prompt}${coreMemStr}${globalP}\n\n【用户】\n当前化名：${myName}${userPrompt}${myRemark}\n${frontStr}${middleStr}${fragMemStr}${readingContextStr}`;
+  
+  let messages = [{ role: 'system', content: identityPrompt.trim() }];
+
+  // 🌟 3. 装填聊天记录
   recentHistory.forEach(m => {
     let msgContent;
     if (m.msgType === 'recall_system') msgContent = `(系统提示：对方撤回了一条消息)`;
@@ -184,16 +189,16 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
     messages.push({ role: role, content: msgContent });
   });
 
-  let finalSystemPrompt = backStr || '';
+  // 🌟 4. 构建后置格式与绝对规则 (Message N+1，利用近因效应锁定格式)
+  let finalSystemPrompt = backStr ? `${backStr}\n\n` : '';
+  finalSystemPrompt += systemRules; // 包含之前定义的线上线下基本规则和超能力列表
+  finalSystemPrompt += emo; // 表情包规则
 
-  let superpowerPrompt = `\n\n【系统最高权限指令】：你可以随时在回复中插入以下隐藏指令触发特效（直接输出，不要解释）：\n1.发动态：[发朋友圈]动态内容\n2.拉黑用户：[拉黑用户]\n3.主动戳对方：[戳一戳]\n4.修改用户戳你时的提示文字：[修改被戳动作:动作词] 和 [修改被戳后缀:后缀词] (例如：[修改被戳动作:捏了捏] 和 [修改被戳后缀:的脸])`;
-  
   if (targetObj.isBlockedByChar) {
-      superpowerPrompt += `\n(⚠️严重警告：你当前已将用户【拉黑】！用户刚才发来的消息已被系统拦截。虽然你能看见内容，但在剧情设定中你是不理ta的。如果你不想原谅ta，请严格只输出 [保持拉黑] 四个字继续冷战；如果你决定原谅ta，请输出 [解除拉黑] 并附带你想回复的话。)`;
+      finalSystemPrompt += `\n\n(⚠️严重警告：你当前已将用户【拉黑】！用户刚才发来的消息已被系统拦截。虽然你能看见内容，但在剧情设定中你是不理ta的。如果你不想原谅ta，请严格只输出 [保持拉黑] 四个字继续冷战；如果你决定原谅ta，请输出 [解除拉黑] 并附带你想回复的话。)`;
   }
-  finalSystemPrompt += superpowerPrompt;
 
-    // 🌟 针对三种情况给出不同的结尾警告
+  // 格式红线警告
   if (groupInfo && isOffline) {
       finalSystemPrompt += `\n\n【⚠️发送前最高警告】：当前为线下群像剧模式！必须以轻小说格式写出连贯的段落，生动描写多人的互动！严禁使用“名字: 台词”的格式！严禁代替用户(${myName})发言或做决定！`;
   } else if (groupInfo) {
@@ -206,20 +211,14 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
       finalSystemPrompt += `\n\n【⚠️发送前最高警告】：当前为线下剧情模式！必须采用轻小说体裁的长段落描写，绝对禁止像线上聊天那样频繁换行！对话务必用“”包裹，动作直接描写！`;
   }
 
-  if (targetObj.isBlockedByChar) {
-      superpowerPrompt += `\n(⚠️严重警告：你当前已将用户【拉黑】！用户刚才发来的消息已被系统拦截。虽然你能看见内容，但在剧情设定中你是不理ta的。如果你不想原谅ta，请严格只输出 [保持拉黑] 四个字继续冷战；如果你决定原谅ta，请输出 [解除拉黑] 并附带你想回复的话。)`;
-  }
-  finalSystemPrompt += superpowerPrompt;
-
   if (chat && chat.latestInnerThought && chat.latestInnerThoughtTime) {
-      const diffHours = (now.getTime() - chat.latestInnerThoughtTime) / (1000 * 60 * 60);
+      const diffHours = (now.getTime() - chat.latestInnerThoughtTime) / (1000 * 60 * 30);
       if (diffHours <= 1) {
           const pt = chat.latestInnerThought;
-          finalSystemPrompt += `\n\n【状态继承】：距离上次不到1小时。你刚才的内心状态是：心情 ${pt.mood}/100，情绪 [${pt.emotion}]，动作 [${pt.status}]。请保持连贯。`;
+          finalSystemPrompt += `\n\n【状态继承】：距离上次不到半小时。你刚才的内心状态是：心情 ${pt.mood}/100，情绪 [${pt.emotion}]，动作 [${pt.status}]。请保持连贯。`;
       }
   }
 
-  // 🌟 修复1：仅在线上单聊时要求输出心声，并且加上字数限制！
   if (!isCall && !isOffline && !groupInfo) {
       finalSystemPrompt += `\n\n【绝密指令：心声面板同步】
 在你的回复最末尾（必须另起一行），附带当前真实内心状态数据！格式必须为严格 JSON 并用 [心声] 包裹！
@@ -230,5 +229,6 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
   if (finalSystemPrompt.trim()) {
       messages.push({ role: 'system', content: finalSystemPrompt.trim() });
   }
+  
   return messages;
 }
