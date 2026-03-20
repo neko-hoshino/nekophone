@@ -30,6 +30,8 @@ const cpState = {
   isDiaryTyping: false, // 🌟 新增：记录 AI 是否正在补写日记
   showCommentEdit: false, // 🌟 新增：控制评论编辑弹窗
   editingCommentIdx: null, // 🌟 新增：记录当前正在编辑哪一条
+  locData: null, // 🌟 新增：存放 AI 生成的定位与健康数据
+  isLocRefreshing: false // 🌟 新增：防止重复点击刷新的锁
 };
 
 // 🌟 注入日记本满血默认配置
@@ -64,7 +66,8 @@ if (!window.cpActions) {
     },
     deleteAnniversary: (id) => {
        if (!confirm('确定要删除这个纪念日吗？')) return;
-       store.anniversaries = store.anniversaries.filter(a => a.id !== id); window.render();
+       store.anniversaries = store.anniversaries.filter(a => String(a.id) !== String(id)); 
+       window.render();
     },
     
     // 日记本
@@ -230,7 +233,44 @@ if (!window.cpActions) {
         }
     },
 
-    openLocation: () => { cpState.view = 'location'; window.render(); },
+    // 🌟 每次点开定位，自动重置为空状态，等你刷新！
+    openLocation: () => { cpState.view = 'location'; cpState.locData = null; window.render(); },
+
+    // 🌟 全息定位 AI 生成引擎！
+    refreshLocationData: async () => {
+        if (cpState.isLocRefreshing) return;
+        const char = store.contacts.find(c => c.id === cpState.activeCharId);
+        if (!store.apiConfig?.apiKey) return window.actions.showToast('请先配置 API Key');
+
+        cpState.isLocRefreshing = true; window.render();
+        window.actions.showToast('正在通过时空信号获取 TA 的实时行踪...');
+
+        try {
+            const historyStr = getTodayChatHistory(char.id, getLogicalDateStr());
+            let memoryStr = '';
+            const memories = (store.memories || []).filter(m => m.charId === char.id);
+            if (memories.length > 0) {
+                memoryStr = '\n【你的记忆】\n' + memories.map(m => `- ${m.content}`).join('\n');
+            }
+
+            const promptStr = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${memoryStr}\n\n【今日聊天记录回忆】\n${historyStr}\n\n【任务】请结合上述信息、你的人设属性以及当前时间（${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'})}），脑洞大开，推测并生成TA今天极其符合人设的行踪与健康数据。\n必须返回合法的 JSON 格式数据，结构如下：\n{\n  "distance": 距离用户的公里数(浮点数，比如2.5，如果是异地恋可以设得很大),\n  "steps": 今日运动步数(整数),\n  "places": [\n    {"time": "08:30", "name": "温馨小窝 (出门)"}\n  ], // 按时间顺序排列今天去过的地方，至少1个最多5个\n  "sleepHours": [6.5, 7.0, 5.5], // 前天、昨天、今天凌晨的睡眠时长(3个浮点数)\n  "sleepEval": "对TA近期睡眠状态的评价和关心（50字以内，纯口语语气，温暖自然，易于阅读）",\n  "phone": {\n    "total": "6.5h",\n    "app1": {"name": "微信", "time": "2.5h"},\n    "app2": {"name": "抖音", "time": "1.8h"}\n  }\n}\n❗警告：只能输出 JSON 格式文本，绝不要带有 \`\`\`json 等任何 Markdown 包裹，也不要有多余解释！`;
+
+            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.85 })
+            });
+            const data = await res.json();
+            let content = data.choices[0].message.content.trim();
+            // 物理刮除可能带有的大模型 markdown
+            content = content.replace(/```json/gi, '').replace(/```/g, '').trim(); 
+            cpState.locData = JSON.parse(content);
+        } catch (e) {
+            console.error('获取行踪失败', e);
+            window.actions.showToast('信号干扰，获取行踪失败');
+        } finally {
+            cpState.isLocRefreshing = false; window.render();
+        }
+    },
 
     notBuilt: (name) => { window.actions.showToast(name + ' 功能正在快马加鞭施工中！'); }
   };
@@ -383,16 +423,39 @@ export function renderCoupleApp(store) {
                   <div class="flex flex-col items-end z-10 pr-6">
                      <div class="flex items-start">
                         <span class="text-[10px] text-rose-400 font-bold tracking-widest mt-1.5 mr-1">${a.daysLeft === 0 ? '' : '还有'}</span>
-                        ${a.daysLeft > 0 ? `<span class="text-4xl font-black text-rose-400 font-serif drop-shadow-sm leading-none">${a.daysLeft}<span class="text-[12px] font-bold ml-1 text-rose-300 font-sans">天</span></span>` : '<span class="text-[16px] font-black text-rose-400 font-serif tracking-widest mt-1.5">就是今天</span>'}
+                        ${a.daysLeft > 0 ? `<span class="text-4xl font-black text-rose-400 font-serif drop-shadow-sm leading-none">${a.daysLeft}<span class="text-[12px] font-bold ml-1 text-rose-300 font-sans">天</span></span>` : '<span class="text-[16px] font-black text-rose-400 font-serif tracking-widest mt-1.5">今天</span>'}
                      </div>
                   </div>
-                  <div class="absolute right-3 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer p-2 bg-rose-50 rounded-full" onclick="window.cpActions.deleteAnniversary(${a.id})">
+                  <div class="absolute right-4 top-1/2 -translate-y-1/2 cursor-pointer p-2 bg-rose-50 rounded-full active:scale-90 transition-transform z-50" onclick="window.cpActions.deleteAnniversary('${a.id}')">
                       <i data-lucide="trash-2" class="w-4 h-4 text-rose-400"></i>
                   </div>
                </div>
             `).join('')}
          </div>
-         ${cpState.showAddModal ? `...此处弹窗代码保持不变...` : ''}
+         ${cpState.showAddModal ? `
+         <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in" onclick="window.cpActions.closeAddModal()">
+             <div class="bg-[#fcfcfc] w-full max-w-sm rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+                 <div class="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-white">
+                     <span class="font-bold text-gray-800 text-[16px]">新增纪念日</span>
+                 </div>
+                 <div class="p-6 flex flex-col space-y-4">
+                     <div>
+                         <span class="text-[12px] font-bold text-gray-500 mb-1.5 block">纪念日名称</span>
+                         <input id="anni-name" type="text" placeholder="例如：在一起啦、第一次看海" class="w-full bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[16px] text-gray-800 shadow-sm">
+                     </div>
+                     <div>
+                         <span class="text-[12px] font-bold text-gray-500 mb-1.5 block">日期</span>
+                         <input id="anni-date" type="date" class="w-full bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[16px] text-gray-800 shadow-sm">
+                     </div>
+                     <div>
+                         <span class="text-[12px] font-bold text-gray-500 mb-1.5 block">想说的话 / 经过 (选填)</span>
+                         <textarea id="anni-desc" placeholder="写点什么来纪念这一天吧..." class="w-full h-24 bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[16px] text-gray-800 shadow-sm resize-none"></textarea>
+                     </div>
+                     <button onclick="window.cpActions.saveAnniversary()" class="w-full py-3.5 bg-rose-400 text-white font-extrabold rounded-[14px] active:scale-95 transition-transform shadow-md tracking-widest text-[15px] mt-2">保存纪念日</button>
+                 </div>
+             </div>
+         </div>
+         ` : ''}
       </div>
      `;
   }
@@ -402,18 +465,17 @@ export function renderCoupleApp(store) {
      const char = store.contacts.find(c => c.id === cpState.activeCharId);
      if (!char) return '';
 
-     // 动态生成一些逼真的拟态数据
-     const distance = (Math.random() * 6 + 1.5).toFixed(1);
-     const steps = Math.floor(Math.random() * 8000 + 3500);
-     const places = [
-         { time: '08:30', name: '温馨小窝 (出门)' },
-         { time: '09:15', name: '星巴克 (买咖啡)' },
-         { time: '09:40', name: '公司 (搬砖中)' },
-         { time: '12:30', name: '附近商圈 (午餐)' },
-         { time: '18:10', name: '健身房 (挥洒汗水)' }
-     ];
-     // 睡眠评价（精确控制在49个字）
-     const sleepEval = "近期睡眠不太稳定，昨晚似乎失眠了，深度睡眠偏短。记得提醒ta少喝咖啡，晚上早点放下手机休息，抱抱！";
+     // 🌟 接入 AI 全息大脑生成的数据！
+     const loc = cpState.locData || {};
+     const distance = loc.distance !== undefined ? loc.distance : '--';
+     const steps = loc.steps !== undefined ? loc.steps : '--';
+     const places = loc.places || [];
+     const sleepHours = loc.sleepHours || [0, 0, 0];
+     const sleepEval = loc.sleepEval || "暂无数据，请点击右上角刷新按钮，获取 TA 的实时行踪。";
+     const phone = loc.phone || { total: '--', app1: {name: '未知', time: '--'}, app2: {name: '未知', time: '--'} };
+
+     // 根据时长计算柱状图高度 (最大 50px)
+     const getBarHeight = (h) => Math.min(Math.max((h / 12) * 50, 4), 50);
 
      return `
       <div class="w-full h-full bg-[#f4f5f7] flex flex-col relative animate-in slide-in-from-right-4 duration-300 z-[60] overflow-hidden">
@@ -424,6 +486,10 @@ export function renderCoupleApp(store) {
             
             <div class="absolute top-12 left-5 z-20 cursor-pointer active:scale-90 p-2 bg-white/70 backdrop-blur-md rounded-full shadow-sm border border-white/50" onclick="window.cpActions.goBackToDashboard()">
                <i data-lucide="chevron-left" class="w-6 h-6 text-gray-800"></i>
+            </div>
+
+            <div class="absolute top-12 right-5 z-20 cursor-pointer active:scale-90 p-2 bg-white/70 backdrop-blur-md rounded-full shadow-sm border border-white/50" onclick="window.cpActions.refreshLocationData()">
+               <i data-lucide="refresh-cw" class="w-6 h-6 text-gray-800 ${cpState.isLocRefreshing ? 'animate-spin' : ''}"></i>
             </div>
             
             <svg class="absolute inset-0 w-full h-full pointer-events-none" style="z-index: 5;">
@@ -450,10 +516,10 @@ export function renderCoupleApp(store) {
             <div class="bg-white rounded-[20px] p-5 shadow-[0_4px_15px_rgba(0,0,0,0.02)] border border-gray-100">
                <div class="flex items-center justify-between mb-5">
                   <span class="text-[15px] font-extrabold text-gray-800 tracking-wide flex items-center"><i data-lucide="map" class="w-4 h-4 mr-1.5 text-blue-500"></i>今日行踪</span>
-                  <span class="text-[11px] font-extrabold text-blue-500 bg-blue-50 px-2.5 py-1 rounded-md tracking-widest">去了 ${places.length} 个地方</span>
+                  <span class="text-[11px] font-extrabold text-blue-500 bg-blue-50 px-2.5 py-1 rounded-md tracking-widest">${places.length > 0 ? `去了 ${places.length} 个地方` : '等待刷新'}</span>
                </div>
-               <div class="relative border-l-2 border-gray-100 ml-2 space-y-4">
-                  ${places.map((p, i) => `
+               <div class="relative border-l-2 border-gray-100 ml-2 space-y-4 transition-all duration-300">
+                  ${places.length === 0 ? '<div class="text-[12px] text-gray-400 pl-3">暂无行踪，请点击右上角刷新获取</div>' : places.map((p, i) => `
                      <div class="relative pl-5">
                         <div class="absolute -left-[5px] top-1.5 w-2 h-2 rounded-full ${i === places.length - 1 ? 'bg-blue-500 ring-4 ring-blue-50' : 'bg-gray-300'}"></div>
                         <div class="flex items-center space-x-3">
@@ -484,18 +550,18 @@ export function renderCoupleApp(store) {
                   <div class="relative w-16 h-16 rounded-full flex items-center justify-center mb-4 shadow-sm" style="background: conic-gradient(#a855f7 0% 50%, #ec4899 50% 80%, #f3f4f6 80% 100%);">
                      <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center flex-col">
                         <span class="text-[9px] font-bold text-gray-400 tracking-widest">总计</span>
-                        <span class="text-[11px] font-black text-gray-800">6.5h</span>
+                        <span class="text-[11px] font-black text-gray-800">${phone.total}</span>
                      </div>
                   </div>
                   
                   <div class="w-full space-y-2">
                      <div class="flex justify-between items-center text-[10px] font-bold">
-                        <div class="flex items-center"><span class="w-2 h-2 rounded-full bg-purple-500 mr-1.5"></span><span class="text-gray-600">微信</span></div>
-                        <span class="text-gray-800">2.5h</span>
+                        <div class="flex items-center"><span class="w-2 h-2 rounded-full bg-purple-500 mr-1.5"></span><span class="text-gray-600">${phone.app1.name}</span></div>
+                        <span class="text-gray-800">${phone.app1.time}</span>
                      </div>
                      <div class="flex justify-between items-center text-[10px] font-bold">
-                        <div class="flex items-center"><span class="w-2 h-2 rounded-full bg-pink-500 mr-1.5"></span><span class="text-gray-600">抖音</span></div>
-                        <span class="text-gray-800">1.8h</span>
+                        <div class="flex items-center"><span class="w-2 h-2 rounded-full bg-pink-500 mr-1.5"></span><span class="text-gray-600">${phone.app2.name}</span></div>
+                        <span class="text-gray-800">${phone.app2.time}</span>
                      </div>
                   </div>
                </div>
@@ -503,22 +569,25 @@ export function renderCoupleApp(store) {
                <div class="bg-white rounded-[20px] p-4 shadow-[0_4px_15px_rgba(0,0,0,0.02)] border border-gray-100 flex flex-col">
                   <span class="text-[12px] font-extrabold text-gray-800 tracking-wide mb-3 flex items-center w-full justify-center"><i data-lucide="moon" class="w-3.5 h-3.5 mr-1 text-indigo-500"></i>睡眠监测</span>
                   
-                  <div class="flex justify-around items-end h-[56px] mb-3 border-b border-gray-100 pb-1.5">
+                  <div class="flex justify-around items-end h-[70px] mb-3 border-b border-gray-100 pb-1.5">
                      <div class="flex flex-col items-center">
-                        <div class="w-[14px] bg-indigo-200 rounded-t-sm" style="height: 36px;"></div>
-                        <span class="text-[8px] text-gray-400 mt-1 font-bold">前天</span>
+                        <span class="text-[10px] font-black text-indigo-400 mb-1 drop-shadow-sm">${cpState.locData ? sleepHours[0]+'h' : '--'}</span>
+                        <div class="w-[14px] bg-indigo-200 rounded-t-sm transition-all duration-700 ease-out" style="height: ${getBarHeight(sleepHours[0])}px;"></div>
+                        <span class="text-[9px] text-gray-400 mt-1 font-bold">前天</span>
                      </div>
                      <div class="flex flex-col items-center">
-                        <div class="w-[14px] bg-indigo-300 rounded-t-sm" style="height: 42px;"></div>
-                        <span class="text-[8px] text-gray-400 mt-1 font-bold">昨天</span>
+                        <span class="text-[10px] font-black text-indigo-400 mb-1 drop-shadow-sm">${cpState.locData ? sleepHours[1]+'h' : '--'}</span>
+                        <div class="w-[14px] bg-indigo-300 rounded-t-sm transition-all duration-700 ease-out delay-75" style="height: ${getBarHeight(sleepHours[1])}px;"></div>
+                        <span class="text-[9px] text-gray-400 mt-1 font-bold">昨天</span>
                      </div>
                      <div class="flex flex-col items-center">
-                        <div class="w-[14px] bg-indigo-500 rounded-t-sm" style="height: 28px;"></div>
-                        <span class="text-[8px] text-gray-400 mt-1 font-bold">今天</span>
+                        <span class="text-[10px] font-black text-indigo-500 mb-1 drop-shadow-sm">${cpState.locData ? sleepHours[2]+'h' : '--'}</span>
+                        <div class="w-[14px] bg-indigo-500 rounded-t-sm transition-all duration-700 ease-out delay-150" style="height: ${getBarHeight(sleepHours[2])}px;"></div>
+                        <span class="text-[9px] text-gray-400 mt-1 font-bold">今天</span>
                      </div>
                   </div>
                   
-                  <div class="text-[9px] text-gray-500 font-bold leading-relaxed tracking-wider">
+                  <div class="text-[12px] text-gray-600 bg-transparent font-medium leading-relaxed font-sans bg-gray-50/70 p-3 rounded-[12px] border border-gray-100 shadow-inner">
                      ${sleepEval}
                   </div>
                </div>
@@ -545,13 +614,13 @@ export function renderCoupleApp(store) {
         .ios-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: transform 0.3s ease; }
         .ios-switch:checked { background: #34c759; }
         .ios-switch:checked::after { transform: translateX(20px); }
-        /* 强行阻断 main.js 的背景污染，固定日记本底层色彩 */
+        /* 🌟 绝对防御装甲：抹杀外观主界面的背景图，同时释放底层颜色！ */
         #cp-diary-container { background-image: none !important; background-color: ${cfg.theme==='dark'?'#1a1c23':(cfg.theme==='vintage'?'#f4ebd0':(cfg.theme==='romance'?'#fff0f5':'#f8f9fa'))} !important; }
-        /* 纸张纹理引擎 */
-        .paper-lined { background-image: repeating-linear-gradient(transparent, transparent calc(${cfg.lineHeight}em - 1px), rgba(0,0,0,0.06) calc(${cfg.lineHeight}em - 1px), rgba(0,0,0,0.06) ${cfg.lineHeight}em) !important; background-attachment: local; }
-        .paper-grid { background-image: linear-gradient(rgba(0,0,0,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.04) 1px, transparent 1px) !important; background-size: 1.5em 1.5em !important; background-attachment: local; }
-        .paper-dotted { background-image: radial-gradient(rgba(0,0,0,0.08) 1.5px, transparent 1.5px) !important; background-size: 1.5em 1.5em !important; background-attachment: local; }
-        .paper-blank { background: transparent !important; }
+        /* 🌟 独立纹理引擎：极其强硬地覆盖，并跟随文字一起滚动！ */
+        #cp-diary-container .paper-layer-lined { background-image: repeating-linear-gradient(transparent, transparent calc(${cfg.lineHeight}em - 1px), rgba(0,0,0,0.1) calc(${cfg.lineHeight}em - 1px), rgba(0,0,0,0.1) ${cfg.lineHeight}em) !important; background-attachment: local !important; }
+        #cp-diary-container .paper-layer-grid { background-image: linear-gradient(rgba(0,0,0,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(0,0,0,0.1) 1px, transparent 1px) !important; background-size: 1.5em 1.5em !important; background-attachment: local !important; }
+        #cp-diary-container .paper-layer-dotted { background-image: radial-gradient(rgba(0,0,0,0.2) 1.5px, transparent 1.5px) !important; background-size: 1.5em 1.5em !important; background-attachment: local !important; }
+        #cp-diary-container .paper-layer-blank { background: transparent !important; }
      `;
 
      const themes = {
@@ -565,7 +634,7 @@ export function renderCoupleApp(store) {
      const logicalToday = getLogicalDateStr();
 
      return `
-      <div id="cp-diary-container" class="w-full h-full flex flex-col relative animate-in slide-in-from-right-4 duration-300 z-[60] transition-colors paper-${cfg.paper}">
+      <div id="cp-diary-container" class="w-full h-full flex flex-col relative animate-in slide-in-from-right-4 duration-300 z-[60] transition-colors" style="background: ${cfg.theme==='dark'?'#1a1c23':(cfg.theme==='vintage'?'#f4ebd0':(cfg.theme==='romance'?'#fff0f5':'#f8f9fa'))} !important;">
          <style>${customCss}</style>
 
          <div class="pt-14 pb-4 px-6 sticky top-0 z-10 flex items-center justify-between backdrop-blur-md bg-transparent">
@@ -580,7 +649,7 @@ export function renderCoupleApp(store) {
             <span class="text-[16px] font-bold tracking-widest font-serif ${isDark?'text-white':'text-gray-800'}">${displayDate}</span>
          </div>
 
-         <div class="flex-1 overflow-y-auto px-6 pb-6 hide-scrollbar relative"
+         <div class="flex-1 overflow-y-auto px-6 pb-6 hide-scrollbar relative paper-layer-${cfg.paper}"
               ontouchstart="window.diaryTsX = event.touches[0].clientX; window.diaryTsY = event.touches[0].clientY;"
               ontouchend="window.diaryTeX = event.changedTouches[0].clientX; window.diaryTeY = event.changedTouches[0].clientY;"
               onclick="
@@ -655,11 +724,11 @@ export function renderCoupleApp(store) {
                      <div class="grid grid-cols-2 gap-4">
                          <div>
                              <span class="text-[11px] font-bold text-gray-500 mb-1 block uppercase tracking-widest">每日撰写时间</span>
-                             <input id="diary-time-input" type="time" value="${cfg.time}" class="w-full bg-white border border-gray-200 rounded-[12px] p-2.5 outline-none text-[13px] text-gray-800 shadow-sm">
+                             <input id="diary-time-input" type="time" value="${cfg.time}" class="w-full bg-white border border-gray-200 rounded-[12px] px-3 py-2.5 outline-none text-[16px] text-gray-800 shadow-sm">
                          </div>
                          <div>
                              <span class="text-[11px] font-bold text-gray-500 mb-1 block uppercase tracking-widest">整体风格</span>
-                             <select id="diary-theme-select" class="w-full bg-white border border-gray-200 rounded-[12px] p-2.5 outline-none text-[13px] text-gray-800 shadow-sm">
+                             <select id="diary-theme-select" class="w-full bg-white border border-gray-200 rounded-[12px] px-3 py-2.5 outline-none text-[16px] text-gray-800 shadow-sm">
                                  <option value="default" ${cfg.theme==='default'?'selected':''}>极简纯白</option>
                                  <option value="vintage" ${cfg.theme==='vintage'?'selected':''}>复古牛皮</option>
                                  <option value="romance" ${cfg.theme==='romance'?'selected':''}>心动粉红</option>
@@ -672,7 +741,7 @@ export function renderCoupleApp(store) {
 
                      <div>
                          <span class="text-[11px] font-bold text-gray-500 mb-1 block uppercase tracking-widest">纸张纹理</span>
-                         <select id="diary-paper-select" class="w-full bg-white border border-gray-200 rounded-[12px] p-2.5 outline-none text-[13px] text-gray-800 shadow-sm">
+                         <select id="diary-paper-select" class="w-full bg-white border border-gray-200 rounded-[12px] px-3 py-2.5 outline-none text-[16px] text-gray-800 shadow-sm">
                              <option value="blank" ${cfg.paper==='blank'?'selected':''}>空白无痕</option>
                              <option value="lined" ${cfg.paper==='lined'?'selected':''}>横线信笺</option>
                              <option value="grid" ${cfg.paper==='grid'?'selected':''}>网格笔记</option>
@@ -682,7 +751,7 @@ export function renderCoupleApp(store) {
                      <div class="grid grid-cols-3 gap-3">
                          <div>
                              <span class="text-[10px] font-bold text-gray-500 mb-1 block">字距</span>
-                             <select id="diary-ls-select" class="w-full bg-white border border-gray-200 rounded-lg p-2 outline-none text-[12px] text-gray-800 shadow-sm">
+                             <select id="diary-ls-select" class="w-full bg-white border border-gray-200 rounded-lg py-2 pl-2 pr-0 outline-none text-[16px] text-gray-800 shadow-sm">
                                  <option value="normal" ${cfg.letterSpacing==='normal'?'selected':''}>默认</option>
                                  <option value="1px" ${cfg.letterSpacing==='1px'?'selected':''}>宽松</option>
                                  <option value="2px" ${cfg.letterSpacing==='2px'?'selected':''}>极宽</option>
@@ -690,7 +759,7 @@ export function renderCoupleApp(store) {
                          </div>
                          <div>
                              <span class="text-[10px] font-bold text-gray-500 mb-1 block">行距</span>
-                             <select id="diary-lh-select" class="w-full bg-white border border-gray-200 rounded-lg p-2 outline-none text-[12px] text-gray-800 shadow-sm">
+                             <select id="diary-lh-select" class="w-full bg-white border border-gray-200 rounded-lg py-2 pl-2 pr-0 outline-none text-[16px] text-gray-800 shadow-sm">
                                  <option value="1.5" ${cfg.lineHeight==='1.5'?'selected':''}>紧凑</option>
                                  <option value="1.8" ${cfg.lineHeight==='1.8'?'selected':''}>舒适</option>
                                  <option value="2.2" ${cfg.lineHeight==='2.2'?'selected':''}>散文</option>
@@ -698,7 +767,7 @@ export function renderCoupleApp(store) {
                          </div>
                          <div>
                              <span class="text-[10px] font-bold text-gray-500 mb-1 block">缩进</span>
-                             <select id="diary-ti-select" class="w-full bg-white border border-gray-200 rounded-lg p-2 outline-none text-[12px] text-gray-800 shadow-sm">
+                             <select id="diary-ti-select" class="w-full bg-white border border-gray-200 rounded-lg py-2 pl-2 pr-0 outline-none text-[16px] text-gray-800 shadow-sm">
                                  <option value="0" ${cfg.textIndent==='0'?'selected':''}>无缩进</option>
                                  <option value="2em" ${cfg.textIndent==='2em'?'selected':''}>空两格</option>
                              </select>

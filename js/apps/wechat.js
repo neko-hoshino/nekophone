@@ -447,12 +447,12 @@ window.wxActions = {
   // 去掉自动获取回复的逻辑，让它像文字一样可以暂存
   sendEmoji: (url, name = '表情') => {
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
-    // 🌟 获取正确的马甲名字
-        // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
+    if (chat) {
+      // 🌟 安全包裹：只有确定在聊天室里，才去解析马甲名字！
       const charObj = store.contacts.find(c => c.id === chat.charId);
       const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
-        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
-    if (chat) {
+      const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
+      
       chat.messages.push({ id: Date.now(), sender: boundPersona.name, text: `[表情包] ${name}`, imageUrl: url, isMe: true, source: 'wechat', isOffline: false, msgType: 'emoji', time: getNowTime() });
       wxState.showEmojiMenu = false; window.render(); window.wxActions.scrollToBottom();
     }
@@ -3499,6 +3499,63 @@ export function renderWeChatApp(store) {
           </div>
           <div class="border-t border-gray-100 mx-3 py-1.5 flex justify-between items-center text-[10px] text-gray-400"><span>聊天记录</span></div>
         `;
+      // --- 🌟 艺术级进化：渲染 iOS 风高级感纪念日卡片 ---
+              } else if (msg.msgType === 'anniversary_card') {
+                const cd = msg.cardData || {};
+                const anni = (store.anniversaries || []).find(a => String(a.id) === String(cd.anniId));
+                
+                maxWidthClass = 'max-w-[280px] w-full';
+                bubbleClass = 'bg-transparent shadow-none p-0 border-0'; 
+                bubbleStyle = ''; 
+                
+                if (!anni) {
+                    contentHtml = `<div class="text-[12px] text-gray-400 bg-gray-100 px-3 py-1.5 rounded-lg">该纪念日卡片已失效</div>`;
+                } else {
+                    const nth = (n) => n + (n % 10 === 1 && n % 100 !== 11 ? 'st' : n % 10 === 2 && n % 100 !== 12 ? 'nd' : n % 10 === 3 && n % 100 !== 13 ? 'rd' : 'th');
+                    
+                    // 🌟 提取天数数字
+                    const numMatch = cd.daysLeftText.match(/\d+/);
+                    const daysNum = numMatch ? numMatch[0] : '';
+                    const isToday = cd.daysLeftText.includes('今天');
+
+                    contentHtml = `
+                    <div class="relative z-10 cursor-pointer active:scale-95 transition-transform w-full" onclick="event.stopPropagation(); window.actions.showAnniDetail('${anni.id}')">
+                      <div class="bg-white border border-gray-100 rounded-[24px] p-5 shadow-sm flex flex-col items-center w-full">
+                        
+                        <div class="flex items-center space-x-3.5 w-full mb-3">
+                            <div class="w-10 h-10 bg-rose-50 rounded-full flex items-center justify-center shrink-0">
+                                <i data-lucide="heart" class="w-5 h-5 text-rose-400 fill-rose-100"></i>
+                            </div>
+                            <div class="flex flex-col text-left">
+                                <span class="text-[15px] font-bold text-gray-800">专属纪念日提醒</span>
+                                <span class="text-[11px] text-gray-400 tracking-wider">ANNIVERSARY</span>
+                            </div>
+                        </div>
+
+                        <div class="h-px w-full bg-gray-100 mb-3.5"></div>
+
+                        <div class="flex flex-col items-center w-full">
+                            <span class="text-[15px] font-bold text-gray-700">${anni.name}</span>
+                            
+                            ${isToday ? 
+                                `<span class="text-[36px] font-black text-red-500 tracking-tight leading-none py-3 drop-shadow-sm">今天</span>` : 
+                                `<div class="w-full flex justify-center items-baseline py-3">
+                                    <span class="text-[13px] font-bold text-gray-400 mr-2 tracking-widest">倒计时</span>
+                                    <span class="text-[38px] font-black ${cd.statusColor} tracking-tight leading-none drop-shadow-sm">${daysNum}<span class="text-[20px] ml-1">天</span></span>
+                                 </div>`
+                            }
+                            
+                            <span class="text-[13px] font-medium text-gray-500">${cd.origDateStr}</span>
+                            
+                            <span class="text-[11px] text-gray-400 font-medium mt-1">
+                                这是我们第 ${nth(cd.count)} 次过这个纪念日
+                            </span>
+                        </div>
+
+                      </div>
+                    </div>
+                    `;
+                }
       } else if (msg.msgType === 'emoji') {
         maxWidthClass = 'max-w-[25%]';
         bubbleClass = 'bg-transparent shadow-none'; 
@@ -4452,6 +4509,64 @@ export function renderWeChatApp(store) {
       setTimeout(() => {
           console.log('[系统] 启动全局朋友圈巡逻...');
           store.contacts.forEach(char => {
+            // 🌟 【新增】纪念日智能巡逻引擎：每天开机暗中核对日期！
+              const todayStr = new Date().toLocaleDateString('zh-CN');
+              if (store.anniversaries) {
+                  store.anniversaries.forEach(anni => {
+                      if (anni.lastRemindedDate === todayStr) return; // 🌟 每天每件事只提醒一次，绝不轰炸
+                      
+                      const today = new Date(); today.setHours(0,0,0,0);
+                      const origDate = new Date(anni.date); origDate.setHours(0,0,0,0);
+                      let nextDate = new Date(today.getFullYear(), origDate.getMonth(), origDate.getDate());
+                      if (nextDate < today) nextDate.setFullYear(today.getFullYear() + 1);
+                      const daysLeft = Math.ceil((nextDate - today) / (1000 * 60 * 60 * 24));
+                      
+                      // 🌟 触发条件：距离 3 天，或者刚好是今天！
+                      if (daysLeft === 3 || daysLeft === 0) {
+                          const chat = store.chats.find(c => c.charId === anni.charId);
+                          const char = store.contacts.find(c => c.id === anni.charId);
+                          if (!chat || !char) return;
+                          
+                          anni.lastRemindedDate = todayStr; // 打上今日已提醒标记
+                          
+                          // 精准提取你的马甲身份
+                          const pId = chat.isGroup ? chat.boundPersonaId : (char.boundPersonaId || store.personas[0].id);
+                          const myName = store.personas.find(p => p.id === pId)?.name || store.personas[0].name;
+                          
+                          const count = nextDate.getFullYear() - origDate.getFullYear();
+                          const yyyy = origDate.getFullYear(); const mm = origDate.getMonth()+1; const dd = origDate.getDate();
+                          
+                          // 🌟 生成极其精美的纯文本卡片！在绿色气泡里极其好看！
+                          // 🌟 1. 艺术级进化：将纯文本升级为高级卡片数据对象！
+                          const origDateStr = origDate.toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+                          
+                          // 组装要在 UI 里显示的文字和颜色
+                          const daysLeftText = daysLeft === 0 ? '今天' : '倒计时 3 天';
+                          const statusColor = daysLeft === 0 ? 'text-red-600' : 'text-amber-600';
+
+                          chat.messages.push({
+                              id: Date.now() + Math.random(), sender: myName, 
+                              // 🌟 将 text 字段作为 AI 看到的纯文本描述
+                              text: `[纪念日提醒卡片] 名称：${anni.name} ${daysLeftText} 这是我们第 ${count} 次过这个纪念日`, 
+                              isMe: true, isHidden: false, 
+                              // 🌟 物理类型升级为高级卡片！
+                              msgType: 'anniversary_card', 
+                              // 🌟 包含渲染所需的全部高级数据
+                              cardData: {
+                                  name: anni.name,
+                                  origDateStr,
+                                  count, // 这里是数字，我们稍后在 UI 里处理序数
+                                  daysLeftText,
+                                  statusColor,
+                                  anniId: anni.id
+                              },
+                              time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+                          });
+                          
+                          if (typeof window.render === 'function') window.render();
+                      }
+                  });
+              }
               const chat = store.chats.find(c => c.charId === char.id);
               if (chat && typeof window.scheduleCloudTask === 'function') {
                   window.scheduleCloudTask(chat.charId);
