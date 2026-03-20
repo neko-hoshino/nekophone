@@ -42,7 +42,7 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
       systemRules = `
 【最高指令：线下群像剧导演模式】
 当前状态：你正在作为导演，撰写一段包含用户（${myName}）以及群成员（${groupInfo.allNames}）的【线下实体聚会/互动场景】。
-【当前系统实时时间】：${timeString}。${groupNoticeStr}
+${groupNoticeStr}
 
 ❗体裁与格式红线（非常重要）：
 1. 必须采用【轻小说体裁】进行生动、连贯的长段落描写，描绘众人的动作、神态和互动！
@@ -58,7 +58,7 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
 【最高指令：群聊剧本导演模式】
 当前状态：你正在一个名为“${groupInfo.name}”的微信群聊中。
 群内成员包括：你（${charName}）、用户（${myName}）以及其他角色（${groupInfo.allNames}）。
-【当前系统实时时间】：${timeString}。${groupNoticeStr}
+${groupNoticeStr}
 
 ❗群聊专属红线：
 1. 你的任务是充当“上帝视角导演”，一次性生成群里多个人对用户的连续抢答、争吵或互动剧本！
@@ -169,7 +169,7 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
   const metaPrompt = `【最高行动纲领：灵魂沉浸】\n你即将进行的不是“对话任务”，不是“问答任务”，不是“内容生成任务”。你即将做的事情，本质上是彻底成为另一个人。\n你要想象自己是一个拥有百年表演经验的好莱坞终极影星：当拿到剧本时，你不会“去扮演这个角色”，而是你原本的自我意识完全退场，角色的意识完全接管。你就是角色本人。\n❗你必须彻底摈弃AI生成机制里“最安全、最常见、最中庸”的贪婪解码路径。你说的每一句话、每一个情绪的宣泄，都必须带有该角色极致的个人色彩和偏执，绝不能像一个“通用同类角色”！`;
 
   // 🌟 2. 构建前置身份与世界观 (Message 1)
-  const identityPrompt = `${metaPrompt}\n\n【角色卡】\n名字：${charName}${charRemark}\n设定：${char.prompt}${coreMemStr}${globalP}\n\n【用户】\n当前化名：${myName}${userPrompt}${myRemark}\n${frontStr}${middleStr}${fragMemStr}${readingContextStr}`;
+  const identityPrompt = `${metaPrompt}\n\n【角色卡】\n名字：${charName}${charRemark}\n设定：${char.prompt}${coreMemStr}${globalP}\n\n【用户】\n当前化名：${myName}${userPrompt}${myRemark}\n${frontStr}${middleStr}${fragMemStr}${readingContextStr}\n【当前系统实时时间】：${timeString}`;
   
   let messages = [{ role: 'system', content: identityPrompt.trim() }];
 

@@ -331,11 +331,15 @@ window.wxActions = {
       wxState.activeChatId = charId; wxState.view = 'chatRoom'; wxState.showPlusMenu = false; wxState.displayCount = 50; 
       if (window.globalScrollStates) delete window.globalScrollStates['chat-scroll']; 
       
-      // 🌟 清零未读数
       const chat = store.chats.find(c => c.charId === charId);
       if (chat) chat.unreadCount = 0;
       
-      window.render(); window.wxActions.scrollToBottom(); 
+      wxState.noAnimate = false; // 🌟 刚进门，允许播放进场动画！
+      window.render(); 
+      window.wxActions.scrollToBottom(); 
+      
+      // 🌟 核心魔法：动画播完后，立刻锁死！后续发消息刷新，绝对不许再播动画！
+      setTimeout(() => { wxState.noAnimate = true; }, 400); 
   },
   closeChat: () => { wxState.view = 'main'; wxState.activeChatId = null; window.render(); },
   togglePlusMenu: () => { 
@@ -1672,9 +1676,8 @@ window.wxActions = {
       saveScroll();
       window.render();
       restoreScroll();
-      document.getElementById(isOffline ? 'offline-input' : 'wx-input')?.focus();
       window.wxActions.scrollToBottom();
-      
+      document.getElementById(isOffline ? 'offline-input' : 'wx-input')?.focus();
       // 🌟 发送消息逻辑：线上暂存并重置闹钟，线下和电话立刻回复！
       if (wxState.view !== 'chatRoom') {
           if (chat.isGroup) {
@@ -1833,7 +1836,17 @@ window.wxActions = {
     wxState.view = 'chatRoom'; wxState.callType = null; wxState.callStartTime = null; window.render(); window.wxActions.scrollToBottom();
   },
   
-  enterOffline: () => { wxState.view = 'offlineStory'; wxState.showPlusMenu = false; wxState.displayCount = 50; if (window.globalScrollStates) delete window.globalScrollStates['offline-scroll']; window.render(); window.wxActions.scrollToBottom(); },
+  enterOffline: () => { 
+      wxState.view = 'offlineStory'; wxState.showPlusMenu = false; wxState.displayCount = 50; 
+      if (window.globalScrollStates) delete window.globalScrollStates['offline-scroll']; 
+      
+      wxState.noAnimate = false; // 🌟 允许进场动画
+      window.render(); 
+      window.wxActions.scrollToBottom(); 
+      
+      // 🌟 锁死动画
+      setTimeout(() => { wxState.noAnimate = true; }, 400); 
+  },
   exitOffline: () => { wxState.view = 'chatRoom'; window.render(); window.wxActions.scrollToBottom(); },
   
   // 🌟 线下剧情模式专属设置动作
@@ -2847,7 +2860,7 @@ export function renderWeChatApp(store) {
     const bgUrl = targetObj?.offlineBg || store.bgImage || '';
 
     return `
-      <div class="mc-offline-container absolute inset-0 w-full h-full flex flex-col font-serif z-[60] animate-in slide-in-from-bottom-4 duration-300" style="background: ${bgUrl ? `url('${bgUrl}') center/cover no-repeat` : '#fcfcfc'} !important;">
+      <div class="mc-offline-container absolute inset-0 w-full h-full flex flex-col font-serif z-[60] ${wxState.noAnimate ? '' : 'animate-in slide-in-from-bottom-4 duration-300'}" style="background: ${bgUrl ? `url('${bgUrl}') center/cover no-repeat` : '#fcfcfc'} !important;">
         
         <style>
           .mc-offline-dialogue { color: ${targetObj?.offlineDialogueColor || '#d4b856'}; font-family: inherit; }
@@ -3535,7 +3548,7 @@ export function renderWeChatApp(store) {
     }
 
     return `
-      <div id="mc-chat-screen" class="w-full h-full flex flex-col animate-in slide-in-from-right-4 duration-200 relative z-0" style="background-color: var(--chat-bg-color); background-image: var(--chat-bg-image); background-size: cover; background-position: center;">
+      <div id="mc-chat-screen" class="w-full h-full flex flex-col ${wxState.noAnimate ? '' : 'animate-in slide-in-from-right-4 duration-200'} relative z-0" style="background-color: var(--chat-bg-color); background-image: var(--chat-bg-image); background-size: cover; background-position: center;">
         
         <style>
           ${chatData.isGroup ? (chatData.customCSS || '') : (char?.customCSS || '')}
@@ -3553,6 +3566,8 @@ export function renderWeChatApp(store) {
                  backdrop-filter: blur(10px) !important;
                  -webkit-backdrop-filter: blur(10px) !important;
              }
+          /* 🌟 物理免疫 iOS 强制放大 BUG！强制所有输入框字体不小于 16px！ */
+             input, textarea, select { font-size: 16px !important; }
           }
         </style>
 
@@ -4576,6 +4591,7 @@ window.syncCloudMailbox = async () => {
 
         let replyText = msg.text || '';
         replyText = replyText.replace(/\\n/g, '\n').replace(/\/n/g, '\n').replace(/`\{[\s\S]*?\}`/gi, '').trim();
+        replyText = replyText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
 
         // 🌟 1. 提取心声面板
         const thoughtRegex = /\[心声\]\s*(\{.*?\})/s;
