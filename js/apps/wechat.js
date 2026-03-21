@@ -295,6 +295,31 @@ window.wxActions = {
       wxState.view = 'chatRoom';
       window.render();
   },
+  // 🌟 群聊身份切换
+  updateGroupPersona: (val) => {
+      saveScroll();
+      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+      if (chat && chat.isGroup) {
+          chat.boundPersonaId = val;
+          window.actions.showToast('群内身份已切换！');
+          window.render();
+      }
+      restoreScroll();
+  },
+  // 🌟 删除聊天室 / 解散群聊
+  deleteChatRoom: () => {
+      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+      if (!chat) return;
+      const isGroup = chat.isGroup;
+      if (!confirm(`🚨 确定要${isGroup ? '解散群聊' : '删除该聊天'}吗？此操作仅清除聊天记录并从列表移除，不会删除角色或记忆！`)) return;
+      
+      store.chats = store.chats.filter(c => c.charId !== wxState.activeChatId);
+      window.actions.showToast(isGroup ? '群聊已解散' : '聊天已删除');
+      
+      wxState.activeChatId = null;
+      wxState.view = 'main';
+      window.render();
+  },
   toggleBlockCharacter: () => {
       const char = store.contacts.find(c => c.id === wxState.activeChatId);
       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
@@ -367,7 +392,7 @@ window.wxActions = {
       else wxState.momentPrivacyGroups.push(groupId);
       window.render();
   },
-  // 戳一戳动作
+
   // 戳一戳动作
   sendNudge: (charId) => {
     saveScroll();
@@ -520,6 +545,90 @@ window.wxActions = {
        }
     }
   },
+  // ================= 🌟 跨次元群聊关联引擎 =================
+  toggleGroupMountModal: () => { 
+      saveScroll();
+      wxState.showGroupMountModal = !wxState.showGroupMountModal; 
+      window.render(); 
+      restoreScroll();
+  },
+  toggleGroupMount: (groupId) => {
+      saveScroll();
+      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+      const targetObj = chat.isGroup ? chat : store.contacts.find(c => c.id === wxState.activeChatId);
+      if (!targetObj.linkedGroups) targetObj.linkedGroups = [];
+      if (targetObj.linkedGroups.includes(groupId)) {
+          targetObj.linkedGroups = targetObj.linkedGroups.filter(id => id !== groupId);
+      } else {
+          targetObj.linkedGroups.push(groupId);
+      }
+      window.render();
+      restoreScroll();
+  },
+  getLinkedGroupContext: (targetObj) => {
+      if (!targetObj.linkedGroups || targetObj.linkedGroups.length === 0) return null;
+      let injectedContext = [];
+      targetObj.linkedGroups.forEach(gId => {
+          const groupChat = store.chats.find(c => c.charId === gId && c.isGroup);
+          if (groupChat && groupChat.messages.length > 0) {
+              const validGMsgs = groupChat.messages.filter(m => !m.isHidden && !m.isOffline);
+              let turns = 0; let lastGSender = null; let gStartIndex = 0;
+              // 🌟 核心：精确计算最近 10 回合（发送人改变算 1 回合）
+              for (let i = validGMsgs.length - 1; i >= 0; i--) {
+                  const m = validGMsgs[i];
+                  const currentSender = m.isMe ? (store.personas.find(p=>p.id===groupChat.boundPersonaId)?.name || store.personas[0].name) : m.sender;
+                  if (currentSender !== lastGSender) { if (lastGSender !== null) turns += 1; lastGSender = currentSender; }
+                  if (turns >= 10) { gStartIndex = i + 1; break; }
+              }
+              const latestGMsgs = validGMsgs.slice(gStartIndex);
+              if (latestGMsgs.length > 0) {
+                  const formattedGMsgs = latestGMsgs.map(m => {
+                     const sName = m.isMe ? (store.personas.find(p=>p.id===groupChat.boundPersonaId)?.name || store.personas[0].name) : m.sender;
+                     let text = m.msgType === 'text' ? m.text : `[${m.msgType}]`;
+                     if (m.msgType === 'virtual_image') text = `[虚拟照片] ${m.text}`;
+                     return `${sName}: ${text}`;
+                  }).join('\n');
+                  injectedContext.push(`【群聊：${groupChat.groupName || '未知群聊'} 的最近记忆】\n${formattedGMsgs}`);
+              }
+          }
+      });
+      if (injectedContext.length === 0) return null;
+      return `(系统上帝视角注入：以下是你刚才在关联群聊里发生的最新聊天记录（包含其他人说的话）。仅供你作为私聊背景参考，你可以顺着群里的话题跟我私聊，展现你全知的视角，但绝不要生硬地复述：\n\n${injectedContext.join('\n\n')})`;
+  },
+  // ================= 🌟 跨次元群聊关联引擎 (反向：群聊提取私聊) =================
+  getLinkedPrivateContext: (groupChat) => {
+      let injectedContext = [];
+      groupChat.memberIds.forEach(memberId => {
+          const char = store.contacts.find(c => c.id === memberId);
+          // 🌟 检查该角色是否开启了此群聊的关联（共用一个开关）
+          if (char && char.linkedGroups && char.linkedGroups.includes(groupChat.charId)) {
+              const privateChat = store.chats.find(c => c.charId === memberId && !c.isGroup);
+              if (privateChat && privateChat.messages.length > 0) {
+                  const validPMsgs = privateChat.messages.filter(m => !m.isHidden && !m.isOffline);
+                  let turns = 0; let lastPSender = null; let pStartIndex = 0;
+                  // 🌟 核心：精确计算最近 5 回合私聊！
+                  for (let i = validPMsgs.length - 1; i >= 0; i--) {
+                      const m = validPMsgs[i];
+                      const currentSender = m.isMe ? (store.personas.find(p=>p.id===privateChat.boundPersonaId)?.name || store.personas[0].name) : m.sender;
+                      if (currentSender !== lastPSender) { if (lastPSender !== null) turns += 1; lastPSender = currentSender; }
+                      if (turns >= 5) { pStartIndex = i + 1; break; }
+                  }
+                  const latestPMsgs = validPMsgs.slice(pStartIndex);
+                  if (latestPMsgs.length > 0) {
+                      const formattedPMsgs = latestPMsgs.map(m => {
+                         const sName = m.isMe ? (store.personas.find(p=>p.id===privateChat.boundPersonaId)?.name || store.personas[0].name) : m.sender;
+                         let text = m.msgType === 'text' ? m.text : `[${m.msgType}]`;
+                         if (m.msgType === 'virtual_image') text = `[虚拟照片] ${m.text}`;
+                         return `"${sName}: ${text}"`;
+                      }).join('\n');
+                      injectedContext.push(`👉 ${char.name} 的私有记忆（只有 ${char.name} 自己知道）：\n${formattedPMsgs}`);
+                  }
+              }
+          }
+      });
+      if (injectedContext.length === 0) return null;
+      return `(系统最高指令：你现在是群聊导演，请根据群聊语境生成各角色的回复。\n⚠️绝对警告：以下是部分角色与用户在私底下的独立秘密。其他角色【绝对不知道】这些事！你生成的台词必须严格遵守角色的信息差，拥有秘密的角色可以暗示或顺着秘密的话题聊，展现被偏爱的感觉，但不要生硬复述，其他没秘密的角色正常发言。)\n\n【各角色当前的私密状态】\n${injectedContext.join('\n\n')}`;
+  },
   // 世界书与表情包挂载专属动作 (修复了滚动条回弹)
     toggleWbMountModal: () => { 
       saveScroll();
@@ -583,7 +692,7 @@ window.wxActions = {
         if (wxState.tempAvatar) char.avatar = wxState.tempAvatar; // 只有换了才更新
       }
     } else {
-      // 不存在则是新建
+      // 🌟 新建角色：只加通讯录，绝不自动创建聊天室！
       const newId = 'char_' + Date.now();
       contactData.id = newId;
       contactData.avatar = wxState.tempAvatar;
@@ -591,13 +700,6 @@ window.wxActions = {
       contactData.autoMsgEnabled = false;
       contactData.autoMsgInterval = 5;
       store.contacts.push(contactData);
-      store.chats.push({ id: 'chat_' + Date.now(), charId: newId, messages: [] });
-      
-      // 如果有开场白，直接作为第一条消息发出来
-      if (contactData.greeting) {
-        const newChat = store.chats.find(c => c.charId === newId);
-        newChat.messages.push({ id: Date.now() + 1, sender: name, text: contactData.greeting, isMe: false, source: 'wechat', isOffline: false, msgType: 'text', time: getNowTime() });
-      }
     }
     window.actions.showToast('角色保存成功！');
     window.wxActions.closeSubView();
@@ -968,8 +1070,9 @@ window.wxActions = {
     restoreScroll();
   },
   updateExtractConfig: (key, val) => {
-    wxState.extractMemoryConfig[key] = val;
-    window.render();
+    wxState.extractMemoryConfig[key] = key === 'msgCount' ? parseInt(val) : val;
+    // 🌟 修复卡顿：如果是拖动拉条，绝不触发全局重绘！
+    if (key !== 'msgCount') window.render();
   },
   startExtractMemory: async () => {
     if (!store.apiConfig || !store.apiConfig.apiKey) return window.actions.showToast('请先配置 API Key');
@@ -1019,7 +1122,7 @@ window.wxActions = {
       
       // 如果是碎片记忆，让 AI 再干点活：自动提炼关键词！
       if (wxState.extractMemoryConfig.type === 'fragment') {
-         const kwPrompt = `请从以下总结中提取2-3个核心名词作为触发关键词，用英文逗号分隔，绝不输出其他多余废话。\n${wxState.extractMemoryContent}`;
+         const kwPrompt = `请从以下总结中提取2-3个核心名词作为触发关键词，用英文逗号分隔，绝不输出其他多余废话，不要输出多余符号。\n${wxState.extractMemoryContent}`;
          const resKw = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
             body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: kwPrompt }], temperature: 0.3 })
@@ -2117,6 +2220,21 @@ ${relation}
               });
           }
 
+          // 🌟 跨次元：单聊触发时，悄悄注入关联的群聊记忆
+          if (!chat.isGroup && char.linkedGroups) {
+              const groupContext = window.wxActions.getLinkedGroupContext(char);
+              if (groupContext) {
+                  tempHistory.push({ id: Date.now(), sender: 'system', text: groupContext, isMe: true, isHidden: true, msgType: 'text' });
+              }
+          }
+          // 🌟 跨次元反向：群聊触发时，如果有人开启了关联，把他们的私聊小纸条塞给导演！
+          if (chat.isGroup) {
+              const privateContext = window.wxActions.getLinkedPrivateContext(chat);
+              if (privateContext) {
+                  tempHistory.push({ id: Date.now(), sender: 'system', text: privateContext, isMe: true, isHidden: true, msgType: 'text' });
+              }
+          }
+
           // 🌟 把抓到的 readingInfo 传给大模型
           const llmMessages = await buildLLMPayload(charId, tempHistory, isOffline, isCall, groupInfo, readingInfo);
           
@@ -2343,6 +2461,33 @@ export function renderWeChatApp(store) {
                    <i data-lucide="chevron-right" class="text-gray-600 w-4 h-4 cursor-pointer" onclick="document.getElementById('upload-bg-image').click()"></i>
                  </div>
             </div>
+          
+          ${chatData.isGroup ? `
+            <div class="bg-white rounded-[16px] p-4 mb-4 shadow-sm border border-gray-100 flex justify-between items-center">
+                 <div class="flex items-center flex-1">
+                    <i data-lucide="user-square" class="w-5 h-5 mr-3 text-purple-500"></i>
+                    <span class="text-[15px] font-medium text-gray-800">你在本群的身份</span>
+                 </div>
+                 <div class="flex items-center">
+                   <select onchange="window.wxActions.updateGroupPersona(this.value)" class="outline-none text-[15px] text-gray-500 font-medium bg-transparent cursor-pointer appearance-none text-right pr-2">
+                       ${store.personas.map(p => `<option value="${p.id}" ${chatData.boundPersonaId === p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
+                   </select>
+                   <i data-lucide="chevron-right" class="text-gray-300 w-4 h-4 pointer-events-none"></i>
+                 </div>
+            </div>
+            ` : ''}
+
+          ${!chatData.isGroup ? `
+            <div class="bg-white rounded-[16px] mb-4 shadow-sm border border-gray-100 flex flex-col overflow-hidden"> 
+            <div class="p-4 flex justify-between items-center cursor-pointer active:bg-gray-50 transition-colors border-b border-gray-50" onclick="window.wxActions.toggleGroupMountModal()">
+               <span class="text-[15px] font-medium text-gray-800">关联群聊记忆</span>
+               <div class="flex items-center">
+                 <span class="text-[14px] text-gray-400 mr-1">${targetObj.linkedGroups && targetObj.linkedGroups.length > 0 ? `已关联 ${targetObj.linkedGroups.length} 个` : '未关联'}</span>
+                 <i data-lucide="chevron-right" class="text-gray-300 w-4 h-4"></i>
+               </div>
+             </div>
+             </div>
+             ` : ''}
 
           <div class="bg-white rounded-[16px] mb-4 shadow-sm border border-gray-100 flex flex-col overflow-hidden">
              <div class="p-4 flex justify-between items-center cursor-pointer active:bg-gray-50 transition-colors border-b border-gray-50" onclick="window.wxActions.toggleWbMountModal()">
@@ -2415,6 +2560,8 @@ export function renderWeChatApp(store) {
             <div class="mt-8 flex flex-col space-y-3 pb-8 animate-in fade-in">
               ${!chatData.isGroup ? `<button onclick="window.wxActions.toggleBlockCharacter()" class="w-full py-3.5 bg-white text-red-500 font-bold rounded-xl border border-red-100 shadow-sm active:bg-gray-50 transition-colors">${char.isBlocked ? '解除拉黑' : '拉黑该角色'}</button>` : ''}
               <button onclick="window.wxActions.clearChatHistory()" class="w-full py-3.5 bg-white text-red-500 font-bold rounded-xl border border-red-100 shadow-sm active:bg-gray-50 transition-colors">清空当前聊天记录</button>
+              
+              <button onclick="window.wxActions.deleteChatRoom()" class="w-full py-3.5 bg-white text-red-500 font-bold rounded-xl border border-red-100 shadow-sm active:bg-gray-50 transition-colors">${chatData.isGroup ? '解散群聊' : '删除聊天'}</button>
             </div>
          </div>
 
@@ -2438,6 +2585,38 @@ export function renderWeChatApp(store) {
                   </div>
                 `).join('')}
                 ${(store.emojiLibs || []).length === 0 ? '<div class="text-center text-gray-400 mt-10 text-[12px] font-bold">还没有导入过表情包哦</div>' : ''}
+              </div>
+            </div>
+          </div>
+        ` : ''}
+
+        ${wxState.showGroupMountModal ? `
+          <div class="mc-modal-overlay flex items-center justify-center animate-in fade-in backdrop-blur-sm p-4 absolute inset-0 z-[80]" onclick="window.wxActions.toggleGroupMountModal()">
+            <div class="bg-[#f6f6f6] w-[90%] max-h-[75vh] rounded-[24px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+              <div class="bg-white px-5 py-4 flex justify-between items-center border-b border-gray-100 shadow-sm shrink-0">
+                 <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="message-circle" class="text-blue-500 mr-2 w-5 h-5"></i>关联群聊记忆</span>
+                 <i data-lucide="x" class="text-gray-400 cursor-pointer active:scale-90 transition-transform bg-gray-50 p-1 rounded-full w-6 h-6" onclick="window.wxActions.toggleGroupMountModal()"></i>
+              </div>
+              <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar">
+                 <p class="text-[10px] text-gray-400 font-bold mb-2 pl-1">跨次元打通：让 TA 在私聊中保留群聊的记忆视角。</p>
+                 ${(() => {
+                    const mounted = targetObj.linkedGroups || [];
+                    // 🌟 智能过滤：只显示 TA 当前已经加入的群聊！
+                    const availableGroups = store.chats.filter(c => c.isGroup && c.memberIds.includes(targetObj.id));
+                    if(availableGroups.length === 0) return '<div class="text-center text-gray-400 mt-10 text-[12px] font-bold">该角色还没有加入任何群聊哦</div>';
+                    
+                    return availableGroups.map(g => `
+                      <div class="bg-white rounded-xl p-3 flex items-center justify-between shadow-sm border ${mounted.includes(g.charId) ? 'border-blue-300 bg-blue-50/20' : 'border-gray-100'} cursor-pointer active:scale-[0.98] transition-all" onclick="window.wxActions.toggleGroupMount('${g.charId}')">
+                         <div class="flex flex-col flex-1 overflow-hidden mr-3">
+                            <span class="text-[14px] font-bold ${mounted.includes(g.charId) ? 'text-blue-600' : 'text-gray-800'} truncate">${g.groupName || '群聊'}</span>
+                            <span class="text-[10px] text-gray-400 mt-0.5">包含 ${g.memberIds.length} 名成员</span>
+                         </div>
+                         <div class="w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${mounted.includes(g.charId) ? 'bg-blue-500 border-blue-500' : 'border-gray-300'}">
+                            ${mounted.includes(g.charId) ? '<i data-lucide="check" class="text-white w-4 h-4"></i>' : ''}
+                         </div>
+                      </div>
+                    `).join('');
+                 })()}
               </div>
             </div>
           </div>
@@ -3783,7 +3962,7 @@ export function renderWeChatApp(store) {
 
               return `
                 <div class="mc-btn-back flex items-center cursor-pointer text-gray-800 w-1/4" onclick="window.wxActions.closeChat()"><i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i></div>
-                <span class="mc-title flex-1 font-bold text-gray-800 text-[17px] text-center transition-all duration-300 ${isAnyTyping ? 'opacity-60 animate-pulse text-gray-400' : ''}">${isAnyTyping ? typingText : titleText}</span>
+                <span class="mc-title flex-1 font-bold text-gray-800 text-[17px] text-center truncate px-2 transition-all duration-300 ${isAnyTyping ? 'opacity-60 animate-pulse text-gray-400' : ''}">${isAnyTyping ? typingText : titleText}</span>
                 <div class="mc-btn-more w-1/4 flex justify-end"><i data-lucide="more-horizontal" class="text-gray-800 cursor-pointer active:scale-90" style="width: 24px; height: 24px;" onclick="window.wxActions.openSettings()"></i></div>
               `;
             }
@@ -3939,9 +4118,9 @@ export function renderWeChatApp(store) {
                     <div>
                        <div class="flex justify-between items-end mb-2 pl-1">
                          <span class="text-[12px] font-black text-gray-400 uppercase tracking-widest">总结过去多少条聊天？</span>
-                         <span class="text-[16px] font-black text-[#07c160] font-mono">${wxState.extractMemoryConfig.msgCount} 条</span>
+                         <span id="extract-msg-count-display" class="text-[16px] font-black text-[#07c160] font-mono">${wxState.extractMemoryConfig.msgCount} 条</span>
                        </div>
-                       <input type="range" min="2" max="100" value="${wxState.extractMemoryConfig.msgCount}" class="w-full accent-[#07c160] h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer" oninput="window.wxActions.updateExtractConfig('msgCount', this.value)" />
+                       <input type="range" min="2" max="100" value="${wxState.extractMemoryConfig.msgCount}" class="w-full accent-[#07c160] h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer" oninput="document.getElementById('extract-msg-count-display').innerText = this.value + ' 条'; window.wxActions.updateExtractConfig('msgCount', this.value)" />
                     </div>
                     <button class="w-full bg-[#07c160] text-white font-bold py-3.5 rounded-[14px] flex items-center justify-center active:scale-95 transition-transform shadow-[0_4px_15px_rgba(7,193,96,0.3)] mt-2" onclick="window.wxActions.startExtractMemory()">
                       ${wxState.isExtracting ? '<i data-lucide="loader-2" class="animate-spin mr-2 w-5 h-5"></i>飞速阅读中...' : '<i data-lucide="sparkles" class="mr-2 w-5 h-5"></i>开始一键提取'}
@@ -4704,6 +4883,20 @@ window.scheduleCloudTask = async (charId) => {
                     isMe: true, isHidden: true, msgType: 'text'
                 });
             }
+            // 🌟 跨次元：哪怕是云端主动搭话的闹钟，也要带上群聊记忆，让 TA 可以用群里的事做开场白！
+            if (!chat.isGroup && targetObj.linkedGroups) {
+                const groupContext = window.wxActions.getLinkedGroupContext(targetObj);
+                if (groupContext) {
+                    chatHistory.push({ id: Date.now(), sender: 'system', text: groupContext, isMe: true, isHidden: true, msgType: 'text' });
+                }
+            }
+            // 🌟 跨次元反向：如果群聊主动发起了闹钟聊天，导演同样需要知道大家的私有秘密！
+            if (chat.isGroup) {
+                const privateContext = window.wxActions.getLinkedPrivateContext(chat);
+                if (privateContext) {
+                    chatHistory.push({ id: Date.now(), sender: 'system', text: privateContext, isMe: true, isHidden: true, msgType: 'text' });
+                }
+            }
 
             const chatMsgs = await buildLLMPayload(speakerChar.id, chatHistory, false, false, chat.isGroup ? chat : null, null);
             
@@ -4863,6 +5056,21 @@ window.wxActions.submitReroll = async () => {
                 isHidden: true, 
                 msgType: 'text'
             });
+        }
+
+        // 🌟 跨次元：单聊重roll时，同样注入关联的群聊记忆
+        if (!chat.isGroup && char.linkedGroups) {
+            const groupContext = window.wxActions.getLinkedGroupContext(char);
+            if (groupContext) {
+                tempHistory.push({ id: Date.now(), sender: 'system', text: groupContext, isMe: true, isHidden: true, msgType: 'text' });
+            }
+        }
+        // 🌟 跨次元反向：群聊重roll时，导演依然需要拿着剧本进行修改！
+        if (chat.isGroup) {
+            const privateContext = window.wxActions.getLinkedPrivateContext(chat);
+            if (privateContext) {
+                tempHistory.push({ id: Date.now(), sender: 'system', text: privateContext, isMe: true, isHidden: true, msgType: 'text' });
+            }
         }
 
         // 修正为准确的线下模式判定名

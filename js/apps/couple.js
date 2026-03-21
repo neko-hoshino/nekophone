@@ -233,8 +233,13 @@ if (!window.cpActions) {
         }
     },
 
-    // 🌟 每次点开定位，自动重置为空状态，等你刷新！
-    openLocation: () => { cpState.view = 'location'; cpState.locData = null; window.render(); },
+    // 🌟 永久记忆舱：点开定位时，读取这个角色的专属定位数据，绝不丢失！
+    openLocation: () => { 
+        cpState.view = 'location'; 
+        const char = store.contacts.find(c => c.id === cpState.activeCharId);
+        cpState.locData = char.locData || null; 
+        window.render(); 
+    },
 
     // 🌟 全息定位 AI 生成引擎！
     refreshLocationData: async () => {
@@ -253,8 +258,7 @@ if (!window.cpActions) {
                 memoryStr = '\n【你的记忆】\n' + memories.map(m => `- ${m.content}`).join('\n');
             }
 
-            const promptStr = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${memoryStr}\n\n【今日聊天记录回忆】\n${historyStr}\n\n【任务】请结合上述信息、你的人设属性以及当前时间（${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'})}），脑洞大开，推测并生成TA今天极其符合人设的行踪与健康数据。\n必须返回合法的 JSON 格式数据，结构如下：\n{\n  "distance": 距离用户的公里数(浮点数，比如2.5，如果是异地恋可以设得很大),\n  "steps": 今日运动步数(整数),\n  "places": [\n    {"time": "08:30", "name": "温馨小窝 (出门)"}\n  ], // 按时间顺序排列今天去过的地方，至少1个最多5个\n  "sleepHours": [6.5, 7.0, 5.5], // 前天、昨天、今天凌晨的睡眠时长(3个浮点数)\n  "sleepEval": "对TA近期睡眠状态的评价和关心（50字以内，纯口语语气，温暖自然，易于阅读）",\n  "phone": {\n    "total": "6.5h",\n    "app1": {"name": "微信", "time": "2.5h"},\n    "app2": {"name": "抖音", "time": "1.8h"}\n  }\n}\n❗警告：只能输出 JSON 格式文本，绝不要带有 \`\`\`json 等任何 Markdown 包裹，也不要有多余解释！`;
-
+            const promptStr = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${memoryStr}\n\n【今日聊天记录回忆】\n${historyStr}\n\n【任务】请结合上述信息、你的人设属性以及当前时间（${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'})}），脑洞大开，推测并生成TA今天极其符合人设的行踪与健康数据。\n必须返回合法的 JSON 格式数据，结构如下：\n{\n  "distance": 距离用户的公里数(浮点数，比如2.5，如果是异地恋可以设得很大),\n  "steps": 今日运动步数(整数),\n  "places": [\n    {"time": "08:30", "name": "温馨小窝 (出门)"}\n  ], // 按时间顺序排列今天去过的地方，至少1个最多5个\n  "sleepHours": [6.5, 7.0, 5.5], // 前天、昨天、今天凌晨的睡眠时长(3个浮点数)\n  "sleepEval": "以手机系统自带【健康管家】的口吻，客观评价用户的睡眠质量（30字以内，如：昨晚深度睡眠不足，建议今晚放下手机早点休息。）",\n  "phone": {\n    "total": "6.5h",\n    "apps": [\n      {"name": "微信", "time": "2.5h"},\n      {"name": "网易云音乐", "time": "1.8h"}\n    ] // 🌟 随机生成 3 到 5 个最符合TA当前人设和行踪的 App\n  }\n}\n❗警告：只能输出 JSON 格式文本，绝不要带有 \`\`\`json 等任何 Markdown 包裹，也不要有多余解释！`;
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.85 })
@@ -264,6 +268,7 @@ if (!window.cpActions) {
             // 物理刮除可能带有的大模型 markdown
             content = content.replace(/```json/gi, '').replace(/```/g, '').trim(); 
             cpState.locData = JSON.parse(content);
+            char.locData = cpState.locData; // 🌟 每次生成完，牢牢绑在角色身上永久储存！
         } catch (e) {
             console.error('获取行踪失败', e);
             window.actions.showToast('信号干扰，获取行踪失败');
@@ -472,7 +477,8 @@ export function renderCoupleApp(store) {
      const places = loc.places || [];
      const sleepHours = loc.sleepHours || [0, 0, 0];
      const sleepEval = loc.sleepEval || "暂无数据，请点击右上角刷新按钮，获取 TA 的实时行踪。";
-     const phone = loc.phone || { total: '--', app1: {name: '未知', time: '--'}, app2: {name: '未知', time: '--'} };
+     const phone = loc.phone || { total: '--', apps: [{name: '未知', time: '--'}] };
+     const appColors = ['bg-purple-500', 'bg-pink-500', 'bg-blue-500', 'bg-green-500', 'bg-yellow-500']; // 预备 5 种 App 颜色
 
      // 根据时长计算柱状图高度 (最大 50px)
      const getBarHeight = (h) => Math.min(Math.max((h / 12) * 50, 4), 50);
@@ -518,7 +524,7 @@ export function renderCoupleApp(store) {
                   <span class="text-[15px] font-extrabold text-gray-800 tracking-wide flex items-center"><i data-lucide="map" class="w-4 h-4 mr-1.5 text-blue-500"></i>今日行踪</span>
                   <span class="text-[11px] font-extrabold text-blue-500 bg-blue-50 px-2.5 py-1 rounded-md tracking-widest">${places.length > 0 ? `去了 ${places.length} 个地方` : '等待刷新'}</span>
                </div>
-               <div class="relative border-l-2 border-gray-100 ml-2 space-y-4 transition-all duration-300">
+               <div class="relative border-l-2 border-gray-100 ml-2 space-y-2.5 transition-all duration-300">
                   ${places.length === 0 ? '<div class="text-[12px] text-gray-400 pl-3">暂无行踪，请点击右上角刷新获取</div>' : places.map((p, i) => `
                      <div class="relative pl-5">
                         <div class="absolute -left-[5px] top-1.5 w-2 h-2 rounded-full ${i === places.length - 1 ? 'bg-blue-500 ring-4 ring-blue-50' : 'bg-gray-300'}"></div>
@@ -555,14 +561,12 @@ export function renderCoupleApp(store) {
                   </div>
                   
                   <div class="w-full space-y-2">
+                     ${(phone.apps || []).map((app, idx) => `
                      <div class="flex justify-between items-center text-[10px] font-bold">
-                        <div class="flex items-center"><span class="w-2 h-2 rounded-full bg-purple-500 mr-1.5"></span><span class="text-gray-600">${phone.app1.name}</span></div>
-                        <span class="text-gray-800">${phone.app1.time}</span>
+                        <div class="flex items-center"><span class="w-2 h-2 rounded-full ${appColors[idx % appColors.length]} mr-1.5"></span><span class="text-gray-600">${app.name}</span></div>
+                        <span class="text-gray-800">${app.time}</span>
                      </div>
-                     <div class="flex justify-between items-center text-[10px] font-bold">
-                        <div class="flex items-center"><span class="w-2 h-2 rounded-full bg-pink-500 mr-1.5"></span><span class="text-gray-600">${phone.app2.name}</span></div>
-                        <span class="text-gray-800">${phone.app2.time}</span>
-                     </div>
+                     `).join('')}
                   </div>
                </div>
 
@@ -587,7 +591,7 @@ export function renderCoupleApp(store) {
                      </div>
                   </div>
                   
-                  <div class="text-[12px] text-gray-600 bg-transparent font-medium leading-relaxed font-sans bg-gray-50/70 p-3 rounded-[12px] border border-gray-100 shadow-inner">
+                  <div class="text-[12px] text-gray-400 font-medium leading-relaxed font-sans mt-3 px-1 text-center">
                      ${sleepEval}
                   </div>
                </div>
