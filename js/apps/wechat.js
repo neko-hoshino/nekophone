@@ -1683,15 +1683,30 @@ ${relation}
         chat.charRemark = document.getElementById('set-char-name').value.trim();
     }
 
+    // 🌟 记录修改前的状态，用来对比你是不是刚刚“关掉”了开关
+    const oldAutoMsg = targetObj.autoMsgEnabled;
+    const oldMomentFreq = targetObj.autoMomentFreq || 0;
+
     targetObj.contextLimit = parseInt(document.getElementById('set-context-limit').value) || 25;
     targetObj.autoMsgEnabled = document.getElementById('set-auto-msg').checked;
     
-    // 🌟 补上丢失的保存逻辑！
     const autoMomentEl = document.getElementById('chat-auto-moment-select');
     if (autoMomentEl) targetObj.autoMomentFreq = parseInt(autoMomentEl.value) || 0;
     
     const intervalVal = parseFloat(document.getElementById('set-auto-interval').value);
     targetObj.autoMsgInterval = isNaN(intervalVal) ? 5 : intervalVal;
+
+    // 🌟 核心拦截机制：发射省钱空包弹！如果你关掉了开关，立刻向云端发射指令，物理绞杀旧闹钟！
+    const charForCloud = chat.isGroup ? store.contacts.find(c => c.id === chat.memberIds[0]) : targetObj;
+    if (oldAutoMsg && !targetObj.autoMsgEnabled) {
+        console.log('[系统] 主动聊天已关闭，发送空包弹狙杀云端 AUTO 闹钟！');
+        // 参数依次为：延时0，角色，空消息，路由ID，递归间隔0，递归次数0，是空包弹(true)
+        if (typeof planCloudBrain === 'function') planCloudBrain(0, charForCloud, [], 'AUTO|' + chat.charId + '|' + charForCloud.id + '|0', 0, 0, true).catch(()=>{});
+    }
+    if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
+        console.log('[系统] 朋友圈已关闭，发送空包弹狙杀云端 MOMENT 闹钟！');
+        if (typeof planCloudBrain === 'function') planCloudBrain(0, charForCloud, [], 'MOMENT|' + chat.charId + '|' + charForCloud.id + '|0', 0, 0, true).catch(()=>{});
+    }
     
     if (targetObj.disableEmoji) { targetObj.emojis = "disabled"; } else {
       const allowedNames = [];
@@ -1706,8 +1721,7 @@ ${relation}
     window.actions.showToast('设置已生效！');
     wxState.view = 'chatRoom'; window.render(); restoreScroll();
     
-    // 🌟 彻底解耦：只要你点了保存，不管主动聊天开没开，都去敲一下云端的门！
-    // 云端里面的解耦算法（我们上一波写的）会自动判断该执行谁的倒计时！
+    // 🌟 不管有没有关开关，统一踹一脚巡逻员，让他去检查要不要重新定闹钟
     if (typeof window.scheduleCloudTask === 'function') window.scheduleCloudTask(wxState.activeChatId);
   },
   sendMessage: () => {
@@ -4576,12 +4590,11 @@ export function renderWeChatApp(store) {
   }
 // ================= 🧠 云端通用大脑 & 信箱同步引擎 =================
 
-const planCloudBrain = async (delayMinutes, char, llmMessages, routingId) => {
-  // 🚨 移除静默 try-catch，让错误能直接抛给 UI 界面！
+const planCloudBrain = async (delayMinutes, char, llmMessages, routingId, recursiveDelayMinutes = 0, maxRecursion = 0, isCancel = false) => {
   const reg = await navigator.serviceWorker.ready;
   const sub = await reg.pushManager.getSubscription();
   
-  if (!store.apiConfig?.apiKey) throw new Error("缺少 API Key 配置，云端无法请求大模型");
+  if (!store.apiConfig?.apiKey && !isCancel) throw new Error("缺少 API Key 配置，云端无法请求大模型");
   if (!sub) throw new Error("未绑定设备推送凭证！云端不知道把消息发给谁，请先在右上角授权通知！");
 
   const res = await fetch('https://neko-hoshino.duckdns.org/auto-plan', {
@@ -4589,11 +4602,14 @@ const planCloudBrain = async (delayMinutes, char, llmMessages, routingId) => {
       headers: { 'Content-Type': 'application/json', 'x-secret-token': localStorage.getItem('neko_server_pwd') || '' },
       body: JSON.stringify({
           delayMinutes: delayMinutes,
+          recursiveDelayMinutes: recursiveDelayMinutes, // 🌟 传给云端的接力频率
+          maxRecursion: maxRecursion,                   // 🌟 传给云端的最大次数
+          isCancel: isCancel,                           // 🌟 空包弹标记
           title: char.name,
           charId: routingId || char.id, 
           endpoint: sub.endpoint,
           apiConfig: store.apiConfig, 
-          llmMessages: llmMessages    
+          llmMessages: llmMessages || []    
       })
   });
   
@@ -4628,7 +4644,6 @@ window.scheduleCloudTask = async (charId) => {
     try {
         const { buildLLMPayload } = await import('../utils/llm.js');
         
-        // 🌟 基础准备：把纯文本的描述还原成带有标签的特殊格式
         let baseHistory = chat.messages.map(m => {
             let formattedText = m.text;
             if (m.msgType === 'virtual_image') formattedText = `[发送了一张虚拟照片] 画面描述：${m.text}`;
@@ -4637,7 +4652,6 @@ window.scheduleCloudTask = async (charId) => {
             return { ...m, text: formattedText };
         });
 
-        // 🌟 限制上下文轮数，防止撑爆大模型内存
         let turnsCount = 0; let lastSender = null; let startIndex = 0;
         const limit = targetObj.contextLimit || 30; 
         for (let i = baseHistory.length - 1; i >= 0; i--) {
@@ -4646,91 +4660,120 @@ window.scheduleCloudTask = async (charId) => {
         }
         baseHistory = baseHistory.slice(startIndex);
 
+        const nowTime = Date.now();
+
         // =================================================================
-        // 🧵 线程 A：主动聊天专属通道
+        // 🧵 线程 A：主动搭话 (以最新消息为基准 + 防连发 + 支持云端递归)
         // =================================================================
         if (targetObj.autoMsgEnabled) {
-            let chatDelay = targetObj.autoMsgInterval || 30;
-            // 独立克隆一份记忆，防止和朋友圈线程打架
-            let chatHistory = JSON.parse(JSON.stringify(baseHistory));
-            const now = new Date();
-            let targetDate = new Date(now.getTime() + chatDelay * 60000);
+            let chatDelayMin = targetObj.autoMsgInterval || 30; 
+            
+            // 1. 获取最新一条消息的时间戳（排除隐藏系统消息）
+            const validMsgs = baseHistory.filter(m => !m.isHidden && !m.isOffline);
+            const lastMsgTime = validMsgs.length > 0 ? validMsgs[validMsgs.length - 1].id : nowTime;
+            
+            // 2. 理论触发时间 = 最新消息时间 + 频率
+            let targetTime = lastMsgTime + chatDelayMin * 60000;
+            // 3. 真实触发时间 = 理论时间 与 当前时间 的最大值 (防止出现负数倒计时)
+            let realTriggerTime = Math.max(targetTime, nowTime); 
+            let targetDate = new Date(realTriggerTime);
 
             if (speakerChar.isBlocked) {
-                chatDelay = 5;
-                chatHistory.push({
-                    id: Date.now(), sender: boundPersona.name,
-                    text: `(系统严重警告：你当前处于被用户【拉黑】的状态！请立刻输出 [发送好友申请] 这个指令，并附带你想对用户说的话，乞求ta通过你的验证！绝不要带系统标签。)`,
-                    isMe: true, isHidden: true, msgType: 'text'
-                });
+                realTriggerTime = nowTime + 5 * 60000; // 被拉黑5分钟后立刻求饶
             } else if (targetDate.getHours() >= 0 && targetDate.getHours() < 8) {
-                console.log(`[前端时空拦截] 原定 ${targetDate.toLocaleTimeString()} 触发搭话，自动推迟到早 8 点`);
-                targetDate.setHours(8, Math.floor(Math.random() * 5), 0, 0);
-                chatDelay = (targetDate.getTime() - now.getTime()) / 60000;
-                
+                console.log(`[前端时空拦截] 原定 ${targetDate.toLocaleTimeString()} 搭话，自动推迟到早 8 点`);
+                targetDate.setHours(8, Math.floor(Math.random() * 30), 0, 0); // 8:00 - 8:30 随机唤醒
+                realTriggerTime = targetDate.getTime();
+            }
+
+            let initialDelayMinutes = (realTriggerTime - nowTime) / 60000;
+            if (initialDelayMinutes < 0.5) initialDelayMinutes = 0.5; // 兜底
+
+            let chatHistory = JSON.parse(JSON.stringify(baseHistory));
+            
+            if (speakerChar.isBlocked) {
                 chatHistory.push({
                     id: Date.now(), sender: boundPersona.name,
-                    text: `(系统强制插播：现在已经是第二天早上8点多了，免打扰模式结束。请立刻根据你的设定和昨晚的聊天上下文，自然地跟用户发个早安！绝对不要在回复中带有系统提示标签，直接像真人一样说话。)`,
+                    text: `(系统严重警告：你当前处于被用户【拉黑】的状态！请立刻输出 [发送好友申请] 这个指令，乞求ta通过你的验证！绝不要带系统标签。)`,
                     isMe: true, isHidden: true, msgType: 'text'
                 });
             } else {
                 chatHistory.push({
                     id: Date.now(), sender: boundPersona.name,
-                    text: `(系统自动触发：用户已经有 ${Math.round(chatDelay)} 分钟没有理你了。请结合当前语境主动发一条消息找用户搭话。符合你的性格，可以直接开启新话题，绝不可包含系统标签。)`,
+                    text: `(系统自动触发：距离上次聊天已经过了一段时间。请结合当前语境主动发一条消息找用户搭话。符合你的性格，可以直接开启新话题，绝不可包含系统标签。)`,
                     isMe: true, isHidden: true, msgType: 'text'
                 });
             }
 
             const chatMsgs = await buildLLMPayload(speakerChar.id, chatHistory, false, false, chat.isGroup ? chat : null, null);
             
-            // 🚀 发射专属的 AUTO 闹钟（注意：不加 await，让它异步发射，不阻塞后面的朋友圈！）
-            planCloudBrain(chatDelay, speakerChar, chatMsgs, 'AUTO|' + chat.charId + '|' + speakerChar.id + '|0').catch(e => console.error('主动聊天线程启动失败:', e));
+            // 🚀 发射 AUTO 闹钟！首次唤醒使用算出的延迟，后续云端每隔 chatDelayMin 递归，最多 3 次！
+            planCloudBrain(initialDelayMinutes, speakerChar, chatMsgs, 'AUTO|' + chat.charId + '|' + speakerChar.id + '|0', chatDelayMin, 3).catch(e => console.error('主动聊天启动失败:', e));
         }
 
         // =================================================================
-        // 🧵 线程 B：发朋友圈专属通道
+        // 🧵 线程 B：发朋友圈 (基于缓存防刷新重置 + 规避深夜时间)
         // =================================================================
         if (targetObj.autoMomentFreq && targetObj.autoMomentFreq > 0) {
+            const freqMs = targetObj.autoMomentFreq * 3600000; 
+            
+            // 1. 完美抓取最新的一条朋友圈时间戳
             let lastMomentTime = 0;
             if (store.moments) {
                 const charMoments = store.moments.filter(m => m.senderId === speakerChar.id);
-                if (charMoments.length > 0) lastMomentTime = charMoments[0].id;
+                if (charMoments.length > 0) lastMomentTime = Math.max(...charMoments.map(m => m.id));
             }
-            
-            const hoursSinceLastMoment = (Date.now() - (lastMomentTime || 0)) / 3600000;
-            let momentDelay = (targetObj.autoMomentFreq - hoursSinceLastMoment) * 60;
-            if (momentDelay < 1) momentDelay = 1; // 已经过期则1分钟后立刻执行
 
-            // 独立克隆一份专属记忆
+            let realMomentTime = targetObj.nextMomentTarget;
+
+            // 如果缓存的目标时间已经过期，或者根本没有，就需要重新算！
+            if (!realMomentTime || realMomentTime <= nowTime) {
+                if (nowTime - lastMomentTime > freqMs) {
+                    // 已严重过期，立刻 roll 一个 0-60 分钟的随机数
+                    realMomentTime = nowTime + Math.floor(Math.random() * 60) * 60000;
+                } else {
+                    // 正常倒计时
+                    realMomentTime = lastMomentTime + freqMs;
+                }
+            }
+
+            // 检查是否在凌晨 2 点 - 8 点之间
+            const mDate = new Date(realMomentTime);
+            if (mDate.getHours() >= 2 && mDate.getHours() < 8) {
+                console.log(`[前端时空拦截] 原定 ${mDate.toLocaleTimeString()} 发朋友圈，推迟到早 8 点半`);
+                mDate.setHours(8, 30 + Math.floor(Math.random() * 60), 0, 0); // 8:30 - 9:30 随机
+                realMomentTime = mDate.getTime();
+            }
+
+            // 🌟 持久化预定时间，防止你一刷新网页就重新 roll 随机数！
+            targetObj.nextMomentTarget = realMomentTime;
+
+            let momentDelayMinutes = (realMomentTime - nowTime) / 60000;
+            if (momentDelayMinutes < 0.5) momentDelayMinutes = 0.5;
+
             let momentHistory = JSON.parse(JSON.stringify(baseHistory));
-            
             const now = new Date();
             const timeString = now.toLocaleString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-            const hour = now.getHours();
-            let timeOfDayGreeting = hour >= 5 && hour < 11 ? "早上" : hour < 14 ? "中午" : hour < 18 ? "下午" : hour < 23 ? "晚上" : "深夜";
-
-            let diffHours = 0;
-            if (chat.messages && chat.messages.length > 0) {
-                const lastOnlineMsgs = chat.messages.filter(m => !m.isOffline && !m.isHidden);
-                if (lastOnlineMsgs.length > 0) diffHours = (now.getTime() - lastOnlineMsgs[lastOnlineMsgs.length - 1].id) / 3600000;
-            }
             
-            let relation = diffHours < 2 ? `【热聊中】你们刚刚才聊过。朋友圈可以是聊天的延续，或刚结束聊天的心情。` : diffHours < 24 ? `【日常间隔】距离上次聊天已过几个小时。分享此时此刻的独立生活，不必非要提聊天内容。` : `【久未联系】⚠️严重警告：你们已经有 ${Math.floor(diffHours/24)} 天没说话了！严禁提几天前的旧聊天内容！展示你的独立生活或表达落寞感。`;
+            let diffHours = 0;
+            const validMsgs = chat.messages.filter(m => !m.isOffline && !m.isHidden);
+            if (validMsgs.length > 0) diffHours = (now.getTime() - validMsgs[validMsgs.length - 1].id) / 3600000;
+            
+            let relation = diffHours < 2 ? `【热聊中】你们刚刚才聊过。朋友圈可以是聊天的延续，或刚结束聊天的心情。` : diffHours < 24 ? `【日常间隔】距离上次聊天已过几个小时。分享此时此刻的独立生活。` : `【久未联系】⚠️警告：你们已经 ${Math.floor(diffHours/24)} 天没说话了！严禁提几天前的聊天内容！展示你的独立生活或落寞感。`;
 
-            // 把专属指令压在最底端
             momentHistory.push({
                 id: Date.now(), sender: boundPersona.name,
-                text: `(系统最高指令：当前系统时间 ${timeString}（${timeOfDayGreeting}）。距离你上次发朋友圈已超过 ${targetObj.autoMomentFreq} 小时。请你立刻执行 [发朋友圈] 指令发一条最新动态！\n\n【时间与关系状态】\n${relation}\n\n【去“人机感”铁律】\n1. 拒绝书面语（如岁月静好），要说人话！\n2. 朋友圈通常没头没尾碎片化（如“困死”）。\n3. 情绪直接表达，严禁矫情。\n\n⚠️注意：你这次的唯一任务就是输出 [发朋友圈] 动态内容！绝对不要发普通的聊天回复！必要时可以带上 [附带虚拟照片:画面描述]和[附带定位: 具体的地点名称])`,
+                text: `(系统最高指令：系统时间 ${timeString}。距离你上次发朋友圈已超过 ${targetObj.autoMomentFreq} 小时。请你立刻执行 [发朋友圈] 指令！\n\n【状态】\n${relation}\n\n1. 拒绝书面语（如岁月静好），说人话！\n2. 朋友圈通常没头没尾（如“困死”）。\n\n⚠️注意：你这次的唯一任务就是输出 [发朋友圈] 动态内容！绝对不要发普通的聊天回复！必要时可带[附带虚拟照片:描述]或[附带定位:地点])`,
                 isMe: true, isHidden: true, msgType: 'text'
             });
 
             const momentMsgs = await buildLLMPayload(speakerChar.id, momentHistory, false, false, chat.isGroup ? chat : null, null);
             
-            // 🚀 终极隔离：发射专属的 MOMENT 闹钟！（同样是独立发射，互不干扰！）
-            planCloudBrain(momentDelay, speakerChar, momentMsgs, 'MOMENT|' + chat.charId + '|' + speakerChar.id + '|0').catch(e => console.error('朋友圈线程启动失败:', e));
+            // 🚀 发射 MOMENT 闹钟！(朋友圈不需要云端递归，只触发一次)
+            planCloudBrain(momentDelayMinutes, speakerChar, momentMsgs, 'MOMENT|' + chat.charId + '|' + speakerChar.id + '|0', 0, 0).catch(e => console.error('朋友圈启动失败:', e));
         }
 
-    } catch (e) { console.error('云端定时器刷新失败:', e); }
+    } catch (e) { console.error('时空巡逻员崩溃:', e); }
 };
 
 // ==================== 🌟 终极定向重roll 引擎 (兼容经典退回逻辑) ====================
