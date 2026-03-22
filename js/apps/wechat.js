@@ -846,18 +846,50 @@ window.wxActions = {
   closeEditMessageModal: () => {
     saveScroll(); wxState.editMsgData = null; window.render(); restoreScroll();
   },
+  // 🌟 终极强转引擎：完美匹配 Eve 专属超能力协议
+  quickFormatEdit: (type) => {
+      const textarea = document.getElementById('edit-msg-textarea');
+      // 扒掉大模型乱加的括号、前缀，提取纯净文本内容
+      let text = textarea.value.replace(/\[.*?\][:：]?\s*/g, '').replace(/金额[：:]\s*\d+\.?\d*，备注[：:]\s*/g, '').trim(); 
+      
+      if (type === 'virtual_image') textarea.value = `[虚拟照片]: ${text || '一张照片'}`;
+      else if (type === 'voice') textarea.value = `[语音]: ${text || '一段语音'}`;
+      else if (type === 'location') textarea.value = `[发送定位]: ${text || '未知地点'}`;
+      else if (type === 'emoji') textarea.value = `[表情包]: ${text || '开心'}`;
+      else if (type === 'transfer') textarea.value = `[发起转账] 金额：520.00，备注：${text || '转账给你'}`;
+      else textarea.value = text; // 纯文本
+  },
+
   saveEditedMessage: () => {
     saveScroll();
     const newText = document.getElementById('edit-msg-textarea').value.trim();
     if (newText) {
        const chat = store.chats.find(c => c.charId === wxState.activeChatId);
-       const msg = chat.messages.find(m => m.id === wxState.editMsgData.id);
-       if (msg) msg.text = newText;
+       // 线上/线下区分保护
+       if (chat) {
+           const msg = chat.messages.find(m => m.id === wxState.editMsgData.id);
+           if (msg) {
+               // 🌟 核心魔法：识别标准格式，强行转变气泡的物理性质！
+               if (/^\[.*?虚拟照片.*?\][:：]?\s*(.*)$/.test(newText)) {
+                   msg.msgType = 'virtual_image';
+                   msg.text = newText.match(/^\[.*?虚拟照片.*?\][:：]?\s*(.*)$/)[1] || '一张照片';
+               } else if (/^\[.*?语音.*?\][:：]?\s*(.*)$/.test(newText)) {
+                   msg.msgType = 'voice';
+                   msg.text = newText.match(/^\[.*?语音.*?\][:：]?\s*(.*)$/)[1] || '一段语音';
+               } else if (/^\[.*?定位.*?\][:：]?\s*(.*)$/.test(newText)) {
+                   msg.msgType = 'location';
+                   msg.text = newText.match(/^\[.*?定位.*?\][:：]?\s*(.*)$/)[1] || '未知位置';
+               } else {
+                   // 表情包、转账等因为是纯文本正则替换，直接打回 text 类型即可！
+                   msg.msgType = 'text'; 
+                   msg.text = newText;
+               }
+           }
+       }
     }
     wxState.editMsgData = null;
     window.render();
     restoreScroll();
-    // 🌟 编辑完立刻往云端发一份新剧本，覆盖它的记忆！
     if (typeof window.scheduleCloudTask === 'function') window.scheduleCloudTask(wxState.activeChatId);
   },
   // 引用动作
@@ -1449,7 +1481,8 @@ ${relation}
 3. 情绪直接表达，严禁矫情。
 
 【任务】请结合以上所有信息，发一条最新朋友圈动态。
-❗特殊动作：如果要配图，请在文案末尾输出 [附带虚拟照片: 画面描述]（例如：[附带虚拟照片: 一杯冰美式]）。如果要显示所在位置，请输出 [附带定位: 具体的地点名称]（例如：[附带定位: 星巴克]）。这两个指令可以同时使用！
+❗特殊动作：如果要配图，请在文案末尾输出 [附带虚拟照片: 画面描述]（例如：[附带虚拟照片: 一杯冰美式]）。如果要显示所在位置，请输出 [附带定位: 具体的地点名称]（例如：[附带定位: 星巴克]）。
+❗必须严格必须严格按照 [附带虚拟照片: xxx] 或 [附带定位: 具体的地点名称] 的格式！绝对禁止捏造/更改指令格式！
 直接输出文案，绝不加引号，50字以内。`;
 
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -1458,7 +1491,13 @@ ${relation}
             });
             const data = await res.json();
             let contentText = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
-            
+            // 🌟 解析 AI 附加的定位指令！
+            let locationText = null;
+            const locMatch = contentText.match(/\[附带定位[:：]?\s*([^\]]+)\]/);
+            if (locMatch) {
+                locationText = locMatch[1].trim();
+                contentText = contentText.replace(/\[附带定位[:：]?\s*([^\]]+)\]/, '').trim();
+            }
             // 🌟 史诗级进化 3：解析指令，直接点亮朋友圈的“虚拟照片”卡片模块！
             let virtualText = null;
             const photoMatch = contentText.match(/\[附带虚拟照片[:：]?\s*([^\]]+)\]/);
@@ -1827,7 +1866,7 @@ ${relation}
     // 🌟 不管有没有关开关，统一踹一脚巡逻员，让他去检查要不要重新定闹钟
     if (typeof window.scheduleCloudTask === 'function') window.scheduleCloudTask(wxState.activeChatId);
   },
-  sendMessage: () => {
+  sendMessage: async () => {
     const isOffline = wxState.view === 'offlineStory';
     const isCall = wxState.view === 'call';
     const input = document.getElementById(isOffline ? 'offline-input' : 'wx-input');
@@ -1874,6 +1913,29 @@ ${relation}
       restoreScroll();
       window.wxActions.scrollToBottom();
       document.getElementById(isOffline ? 'offline-input' : 'wx-input')?.focus();
+      // ================= 🌟 B站链接极速解析引擎 =================
+      const bvMatch = text.match(/BV[a-zA-Z0-9]{10}/i);
+      if (bvMatch) {
+          try {
+              const bvid = bvMatch[0];
+              const pwd = localStorage.getItem('neko_server_pwd') || '';
+              // 发给云端二传手，绝对不卡死前端
+              const biliRes = await fetch(`https://neko-hoshino.duckdns.org/parse-bili?bvid=${bvid}`, {
+                  headers: { 'x-secret-token': pwd }
+              });
+              if (biliRes.ok) {
+                  const biliData = await biliRes.json();
+                  if (biliData.title) {
+                      // 🌟 核心魔法修改：不产生新消息，直接把情报缝合进你刚发的这条消息里！
+                      const lastMsg = chat.messages[chat.messages.length - 1];
+                      lastMsg.text += `\n\n[系统隐形情报：该链接为B站视频《${biliData.title}》，UP主：${biliData.owner || '未知'}。简介：${biliData.desc || '无'}。请假装你看过该内容并回复用户。]`;
+                      // 重新渲染，因为消息内容变了
+                      if(wxState.view === 'chatRoom') window.render();
+                  }
+              }
+          } catch(e) { console.error('B站解析失败', e); }
+      }
+      // =========================================================
       // 🌟 发送消息逻辑：线上暂存并重置闹钟，线下和电话立刻回复！
       if (wxState.view !== 'chatRoom') {
           if (chat.isGroup) {
@@ -3599,10 +3661,10 @@ export function renderWeChatApp(store) {
         
       } else if (msg.msgType === 'text') {
         // 🌟 修复：加入了 whitespace-pre-wrap 让 \n 能够被浏览器正确渲染成换行！
-        bubbleClass = `mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-wrap break-words whitespace-pre-wrap text-[15px] ${msg.isMe ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`;
+        bubbleClass = `mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed break-all overflow-wrap break-words whitespace-pre-wrap text-[15px] ${msg.isMe ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`;
         bubbleStyle = '';
         
-        let safeText = msg.text;
+        let safeText = msg.text.replace(/\[系统隐形情报：[\s\S]*?\]/g, '').trim();
         try { // 🌟 防止普通零碎文字里的孤立 HTML 标签撑破底栏
             if (safeText.includes('<') && safeText.includes('>')) {
                const doc = new DOMParser().parseFromString(safeText, 'text/html');
@@ -4088,7 +4150,16 @@ export function renderWeChatApp(store) {
                  <i data-lucide="x" class="text-gray-400 cursor-pointer active:scale-90 transition-transform bg-gray-50 p-1 rounded-full w-6 h-6" onclick="window.wxActions.closeEditMessageModal()"></i>
                </div>
                <div class="p-5 flex flex-col space-y-4">
-                  <textarea id="edit-msg-textarea" rows="8" class="w-full bg-white border border-gray-100 rounded-xl p-3 outline-none text-[15px] text-gray-800 font-medium leading-relaxed shadow-sm resize-none hide-scrollbar">${wxState.editMsgData.text}</textarea>
+                  <div class="flex flex-wrap items-center gap-1 border-b border-gray-100/80">
+                     <span class="text-[12px] font-bold text-gray-400 tracking-widest w-full">格式修复</span>
+                     <button class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-500 text-[11px] font-bold rounded-md active:scale-95 transition-all" onclick="window.wxActions.quickFormatEdit('virtual_image')">照片</button>
+                     <button class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-500 text-[11px] font-bold rounded-md active:scale-95 transition-all" onclick="window.wxActions.quickFormatEdit('voice')">语音</button>
+                     <button class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-500 text-[11px] font-bold rounded-md active:scale-95 transition-all" onclick="window.wxActions.quickFormatEdit('location')">定位</button>
+                     <button class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-500 text-[11px] font-bold rounded-md active:scale-95 transition-all" onclick="window.wxActions.quickFormatEdit('emoji')">表情包</button>
+                     <button class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-500 text-[11px] font-bold rounded-md active:scale-95 transition-all" onclick="window.wxActions.quickFormatEdit('transfer')">转账</button>
+                     <button class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-500 text-[11px] font-bold rounded-md active:scale-95 transition-all" onclick="window.wxActions.quickFormatEdit('text')">文本</button>
+                  </div>
+                  <textarea id="edit-msg-textarea" rows="4" class="w-full bg-white border border-gray-100 rounded-xl p-4 outline-none text-[15px] text-gray-800 font-medium leading-loose shadow-sm resize-none hide-scrollbar">${wxState.editMsgData.text}</textarea>
                   <div class="flex space-x-3 pt-2">
                     <button class="flex-1 bg-white border border-gray-200 text-gray-600 font-bold py-3.5 rounded-xl active:bg-gray-50 transition-colors shadow-sm" onclick="window.wxActions.closeEditMessageModal()">取消</button>
                     <button class="flex-1 bg-blue-500 text-white font-bold py-3.5 rounded-xl active:bg-blue-600 transition-colors shadow-md" onclick="window.wxActions.saveEditedMessage()">保存修改</button>
@@ -4956,7 +5027,7 @@ window.scheduleCloudTask = async (charId) => {
 
             momentHistory.push({
                 id: Date.now(), sender: boundPersona.name,
-                text: `(系统最高指令：系统时间 ${timeString}。距离你上次发朋友圈已超过 ${targetObj.autoMomentFreq} 小时。请你立刻执行 [发朋友圈] 指令！\n\n【状态】\n${relation}\n\n1. 拒绝书面语（如岁月静好），说人话！\n2. 朋友圈通常没头没尾（如“困死”）。\n\n⚠️注意：你这次的唯一任务就是输出 [发朋友圈] 动态内容！绝对不要发普通的聊天回复！必要时可带[附带虚拟照片:描述]或[附带定位:地点])`,
+                text: `(系统最高指令：系统时间 ${timeString}。距离你上次发朋友圈已超过 ${targetObj.autoMomentFreq} 小时。请你立刻执行 [发朋友圈] 指令！\n\n【状态】\n${relation}\n\n1. 拒绝书面语（如岁月静好），说人话！\n2. 朋友圈通常没头没尾（如“困死”）。\n\n⚠️注意：你这次的唯一任务就是输出 [发朋友圈] 动态内容！绝对不要发普通的聊天回复！必要时可带[附带虚拟照片:描述]或[附带定位:地点]❗必须严格必须严格按照格式输出，严禁捏造/更改指令格式！绝不可包含系统标签！)`,
                 isMe: true, isHidden: true, msgType: 'text'
             });
 
@@ -4984,8 +5055,10 @@ window.wxActions.rerollReply = (msgId) => {
 };
 
 window.wxActions.closeRerollModal = () => {
+    saveScroll();
     wxState.showRerollModal = false;
     if (typeof window.render === 'function') window.render();
+    restoreScroll();
 };
 
 window.wxActions.submitReroll = async () => {
@@ -5051,7 +5124,7 @@ window.wxActions.submitReroll = async () => {
             tempHistory.push({
                 id: Date.now(),
                 sender: 'system', 
-                text: `(系统提示：用户对你的上一条回复不满意，要求重新生成。用户的修改要求是：“${requirement}”。请直接输出修改后的回复，绝不允许包含这句系统标签和任何多余的解释！也不允许把这句话当成用户说的话来回复！)`,
+                text: `(系统最高指令：你的上一条回复不符合要求。请严格按照以下修改要求重新生成回复：“${requirement}”。\n⚠️绝对警告：你必须直接输出角色的台词！严禁回复“好的”、“明白”、“我这就修改”等任何废话！绝对不能把这条要求当做用户对你说的话！)`,
                 isMe: true,
                 isHidden: true, 
                 msgType: 'text'
@@ -5112,7 +5185,8 @@ window.syncCloudMailbox = async () => {
         if (!msg.charId) continue;
         
         // 🌟 提取云端的真实时间戳 (不再使用用户拉取时的时间！)
-        const cloudTime = msg.time || (msg.id ? new Date(msg.id).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : getNowTime());
+        // 🌟 史诗级修复：精准读取云端的 timestamp 并转换为人类时间！
+const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : getNowTime();
         
         // 🌟 史诗级修复：剥离 AUTO| 和 ALARM| 前缀，防止找不到聊天室导致消息被无情吞噬！
         let rawCharId = msg.charId;
@@ -5255,7 +5329,7 @@ window.syncCloudMailbox = async () => {
             remainingText = remainingText.replace(/\[更换头像\][:：]?\s*[^\n\[\]]+/, '').trim();
         }
 
-        if (/\[(?:发送表情|表情包)\]/.test(remainingText)) {
+        while (/\[(?:发送表情|表情包)\]/.test(remainingText)) {
             const match = remainingText.match(/\[(?:发送表情|表情包)\][:：]?\s*([^\n\[\]]+)/);
             if (match) {
                 const emojiName = match[1].trim(); let foundUrl = '';
@@ -5375,24 +5449,50 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
             const note = (nextLines[0].match(/备注[:：]?\s*([^，,。\]\n]+)/) || [])[1] || '转账给你';
             msgsToPush.push({ msgType: 'transfer', text: `[收到转账]`, transferData: { amount, note }, transferState: 'pending' });
             if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
-        } else if (/\[语音\]/.test(remainingText)) {
-            let parts = remainingText.split(/\[语音\][:：]?\s*/);
-            if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-            let nextLines = parts[1].split('\n');
-            if (nextLines[0].trim()) msgsToPush.push({ msgType: 'voice', text: nextLines[0].trim() });
-            if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
-        } else if (/\[虚拟照片\]/.test(remainingText)) {
-            let parts = remainingText.split(/\[虚拟照片\][:：]?\s*/);
-            if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-            let nextLines = parts[1].split('\n');
-            if (nextLines[0].trim()) msgsToPush.push({ msgType: 'virtual_image', text: nextLines[0].trim() });
-            if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
-        } else if (/\[发送定位\]/.test(remainingText)) {
-            let parts = remainingText.split(/\[发送定位\][:：]?\s*/);
-            if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-            let nextLines = parts[1].split('\n');
-            if (nextLines[0].trim()) msgsToPush.push({ msgType: 'location', text: nextLines[0].trim() });
-            if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
+        } else if (/\[(?:发送)?语音[:：]?\s*([^\]]+)?\]/.test(remainingText) || /\[(?:发送)?语音\]/.test(remainingText)) {
+            // 兼容 [语音: 哈哈哈] 和 [语音]\n哈哈哈 两种极其随意的格式
+            const match = remainingText.match(/\[(?:发送)?语音[:：]?\s*([^\]]+)\]/);
+            if (match) {
+                const parts = remainingText.split(match[0]);
+                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+                msgsToPush.push({ msgType: 'voice', text: match[1].trim() });
+                if (parts[1] && parts[1].trim()) msgsToPush.push({ msgType: 'text', text: parts[1].trim() });
+            } else {
+                let parts = remainingText.split(/\[(?:发送)?语音\][:：]?\s*/);
+                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+                let nextLines = parts[1].split('\n');
+                if (nextLines[0].trim()) msgsToPush.push({ msgType: 'voice', text: nextLines[0].replace(/\]$/, '').trim() });
+                if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
+            }
+        } else if (/\[(?:发送)?虚拟照片[:：]?\s*([^\]]+)?\]/.test(remainingText) || /\[虚拟照片\]/.test(remainingText)) {
+            // 兼容 [虚拟照片: 一只猫] 和 [虚拟照片]\n一只猫 两种格式
+            const match = remainingText.match(/\[(?:发送)?虚拟照片[:：]?\s*([^\]]+)\]/);
+            if (match) {
+                const parts = remainingText.split(match[0]);
+                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+                msgsToPush.push({ msgType: 'virtual_image', text: match[1].trim() });
+                if (parts[1] && parts[1].trim()) msgsToPush.push({ msgType: 'text', text: parts[1].trim() });
+            } else {
+                let parts = remainingText.split(/\[(?:发送)?虚拟照片\][:：]?\s*/);
+                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+                let nextLines = parts[1].split('\n');
+                if (nextLines[0].trim()) msgsToPush.push({ msgType: 'virtual_image', text: nextLines[0].replace(/\]$/, '').trim() });
+                if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
+            }
+        } else if (/\[(?:发送)?定位[:：]?\s*([^\]]+)?\]/.test(remainingText) || /\[发送定位\]/.test(remainingText)) {
+            const match = remainingText.match(/\[(?:发送)?定位[:：]?\s*([^\]]+)\]/);
+            if (match) {
+                const parts = remainingText.split(match[0]);
+                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+                msgsToPush.push({ msgType: 'location', text: match[1].trim() });
+                if (parts[1] && parts[1].trim()) msgsToPush.push({ msgType: 'text', text: parts[1].trim() });
+            } else {
+                let parts = remainingText.split(/\[发送定位\][:：]?\s*/);
+                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
+                let nextLines = parts[1].split('\n');
+                if (nextLines[0].trim()) msgsToPush.push({ msgType: 'location', text: nextLines[0].replace(/\]$/, '').trim() });
+                if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
+            }
         } else {
             if (remainingText.trim()) {
                 if (isOffline) { 

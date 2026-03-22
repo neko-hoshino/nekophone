@@ -113,7 +113,7 @@ ${groupNoticeStr}
    - 修改被戳提示：[修改被戳动作:捏了捏] 和 [修改被戳后缀:的脸]
    - 拉黑用户：[拉黑用户]（极度生气、吃醋决裂时使用）
    
-❗【防幻觉绝对红线】：你只能使用上方列表和词典中【精确存在】的指令！绝对禁止产生幻觉去编造指令（严禁输出任何未定义的格式）！`;
+❗【绝对红线】：你只能使用上方列表和词典中【精确存在】的指令！绝对禁止编造/更改指令（严禁输出任何未定义的格式）！`;
   }
 
   let turnsCount = 0; let lastSender = null; let startIndex = 0;
@@ -191,6 +191,22 @@ ${groupNoticeStr}
 
   // 🌟 4. 构建后置格式与绝对规则 (Message N+1，利用近因效应锁定格式)
   let finalSystemPrompt = backStr ? `${backStr}\n\n` : '';
+
+  if (chat && chat.latestInnerThought && chat.latestInnerThoughtTime) {
+      const diffHours = (now.getTime() - chat.latestInnerThoughtTime) / (1000 * 60 * 30);
+      if (diffHours <= 1) {
+          const pt = chat.latestInnerThought;
+          finalSystemPrompt += `\n\n【状态继承】：距离上次不到半小时。你刚才的内心状态是：心情 ${pt.mood}/100，情绪 [${pt.emotion}]，动作 [${pt.status}]。请保持连贯。`;
+      }
+  }
+
+  if (!isCall && !isOffline && !groupInfo) {
+      finalSystemPrompt += `\n\n【绝密指令：心声面板同步】
+在你的回复最末尾（必须另起一行），附带当前真实内心状态数据！格式必须为严格 JSON 并用 [心声] 包裹！
+示范：
+[心声] {"mood": 85, "emotion": "开心/吃醋 (必须严格在10字内概括!)", "lust": 60, "status": "正在看手机 (10字内的动作!)", "os": "这里写内心独白，不少于50字，必须符合你的人设，风格正常、阳光、日常、符合社会规范，把没说出口的话写在这里！", "hidden": "这里写阴暗、色情、变态、占有欲、直白，必须包含对 User 的性幻想、偷窥欲、嫉妒心或想要占有的冲动，严格50字以上！(注意：如果 lust 小于50，请留空字符串或不要输出这个字段)"}`;
+  }
+
   finalSystemPrompt += systemRules; // 包含之前定义的线上线下基本规则和超能力列表
   finalSystemPrompt += emo; // 表情包规则
 
@@ -206,24 +222,9 @@ ${groupNoticeStr}
   } else if (isCall) {
       finalSystemPrompt += `\n\n【⚠️发送前最高警告】：当前为实时通话！每句话必须简短自然，可用*动作*增加互动感，绝不可带任何系统前缀或时间戳！长句必须按语气换行！`;
   } else if (!isOffline) {
-      finalSystemPrompt += `\n\n【⚠️发送前最高警告】：你现在是在微信界面聊天，普通对话每行严禁超过24个字！若想说长句，必须按自然语言习惯断句换行！严禁输出任何时间戳或系统标签！\n❗特殊红线：如果你要发送 网页/HTML代码/小程序卡片，必须将其完整包裹在 \`\`\`html 和 \`\`\` 之间！在代码块内部【绝对禁止】为了字数限制而随意换行！`;
+      finalSystemPrompt += `\n\n【⚠️发送前最高警告】：你现在是在微信界面聊天，普通对话每行严禁超过24个字！若想说长句，必须按自然语言习惯断句换行！严禁输出任何时间戳或系统标签！\n❗特殊红线：如果你要发送 网页/HTML代码/小程序卡片，必须将其完整包裹在 \`\`\`html 和 \`\`\` 之间！在代码块内部【绝对禁止】为了字数限制而随意换行！\n❗【绝对红线】：你只能使用上方列表和词典中【精确存在】的指令！绝对禁止编造/更改指令（严禁输出任何未定义的格式）！`;
   } else {
       finalSystemPrompt += `\n\n【⚠️发送前最高警告】：当前为线下剧情模式！必须采用轻小说体裁的长段落描写，绝对禁止像线上聊天那样频繁换行！对话务必用“”包裹，动作直接描写！`;
-  }
-
-  if (chat && chat.latestInnerThought && chat.latestInnerThoughtTime) {
-      const diffHours = (now.getTime() - chat.latestInnerThoughtTime) / (1000 * 60 * 30);
-      if (diffHours <= 1) {
-          const pt = chat.latestInnerThought;
-          finalSystemPrompt += `\n\n【状态继承】：距离上次不到半小时。你刚才的内心状态是：心情 ${pt.mood}/100，情绪 [${pt.emotion}]，动作 [${pt.status}]。请保持连贯。`;
-      }
-  }
-
-  if (!isCall && !isOffline && !groupInfo) {
-      finalSystemPrompt += `\n\n【绝密指令：心声面板同步】
-在你的回复最末尾（必须另起一行），附带当前真实内心状态数据！格式必须为严格 JSON 并用 [心声] 包裹！
-示范：
-[心声] {"mood": 85, "emotion": "开心/吃醋 (必须严格在10字内概括!)", "lust": 60, "status": "正在看手机 (10字内的动作!)", "os": "这里写内心独白，不少于50字，必须符合你的人设，风格正常、阳光、日常、符合社会规范，把没说出口的话写在这里！", "hidden": "这里写阴暗、色情、变态、占有欲、直白，必须包含对 User 的性幻想、偷窥欲、嫉妒心或想要占有的冲动，严格50字以上！(注意：如果 lust 小于50，请留空字符串或不要输出这个字段)"}`;
   }
 
   if (finalSystemPrompt.trim()) {
