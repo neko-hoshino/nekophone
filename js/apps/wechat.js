@@ -97,12 +97,12 @@ async function triggerAutoMemory(charId, msgs) {
     const logText = msgs.map(m => {
         let senderName = m.sender === defaultName ? myName : m.sender;
         let content = m.text;
-        if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
-        else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
-        else if (m.msgType === 'location') content = `[定位] ${m.text}`;
-        else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
+        if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.text}`;
+        else if (m.msgType === 'voice') content = `[语音]: ${m.text}`;
+        else if (m.msgType === 'location') content = `[发送定位]: ${m.text}`;
+        else if (m.msgType === 'transfer') content = `[发起转账] ${m.transferData?.amount}, 备注: ${m.transferData?.note}`;
         else if (m.msgType === 'real_image') content = `[真实照片]`;
-        else if (m.msgType === 'emoji') content = `[表情包]`;
+        else if (m.msgType === 'emoji') content = `[表情包]: ${m.text}`;
         else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
         return `${senderName}: ${content}`;
     }).join('\n');
@@ -585,7 +585,13 @@ window.wxActions = {
                   const formattedGMsgs = latestGMsgs.map(m => {
                      const sName = m.isMe ? (store.personas.find(p=>p.id===groupChat.boundPersonaId)?.name || store.personas[0].name) : m.sender;
                      let text = m.msgType === 'text' ? m.text : `[${m.msgType}]`;
-                     if (m.msgType === 'virtual_image') text = `[虚拟照片] ${m.text}`;
+                     if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.text}`;
+        else if (m.msgType === 'voice') content = `[语音]: ${m.text}`;
+        else if (m.msgType === 'location') content = `[发送定位]: ${m.text}`;
+        else if (m.msgType === 'transfer') content = `[发起转账] ${m.transferData?.amount}, 备注: ${m.transferData?.note}`;
+        else if (m.msgType === 'real_image') content = `[真实照片]`;
+        else if (m.msgType === 'emoji') content = `[表情包]: ${m.text}`;
+        else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
                      return `${sName}: ${text}`;
                   }).join('\n');
                   injectedContext.push(`【群聊：${groupChat.groupName || '未知群聊'} 的最近记忆】\n${formattedGMsgs}`);
@@ -618,7 +624,13 @@ window.wxActions = {
                       const formattedPMsgs = latestPMsgs.map(m => {
                          const sName = m.isMe ? (store.personas.find(p=>p.id===privateChat.boundPersonaId)?.name || store.personas[0].name) : m.sender;
                          let text = m.msgType === 'text' ? m.text : `[${m.msgType}]`;
-                         if (m.msgType === 'virtual_image') text = `[虚拟照片] ${m.text}`;
+                         if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.text}`;
+        else if (m.msgType === 'voice') content = `[语音]: ${m.text}`;
+        else if (m.msgType === 'location') content = `[发送定位]: ${m.text}`;
+        else if (m.msgType === 'transfer') content = `[发起转账] ${m.transferData?.amount}, 备注: ${m.transferData?.note}`;
+        else if (m.msgType === 'real_image') content = `[真实照片]`;
+        else if (m.msgType === 'emoji') content = `[表情包]: ${m.text}`;
+        else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
                          return `"${sName}: ${text}"`;
                       }).join('\n');
                       injectedContext.push(`👉 ${char.name} 的私有记忆（只有 ${char.name} 自己知道）：\n${formattedPMsgs}`);
@@ -1053,12 +1065,12 @@ window.wxActions = {
       const previewLines = msgsToForward.slice(0, 4).map(m => {
         let senderName = m.isMe ? boundPersona.name : sourceCharName;
         let content = m.text;
-        if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
-        else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
-        else if (m.msgType === 'location') content = `[定位] ${m.text}`;
-        else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
+        if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.text}`;
+        else if (m.msgType === 'voice') content = `[语音]: ${m.text}`;
+        else if (m.msgType === 'location') content = `[发送定位]: ${m.text}`;
+        else if (m.msgType === 'transfer') content = `[发起转账] ${m.transferData?.amount}, 备注: ${m.transferData?.note}`;
         else if (m.msgType === 'real_image') content = `[真实照片]`;
-        else if (m.msgType === 'emoji') content = `[表情包]`;
+        else if (m.msgType === 'emoji') content = `[表情包]: ${m.text}`;
         else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
         return `${senderName}: ${content}`;
       }).join('\n');
@@ -1129,13 +1141,13 @@ window.wxActions = {
         const logText = msgs.map(m => {
             let senderName = m.sender === defaultName ? myName : m.sender;
             let content = m.text;
-            if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
-            else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
-            else if (m.msgType === 'location') content = `[定位] ${m.text}`;
-            else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
-            else if (m.msgType === 'real_image') content = `[真实照片]`;
-            else if (m.msgType === 'emoji') content = `[表情包]`;
-            else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
+            if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.text}`;
+        else if (m.msgType === 'voice') content = `[语音]: ${m.text}`;
+        else if (m.msgType === 'location') content = `[发送定位]: ${m.text}`;
+        else if (m.msgType === 'transfer') content = `[发起转账] ${m.transferData?.amount}, 备注: ${m.transferData?.note}`;
+        else if (m.msgType === 'real_image') content = `[真实照片]`;
+        else if (m.msgType === 'emoji') content = `[表情包]: ${m.text}`;
+        else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
             return `${senderName}: ${content}`;
         }).join('\n');
         
@@ -2276,17 +2288,18 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
           }
 
           const { buildLLMPayload } = await import('../utils/llm.js');
-          // 🌟 修复：发送给大模型前，把纯文本的描述还原成带有标签的特殊格式，让 AI 知道这是多媒体消息！
+          // 🌟 终极净化：完美还原多媒体标签，且必须保留原消息的对象结构！
           const tempHistory = chat.messages.map(m => {
-              let formattedText = m.text;
-              if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
-        else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
-        else if (m.msgType === 'location') content = `[定位] ${m.text}`;
-        else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
-        else if (m.msgType === 'real_image') content = `[真实照片]`;
-        else if (m.msgType === 'emoji') content = `[表情包]`;
-        else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
-        return `${senderName}: ${content}`;
+              let content = m.text || '';
+              if (m.msgType === 'voice') content = `[语音]: ${content}`;
+              else if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.virtualImageText || content || '一张照片'}`;
+              else if (m.msgType === 'location') content = `[发送定位]: ${content || '未知位置'}`;
+              else if (m.msgType === 'transfer') content = `[发起转账] 金额：${m.transferData?.amount || '未知'}，备注：${m.transferData?.note || '无'}`;
+              else if (m.msgType === 'real_image') content = `[真实照片]`;
+              else if (m.msgType === 'emoji') content = `[表情包]: ${content}`;
+              
+              // ⚠️ 绝杀：必须返回克隆的新对象，并替换掉 text！绝不允许返回成纯字符串！
+              return { ...m, text: content };
           });
 
           // 🌟 实时塞入“发送好友申请”的求饶说明书
@@ -4947,9 +4960,9 @@ window.scheduleCloudTask = async (charId) => {
 
     try {
         const { buildLLMPayload } = await import('../utils/llm.js');
-        
+        let senderName = m.isMe ? boundPersona.name : sourceCharName;
         let baseHistory = chat.messages.map(m => {
-            let formattedText = m.text;
+            let content = m.text;
             if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
         else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
         else if (m.msgType === 'location') content = `[定位] ${m.text}`;
@@ -5167,18 +5180,18 @@ window.wxActions.submitReroll = async () => {
       const charObj = store.contacts.find(c => c.id === chat.charId);
       const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
       const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
-        
-        // 🌟 修复：把纯文本的描述还原成带有标签的特殊格式
+        // 🌟 终极净化：完美还原多媒体标签，且必须保留原消息的对象结构！
         let tempHistory = chat.messages.map(m => {
-            let formattedText = m.text;
-            if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
-        else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
-        else if (m.msgType === 'location') content = `[定位] ${m.text}`;
-        else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
-        else if (m.msgType === 'real_image') content = `[真实照片]`;
-        else if (m.msgType === 'emoji') content = `[表情包]`;
-        else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
-        return `${senderName}: ${content}`;
+            let content = m.text || '';
+            if (m.msgType === 'voice') content = `[语音]: ${content}`;
+            else if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.virtualImageText || content || '一张照片'}`;
+            else if (m.msgType === 'location') content = `[发送定位]: ${content || '未知位置'}`;
+            else if (m.msgType === 'transfer') content = `[发起转账] 金额：${m.transferData?.amount || '未知'}，备注：${m.transferData?.note || '无'}`;
+            else if (m.msgType === 'real_image') content = `[真实照片]`;
+            else if (m.msgType === 'emoji') content = `[表情包]: ${content}`;
+            
+            // ⚠️ 绝杀：必须返回克隆的新对象，并替换掉 text！绝不允许返回成纯字符串！
+            return { ...m, text: content };
         });
         
         // 🌟 核心魔法：偷偷给大模型塞一张“导演纸条”
