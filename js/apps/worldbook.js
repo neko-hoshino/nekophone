@@ -207,9 +207,9 @@ export function renderWorldbookApp(store) {
         </div>
 
         ${wbState.activeTab === 'trigger' ? `
-          <div class="space-y-2 shrink-0 animate-in fade-in">
+          <div class="space-y-2 shrink-0">
             <span class="text-[12px] font-bold text-gray-600 uppercase tracking-widest">触发关键词 (英文逗号分隔)</span>
-            <input id="wb-edit-keywords" type="text" value="${data.keywords}" class="w-full bg-blue-50/30 border border-blue-100 rounded-xl p-3.5 outline-none text-[14px] font-medium text-blue-600" />
+            <input id="wb-edit-keywords" type="text" value="${data.keywords}" class="w-full bg-white border border-gray-100 rounded-xl p-3.5 outline-none text-[15px] font-medium shadow-sm" />
           </div>
         ` : ''}
 

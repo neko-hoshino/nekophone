@@ -156,9 +156,9 @@ export function renderMemoryApp(store) {
         </div>
 
         ${memState.activeTab === 'fragment' ? `
-          <div class="space-y-2 shrink-0 animate-in fade-in">
-            <span class="text-[12px] font-black text-blue-600 uppercase tracking-widest">触发关键词 (用英文逗号分隔)</span>
-            <input id="mem-edit-keywords" type="text" value="${data.keywords}" class="w-full bg-blue-50/50 border border-blue-100 rounded-xl p-3.5 outline-none text-[14px] font-bold text-blue-600 placeholder-blue-300" placeholder="例如：滑雪,瑞士,冬天" />
+          <div class="space-y-2 shrink-0">
+            <span class="text-[12px] font-black text-gray-600 uppercase tracking-widest">触发关键词 (用英文逗号分隔)</span>
+            <input id="mem-edit-keywords" type="text" value="${data.keywords}" class="w-full bg-white border border-gray-100 rounded-xl p-3.5 outline-none text-[15px] font-medium shadow-sm" placeholder="例如：滑雪,瑞士,冬天" />
           </div>
         ` : ''}
 

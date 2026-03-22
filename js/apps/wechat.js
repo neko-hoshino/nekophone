@@ -1053,11 +1053,13 @@ window.wxActions = {
       const previewLines = msgsToForward.slice(0, 4).map(m => {
         let senderName = m.isMe ? boundPersona.name : sourceCharName;
         let content = m.text;
-        if (m.msgType === 'emoji' || m.msgType === 'real_image') content = '[图片]';
-        if (m.msgType === 'voice') content = '[语音]';
-        if (m.msgType === 'virtual_image') content = '[照片]';
-        if (m.msgType === 'transfer') content = '[转账]';
-        if (m.msgType === 'history_record') content = '[聊天记录]';
+        if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
+        else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
+        else if (m.msgType === 'location') content = `[定位] ${m.text}`;
+        else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
+        else if (m.msgType === 'real_image') content = `[真实照片]`;
+        else if (m.msgType === 'emoji') content = `[表情包]`;
+        else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
         return `${senderName}: ${content}`;
       }).join('\n');
 
@@ -1839,16 +1841,26 @@ ${relation}
     targetObj.autoMsgInterval = isNaN(intervalVal) ? 5 : intervalVal;
 
     // 🌟 核心拦截机制：发射省钱空包弹！如果你关掉了开关，立刻向云端发射指令，物理绞杀旧闹钟！
-    const charForCloud = chat.isGroup ? store.contacts.find(c => c.id === chat.memberIds[0]) : targetObj;
     if (oldAutoMsg && !targetObj.autoMsgEnabled) {
-        console.log('[系统] 主动聊天已关闭，发送空包弹狙杀云端 AUTO 闹钟！');
-        // 参数依次为：延时0，角色，空消息，路由ID，递归间隔0，递归次数0，是空包弹(true)
-        if (typeof planCloudBrain === 'function') planCloudBrain(0, charForCloud, [], 'AUTO|' + chat.charId + '|' + charForCloud.id + '|0', 0, 0, true).catch(()=>{});
-    }
-    if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
-        console.log('[系统] 朋友圈已关闭，发送空包弹狙杀云端 MOMENT 闹钟！');
-        if (typeof planCloudBrain === 'function') planCloudBrain(0, charForCloud, [], 'MOMENT|' + chat.charId + '|' + charForCloud.id + '|0', 0, 0, true).catch(()=>{});
-    }
+    console.log('[系统] 主动聊天已关闭，发送空包弹狙杀云端 AUTO 闹钟！');
+    const memberIds = chat.isGroup ? chat.memberIds : [targetObj.id];
+    memberIds.forEach(mId => {
+        const mChar = store.contacts.find(c => c.id === mId);
+        if (mChar && typeof window.planCloudBrain === 'function') {
+            window.planCloudBrain(0, mChar, [], 'AUTO|' + chat.charId + '|' + mId + '|0', 0, 0, true).catch(()=>{});
+        }
+    });
+}
+if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
+    console.log('[系统] 朋友圈已关闭，发送空包弹狙杀云端 MOMENT 闹钟！');
+    const memberIds = chat.isGroup ? chat.memberIds : [targetObj.id];
+    memberIds.forEach(mId => {
+        const mChar = store.contacts.find(c => c.id === mId);
+        if (mChar && typeof window.planCloudBrain === 'function') {
+            window.planCloudBrain(0, mChar, [], 'MOMENT|' + chat.charId + '|' + mId + '|0', 0, 0, true).catch(()=>{});
+        }
+    });
+}
     
     if (targetObj.disableEmoji) { targetObj.emojis = "disabled"; } else {
       const allowedNames = [];
@@ -2267,10 +2279,14 @@ ${relation}
           // 🌟 修复：发送给大模型前，把纯文本的描述还原成带有标签的特殊格式，让 AI 知道这是多媒体消息！
           const tempHistory = chat.messages.map(m => {
               let formattedText = m.text;
-              if (m.msgType === 'virtual_image') formattedText = `[发送了一张虚拟照片] 画面描述：${m.text}`;
-              else if (m.msgType === 'voice') formattedText = `[发送了一条语音] 语音内容：${m.text}`;
-              else if (m.msgType === 'location') formattedText = `[发送了一个定位] 位置信息：${m.text}`;
-              return { ...m, text: formattedText };
+              if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
+        else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
+        else if (m.msgType === 'location') content = `[定位] ${m.text}`;
+        else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
+        else if (m.msgType === 'real_image') content = `[真实照片]`;
+        else if (m.msgType === 'emoji') content = `[表情包]`;
+        else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
+        return `${senderName}: ${content}`;
           });
 
           // 🌟 实时塞入“发送好友申请”的求饶说明书
@@ -3664,7 +3680,9 @@ export function renderWeChatApp(store) {
         bubbleClass = `mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed break-all overflow-wrap break-words whitespace-pre-wrap text-[15px] ${msg.isMe ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`;
         bubbleStyle = '';
         
-        let safeText = msg.text.replace(/\[系统隐形情报：[\s\S]*?\]/g, '').trim();
+        // 🌟 物理擦除 AI 附加的接受邀请指令，让用户只能看到 AI 开心的回复
+        let safeText = msg.text.replace(/\[系统隐形情报：[\s\S]*?\]/g, '').replace(/\[(?:接受|同意)邀请\]/g, '').trim();
+
         try { // 🌟 防止普通零碎文字里的孤立 HTML 标签撑破底栏
             if (safeText.includes('<') && safeText.includes('>')) {
                const doc = new DOMParser().parseFromString(safeText, 'text/html');
@@ -3754,7 +3772,36 @@ export function renderWeChatApp(store) {
           </div>
           <div class="border-t border-gray-100 mx-3 py-1.5 flex justify-between items-center text-[10px] text-gray-400"><span>聊天记录</span></div>
         `;
-      // --- 🌟 艺术级进化：渲染 iOS 风高级感纪念日卡片 ---
+      } else if (msg.msgType === 'invite_card') {
+            // 🌟 完美融入架构：利用底层气泡包装器，只需指定宽度和透明底色！头像和时间会自动对齐！
+            maxWidthClass = 'max-w-[240px]';
+            bubbleClass = 'bg-transparent shadow-none p-0 m-0 border-0'; 
+            bubbleStyle = ''; 
+            contentHtml = `
+            <div class="w-[200px] bg-rose-50 rounded-[18px] border border-rose-100 p-4 shadow-sm select-none flex flex-col items-center justify-center">
+                <div class="flex items-center space-x-2 text-[#881337] mb-2.5 mt-1">
+                    <i data-lucide="mail" class="w-5 h-5 opacity-80 shrink-0"></i>
+                    <span class="text-[14px] font-black tracking-wide leading-snug text-center">${boundPersona.name}邀请你<br>开通情侣空间</span>
+                </div>
+                <div class="flex items-center space-x-1.5 text-rose-400 mb-1">
+                    <span class="text-[10px] font-bold">等待对方接受邀请...</span>
+                </div>
+            </div>
+            `;
+        } else if (msg.msgType === 'accept_card') {
+            // 🌟 同理，极其干净的接收卡片
+            maxWidthClass = 'max-w-[200px]';
+            bubbleClass = 'bg-transparent shadow-none p-0 m-0 border-0'; 
+            bubbleStyle = ''; 
+            contentHtml = `
+            <div class="w-[180px] bg-rose-50 rounded-[18px] border border-gray-100 p-4 shadow-sm select-none flex flex-col items-center justify-center">
+                <div class="flex items-center space-x-2.5 text-rose-500/90 py-1">
+                    <i data-lucide="mail-check" class="w-6 h-6 shrink-0"></i>
+                    <span class="text-[15px] font-black tracking-wide">已接受邀请</span>
+                </div>
+            </div>
+            `;
+        // --- 🌟 艺术级进化：渲染 iOS 风高级感纪念日卡片 ---
               } else if (msg.msgType === 'anniversary_card') {
                 const cd = msg.cardData || {};
                 const anni = (store.anniversaries || []).find(a => String(a.id) === String(cd.anniId));
@@ -4869,8 +4916,15 @@ const planCloudBrain = async (delayMinutes, char, llmMessages, routingId, recurs
   }
 };
 
+window.planCloudBrain = planCloudBrain; // 🌟 挂载到全局，供设置面板的空包弹调用
+
 // 🌟 终极时空巡逻员：双线程并发引擎，聊天与朋友圈互不抢占！
 window.scheduleCloudTask = async (charId) => {
+    if (window.isSyncingMailbox) {
+        // 🌟 如果信箱正在工作，巡逻员等 1 秒再来
+        setTimeout(() => window.scheduleCloudTask(charId), 1000);
+        return;
+    }
     const chat = store.chats.find(c => c.charId === charId);
     if (!chat) return;
 
@@ -4896,10 +4950,14 @@ window.scheduleCloudTask = async (charId) => {
         
         let baseHistory = chat.messages.map(m => {
             let formattedText = m.text;
-            if (m.msgType === 'virtual_image') formattedText = `[发送了一张虚拟照片] 画面描述：${m.text}`;
-            else if (m.msgType === 'voice') formattedText = `[发送了一条语音] 语音内容：${m.text}`;
-            else if (m.msgType === 'location') formattedText = `[发送了一个定位] 位置信息：${m.text}`;
-            return { ...m, text: formattedText };
+            if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
+        else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
+        else if (m.msgType === 'location') content = `[定位] ${m.text}`;
+        else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
+        else if (m.msgType === 'real_image') content = `[真实照片]`;
+        else if (m.msgType === 'emoji') content = `[表情包]`;
+        else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
+        return `${senderName}: ${content}`;
         });
 
         let turnsCount = 0; let lastSender = null; let startIndex = 0;
@@ -5108,15 +5166,19 @@ window.wxActions.submitReroll = async () => {
         // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
       const charObj = store.contacts.find(c => c.id === chat.charId);
       const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
-        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
+      const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
         
         // 🌟 修复：把纯文本的描述还原成带有标签的特殊格式
         let tempHistory = chat.messages.map(m => {
             let formattedText = m.text;
-            if (m.msgType === 'virtual_image') formattedText = `[发送了一张虚拟照片] 画面描述：${m.text}`;
-            else if (m.msgType === 'voice') formattedText = `[发送了一条语音] 语音内容：${m.text}`;
-            else if (m.msgType === 'location') formattedText = `[发送了一个定位] 位置信息：${m.text}`;
-            return { ...m, text: formattedText };
+            if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
+        else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
+        else if (m.msgType === 'location') content = `[定位] ${m.text}`;
+        else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
+        else if (m.msgType === 'real_image') content = `[真实照片]`;
+        else if (m.msgType === 'emoji') content = `[表情包]`;
+        else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
+        return `${senderName}: ${content}`;
         });
         
         // 🌟 核心魔法：偷偷给大模型塞一张“导演纸条”
@@ -5152,6 +5214,11 @@ window.wxActions.submitReroll = async () => {
         
         // 发送给云端代跑
         await planCloudBrain(0, char, llmMessages, chat.charId + '|' + char.id + '|' + (isOffline ? '1' : '0'));
+        
+        // 🌟 重 roll 之后，强制踹一脚巡逻员，重新校准云端闹钟！
+        if (typeof window.scheduleCloudTask === 'function') {
+            window.scheduleCloudTask(chat.charId);
+        }
     } catch (e) {
         console.error('重roll请求失败', e);
         wxState.typingStatus[chat.charId] = false;
@@ -5161,6 +5228,8 @@ window.wxActions.submitReroll = async () => {
 // ==================== 以下代码必须放在 wechat.js 的最最最底部 ====================
 
 window.syncCloudMailbox = async () => {
+  if (window.isSyncingMailbox) return; // 🌟 锁门，防止巡逻员闯入
+  window.isSyncingMailbox = true;
   try {
     const reg = await navigator.serviceWorker.ready;
     const sub = await reg.pushManager.getSubscription();
@@ -5381,6 +5450,19 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
             remainingText = remainingText.replace(/\[(?:发送好友申请|请求添加好友)\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
 
+        // 🌟 物理拦截 AI 的接受邀请指令，转为绝美卡片并开通空间！
+        if (/\[(?:接受|同意)邀请\]/.test(remainingText)) {
+            msgsToPush.push({ msgType: 'accept_card', text: '[已接受邀请]' });
+            remainingText = remainingText.replace(/\[(?:接受|同意)邀请\][:：]?\s*/g, '').trim();
+            
+            // 物理开通情侣空间！
+            store.coupleSpaces = store.coupleSpaces || [];
+            if (!store.coupleSpaces.includes(char.id)) {
+                store.coupleSpaces.push(char.id);
+            }
+            hasSystemAction = true;
+        }
+
         if (/\[撤回上一条消息\]/.test(remainingText)) {
             const aiMsgs = chat.messages.filter(m => !m.isMe && m.msgType !== 'system' && m.msgType !== 'recall_system');
             if (aiMsgs.length > 0) {
@@ -5439,6 +5521,11 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
             remainingText = '';
             console.log(`[系统] 主动搭话已关闭，已静默拦截 ${char.name} 的聊天气泡（朋友圈和后台指令已放行）`);
         }
+        
+// 🌟 加上无限连发引擎的安全锁
+let lastLength = -1;
+while (remainingText.trim().length > 0 && remainingText.length !== lastLength) {
+lastLength = remainingText.length; // 只要文本还在变短，就一直切！
 
         // 🌟 5. 解析气泡与附件 (语音、虚拟照片、转账、定位)
         if (/\[发起转账\]/.test(remainingText)) {
@@ -5449,20 +5536,30 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
             const note = (nextLines[0].match(/备注[:：]?\s*([^，,。\]\n]+)/) || [])[1] || '转账给你';
             msgsToPush.push({ msgType: 'transfer', text: `[收到转账]`, transferData: { amount, note }, transferState: 'pending' });
             if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
-        } else if (/\[(?:发送)?语音[:：]?\s*([^\]]+)?\]/.test(remainingText) || /\[(?:发送)?语音\]/.test(remainingText)) {
-            // 兼容 [语音: 哈哈哈] 和 [语音]\n哈哈哈 两种极其随意的格式
-            const match = remainingText.match(/\[(?:发送)?语音[:：]?\s*([^\]]+)\]/);
-            if (match) {
-                const parts = remainingText.split(match[0]);
-                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-                msgsToPush.push({ msgType: 'voice', text: match[1].trim() });
-                if (parts[1] && parts[1].trim()) msgsToPush.push({ msgType: 'text', text: parts[1].trim() });
+        } else if (/\[(?:发送)?语音[:：]?\s*([^\]\n]+)?\]/.test(remainingText) || /\[(?:发送)?语音\]/.test(remainingText)) {
+            // 兼容格式 1：[语音: 哈哈哈] (极其宽容的冒号和空格)
+            const inlineMatch = remainingText.match(/\[(?:发送)?语音[:：]?\s*([^\]]+)\]/);
+            if (inlineMatch) {
+                const parts = remainingText.split(inlineMatch[0]);
+                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() }); // 推送语音前面的文字
+                msgsToPush.push({ msgType: 'voice', text: inlineMatch[1].trim() }); // 推送语音
+                
+                // 🌟 【绝不吞字核心】：把切断的后半部分无损塞回，供下一轮继续解析！
+                remainingText = parts.slice(1).join(inlineMatch[0]); 
             } else {
-                let parts = remainingText.split(/\[(?:发送)?语音\][:：]?\s*/);
+                // 兼容格式 2：[语音]\n哈哈哈
+                const parts = remainingText.split(/\[(?:发送)?语音\][:：]?\s*/);
                 if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-                let nextLines = parts[1].split('\n');
-                if (nextLines[0].trim()) msgsToPush.push({ msgType: 'voice', text: nextLines[0].replace(/\]$/, '').trim() });
-                if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
+                
+                // 提取换行符后的一行作为语音，【坚决不吞后面的行】！
+                const contentMatch = parts[1].match(/^([^\n]+)/);
+                if (contentMatch) {
+                    msgsToPush.push({ msgType: 'voice', text: contentMatch[1].trim() });
+                    // 🌟 【绝不吞字核心】：精密切割，把剩下的行原样留给 remainingText！
+                    remainingText = parts[1].substring(contentMatch[0].length);
+                } else {
+                    remainingText = parts[1]; // 没匹配到就直接扔回去，防卡死
+                }
             }
         } else if (/\[(?:发送)?虚拟照片[:：]?\s*([^\]]+)?\]/.test(remainingText) || /\[虚拟照片\]/.test(remainingText)) {
             // 兼容 [虚拟照片: 一只猫] 和 [虚拟照片]\n一只猫 两种格式
@@ -5522,6 +5619,7 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
                 }
             }
         }
+}
 
         // 🌟 6. 装配切割好的气泡
         const finalMsgs = [];
@@ -5587,6 +5685,7 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
         setTimeout(() => { if (typeof window.scheduleCloudTask === 'function') window.scheduleCloudTask(chatId); }, 2000);
     }
   } catch (e) { console.error('同步信箱失败:', e); }
+  finally { window.isSyncingMailbox = false; } // 🌟 开门
 };
 
 window.checkAutoMsg = async () => {}; 

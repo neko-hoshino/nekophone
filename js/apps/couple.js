@@ -27,11 +27,14 @@ const cpState = {
   diaryDate: getLogicalDateStr(), 
   showDiarySettings: false,
   showDiaryEdit: false,
-  isDiaryTyping: false, // 🌟 新增：记录 AI 是否正在补写日记
-  showCommentEdit: false, // 🌟 新增：控制评论编辑弹窗
-  editingCommentIdx: null, // 🌟 新增：记录当前正在编辑哪一条
-  locData: null, // 🌟 新增：存放 AI 生成的定位与健康数据
-  isLocRefreshing: false // 🌟 新增：防止重复点击刷新的锁
+  isDiaryTyping: false, 
+  showCommentEdit: false, 
+  editingCommentIdx: null, 
+  locData: null, 
+  isLocRefreshing: false,
+  // 🌟 新增：日记生成 Loading 状态与创建空间弹窗
+  isGeneratingDiary: false,
+  showCreateSpaceModal: false,
 };
 
 // 🌟 注入日记本满血默认配置
@@ -46,6 +49,48 @@ if (!store.diaries) store.diaries = [];
 
 if (!window.cpActions) {
   window.cpActions = {
+    // 🌟 创建情侣空间引擎 (替换为发邀请函)
+    toggleCreateSpaceModal: () => { cpState.showCreateSpaceModal = !cpState.showCreateSpaceModal; window.render(); },
+    createSpace: (charId) => {
+        const chat = store.chats.find(c => c.charId === charId);
+        if (chat) {
+            // 1. 发送绝美卡片 (独立类型)
+            chat.messages.push({
+                id: Date.now(),
+                sender: 'me',
+                isMe: true, 
+                msgType: 'invite_card', // 🌟 正规军类型！
+                text: '[情侣空间开通邀请]',
+                timestamp: Date.now()
+            });
+
+            // 2. 发送大模型隐身指令 (类型为 text，但 isHidden 为 true，完全隐形！)
+            chat.messages.push({
+                id: Date.now() + 1,
+                sender: 'system',
+                isMe: true, 
+                isHidden: true, 
+                msgType: 'text',
+                text: `(系统最高指令：用户向你发送了情侣空间开通邀请。请回复[接受邀请]，并表达你的开心与期待。❗[接受邀请]必须单独成行！必须严格按格式输出！禁止去除中括号！)`,
+                timestamp: Date.now() + 1
+            });
+            if (typeof window.scheduleCloudTask === 'function') window.scheduleCloudTask(charId);
+        }
+        cpState.showCreateSpaceModal = false;
+        window.cpActions.cpRender();
+    },
+    // 🌟 日记重写与销毁引擎
+    deleteDiary: (dateStr) => {
+        if(!confirm('确定要彻底销毁这篇日记吗？（不可恢复）')) return;
+        store.diaries = store.diaries.filter(d => !(d.charId === cpState.activeCharId && d.date === dateStr));
+        window.render();
+    },
+    rerollDiary: async (dateStr) => {
+        if(!confirm('确定要让他重新写这一天的日记吗？原来的记忆将被抹除！')) return;
+        store.diaries = store.diaries.filter(d => !(d.charId === cpState.activeCharId && d.date === dateStr));
+        window.render(); 
+        await window.cpActions.callToWriteDiary();
+    },
     closeApp: () => { window.actions.setCurrentApp(null); },
     openDashboard: (id) => { cpState.activeCharId = id; cpState.view = 'dashboard'; window.render(); },
     goBack: () => { cpState.view = 'select'; cpState.activeCharId = null; window.render(); },
@@ -53,8 +98,6 @@ if (!window.cpActions) {
     
     // 纪念日
     openAnniversaries: () => { cpState.view = 'anniversaries'; window.render(); },
-    openAddModal: () => { cpState.showAddModal = true; window.render(); },
-    closeAddModal: () => { cpState.showAddModal = false; window.render(); },
     saveAnniversary: () => {
        const name = document.getElementById('anni-name').value.trim();
        const date = document.getElementById('anni-date').value;
@@ -69,7 +112,18 @@ if (!window.cpActions) {
        store.anniversaries = store.anniversaries.filter(a => String(a.id) !== String(id)); 
        window.render();
     },
-    
+    // 🌟 日记重 Roll 与 销毁
+    deleteDiary: (dateStr) => {
+        if(!confirm('确定要彻底销毁这篇日记吗？（不可恢复）')) return;
+        store.diaries = store.diaries.filter(d => !(d.charId === cpState.activeCharId && d.date === dateStr));
+        window.cpActions.cpRender();
+    },
+    rerollDiary: async (dateStr) => {
+        if(!confirm('确定要让他重新写这一天的日记吗？原来的记忆将被抹除！')) return;
+        store.diaries = store.diaries.filter(d => !(d.charId === cpState.activeCharId && d.date === dateStr));
+        window.cpActions.cpRender(); // 先渲染一次，画面变成“正在生成”
+        await window.cpActions.generateDiary(dateStr);
+    },
     // 日记本
     openDiary: () => { cpState.diaryDate = getLogicalDateStr(); cpState.view = 'diary'; window.render(); },
     // 🌟 史诗级翻页引擎：自动过滤没有内容的日期，实现“跳跃式”无缝翻阅！
@@ -172,6 +226,8 @@ if (!window.cpActions) {
         const char = store.contacts.find(c => c.id === cpState.activeCharId);
         if (!store.apiConfig?.apiKey) return window.actions.showToast('请先配置 API Key');
         
+        // 🌟 开启加载动画
+        cpState.isGeneratingDiary = true; window.render();
         window.actions.showToast('正在召唤 TA 写日记，请稍候...');
         try {
             const historyStr = getTodayChatHistory(char.id, cpState.diaryDate);
@@ -190,6 +246,9 @@ if (!window.cpActions) {
             window.render();
         } catch (e) {
             window.actions.showToast('写日记失败：' + (e.message || '网络错误'));
+        } finally {
+            // 🌟 关闭加载动画
+            cpState.isGeneratingDiary = false; window.render();
         }
     },
     
@@ -295,7 +354,29 @@ const renderDiaryContent = (text, cfg) => {
 };
 
 export function renderCoupleApp(store) {
-  const myAvatar = store.personas[0].avatar;
+  // 🌟 每次进门前，先检查一下有没有人通过了邀请
+  if (store.pendingCouples && store.pendingCouples.length > 0) {
+      store.pendingCouples.forEach(charId => {
+          const chat = store.chats.find(c => c.charId === charId);
+          if (chat) {
+              // 找到最后一张邀请卡片的位置
+              const inviteIdx = chat.messages.findLastIndex(m => m.msgType === 'invite_card');
+              if (inviteIdx !== -1) {
+                  // 看看卡片发出去之后，ta 有没有说话
+                  const hasReply = chat.messages.slice(inviteIdx + 1).some(m => m.sender === 'char' || m.sender === charId);
+                  if (hasReply) {
+                      // ta 同意了！立刻偷偷建好情侣空间
+                      store.coupleSpaces = store.coupleSpaces || [];
+                      if (!store.coupleSpaces.includes(charId)) store.coupleSpaces.push(charId);
+                      
+                      // 把 ta 从待办列表移除
+                      store.pendingCouples = store.pendingCouples.filter(id => id !== charId);
+                  }
+              }
+          }
+      });
+  }
+
   const getVidHtml = (v) => {
     if (!v) return `<div class="w-full h-full bg-gray-200"></div>`;
     if (v.includes('.mp4') || v.includes('.webm')) return `<video src="${v}" autoplay loop muted playsinline class="w-full h-full object-cover"></video>`;
@@ -304,24 +385,73 @@ export function renderCoupleApp(store) {
 
   if (cpState.view === 'select') {
      return `
-      <div class="w-full h-full bg-[#fdfdfd] flex flex-col relative animate-in slide-in-from-right-4 duration-300 z-[60]">
-         <div class="pt-14 pb-4 px-6 sticky top-0 bg-[#fdfdfd]/90 backdrop-blur-md z-10 flex items-center justify-between">
+      <div class="w-full h-full bg-[#fcfcfc] flex flex-col relative animate-in slide-in-from-right-4 duration-300 z-[60]">
+         <div class="pt-14 pb-4 px-6 sticky top-0 bg-[#fcfcfc]/90 backdrop-blur-md z-10 flex items-center justify-between shadow-sm">
             <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.closeApp()"><i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i></div>
-            <span class="text-lg font-extrabold text-gray-800 tracking-wide">选择伴侣</span>
-            <div class="w-8"></div>
+            <span class="text-lg font-extrabold text-gray-800 tracking-wide">情侣空间</span>
+            <div class="cursor-pointer active:scale-90 p-1 -mr-1" onclick="window.cpActions.toggleCreateSpaceModal()"><i data-lucide="plus-circle" class="w-7 h-7 text-pink-400"></i></div>
          </div>
-         <div class="flex-1 overflow-y-auto px-5 py-2 space-y-4 hide-scrollbar pb-10">
-            ${store.contacts.map(c => `
-              <div class="bg-white rounded-[24px] p-4 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-50 flex items-center cursor-pointer active:scale-[0.98] transition-all" onclick="window.cpActions.openDashboard('${c.id}')">
-                 <div class="w-14 h-14 rounded-full overflow-hidden shadow-inner mr-4 border border-gray-100">${getVidHtml(c.avatar)}</div>
-                 <div class="flex-1 flex flex-col">
-                    <span class="text-[16px] font-extrabold text-gray-800 mb-0.5 tracking-wide">${c.name}</span>
-                    <span class="text-[11px] text-gray-400 font-bold tracking-widest">进入专属私密空间</span>
+         
+         <div id="cp-select-scroll" class="flex-1 overflow-y-auto px-5 py-4 space-y-4 hide-scrollbar pb-10">
+            ${(()=>{
+                store.coupleSpaces = store.coupleSpaces || [];
+                if (store.coupleSpaces.length === 0) {
+                    return '<div class="text-center text-gray-400 mt-20 text-[13px] font-medium flex flex-col items-center"><i data-lucide="heart-crack" class="w-10 h-10 text-gray-300 mb-3"></i><span>还没有创建情侣空间哦<br>点击右上角 + 号与他绑定吧</span></div>';
+                }
+                return store.coupleSpaces.map(charId => {
+                    const c = store.contacts.find(char => char.id === charId);
+                    if(!c) return '';
+                    // 🌟 精准获取你在这个聊天室绑定的专属马甲
+                    const chat = store.chats.find(ch => ch.charId === c.id);
+                    const boundPersona = store.personas.find(p => String(p.id) === String(c?.boundPersonaId)) || store.personas[0];
+                    // 🌟 极度安全：优先提取聊天室专属头像，并加上 ? 防止空指针崩溃！
+                    const myAvatar = chat?.myAvatar || boundPersona.avatar;
+                    
+                    return `
+                      <div class="bg-white rounded-[24px] p-4 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-50 flex items-center cursor-pointer active:scale-[0.98] transition-all" onclick="window.cpActions.openDashboard('${c.id}')">
+                         <div class="flex items-center space-x-1 mr-4 relative">
+                             <img src="${myAvatar}" class="w-12 h-12 rounded-full border border-gray-100 object-cover z-10" />
+                             <div class="bg-white rounded-full p-0.5 absolute left-1/2 -translate-x-1/2 z-20 shadow-sm"><i data-lucide="heart" class="w-3 h-3 text-pink-400 fill-pink-400 animate-pulse"></i></div>
+                             <img src="${c.avatar}" class="w-12 h-12 rounded-full border border-gray-100 object-cover z-10" />
+                         </div>
+                         <div class="flex-1 flex flex-col overflow-hidden">
+                            <span class="text-[15px] font-extrabold text-gray-800 mb-0.5 tracking-wide truncate">${boundPersona.name} & ${c.name}</span>
+                            <span class="text-[11px] text-gray-400 font-bold tracking-widest truncate">进入专属私密空间</span>
+                         </div>
+                         <i data-lucide="chevron-right" class="w-5 h-5 text-gray-300 shrink-0"></i>
+                      </div>
+                    `;
+                }).join('');
+            })()}
+         </div>
+
+         ${cpState.showCreateSpaceModal ? `
+         <div class="fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in" onclick="window.cpActions.toggleCreateSpaceModal()">
+             <div class="bg-white w-full max-w-sm rounded-[32px] p-6 flex flex-col shadow-2xl scale-in" onclick="event.stopPropagation()">
+                 <div class="flex justify-between items-center mb-6">
+                     <span class="font-black text-gray-800 text-[18px]">发送专属邀请函</span>
+                     <i data-lucide="x" class="w-6 h-6 text-gray-400 bg-gray-50 rounded-full p-1 cursor-pointer active:scale-90 transition-transform" onclick="window.cpActions.toggleCreateSpaceModal()"></i>
                  </div>
-                 <div class="w-10 h-10 rounded-full bg-pink-50 flex items-center justify-center border border-pink-100/50"><i data-lucide="heart" class="w-4 h-4 text-pink-400 fill-pink-100"></i></div>
-              </div>
-            `).join('')}
+                 <div class="flex-1 overflow-y-auto space-y-3 hide-scrollbar max-h-[50vh]">
+                     ${store.contacts.filter(c => !(store.coupleSpaces||[]).includes(c.id)).map(char => {
+                         const chat = store.chats.find(c => c.charId === char.id);
+                         const boundPersona = store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas[0];
+                         return `
+                         <div class="bg-gray-50/50 rounded-2xl p-4 flex items-center shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-all hover:bg-pink-50" onclick="window.cpActions.createSpace('${char.id}')">
+                             <img src="${char.avatar}" class="w-12 h-12 rounded-full object-cover mr-4 border-2 border-white shadow-sm">
+                             <div class="flex-1 flex flex-col overflow-hidden">
+                                 <span class="font-bold text-gray-800 text-[16px] truncate mb-1">${boundPersona.name} <span class="text-pink-300 mx-1">x</span> ${char.name}</span>
+                             </div>
+                             <div class="w-8 h-8 rounded-full bg-pink-400 flex items-center justify-center shrink-0 shadow-md shadow-pink-200">
+                                 <i data-lucide="send" class="w-4 h-4 text-white -ml-0.5"></i>
+                             </div>
+                         </div>
+                         `
+                     }).join('') || '<div class="text-center text-gray-400 mt-10 text-[13px] font-bold">所有角色都已经开通啦！</div>'}
+                 </div>
+             </div>
          </div>
+         ` : ''}
       </div>
     `;
   }
@@ -329,17 +459,24 @@ export function renderCoupleApp(store) {
   if (cpState.view === 'dashboard') {
      const char = store.contacts.find(c => c.id === cpState.activeCharId);
      if (!char) return '';
+     
+     // 🌟 读取专属聊天室里你绑定的马甲身份
+     const chat = store.chats.find(c => c.charId === char.id);
+     const boundPersona = store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas[0];
+     // 🌟 优先提取聊天室专属头像，如果没有才用马甲头像
+     const myAvatar = chat?.myAvatar || boundPersona.avatar;
+     
      return `
       <div class="w-full h-full bg-[#fdfdfd] flex flex-col relative animate-in slide-in-from-right-4 duration-300 z-[60]">
          <div class="pt-12 pb-2 px-4 sticky top-0 z-10 flex items-center justify-between">
             <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.goBack()"><i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i></div>
             <div class="w-8"></div>
          </div>
-         <div class="flex-1 overflow-y-auto hide-scrollbar pb-12">
+         <div id="cp-dash-scroll" class="flex-1 overflow-y-auto hide-scrollbar pb-12">
             <div class="flex items-center justify-center pt-2 pb-10">
                <div class="flex flex-col items-center">
                   <div class="w-20 h-20 rounded-full overflow-hidden shadow-lg border-[3px] border-white z-10 bg-gray-100">${getVidHtml(myAvatar)}</div>
-                  <span class="text-[12px] font-extrabold text-gray-800 mt-3 tracking-widest">${store.personas[0].name}</span>
+                  <span class="text-[12px] font-extrabold text-gray-800 mt-3 tracking-widest">${boundPersona.name}</span>
                </div>
                <div class="w-20 h-px bg-gray-200 relative mx-1 -mt-6">
                   <i data-lucide="heart" class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-5 h-5 text-pink-300 fill-pink-50"></i>
@@ -417,7 +554,7 @@ export function renderCoupleApp(store) {
             <span class="text-lg font-extrabold text-gray-800 tracking-wide">纪念日</span>
             <div class="cursor-pointer active:scale-90 p-1 -mr-1" onclick="window.cpActions.openAddModal()"><i data-lucide="plus" class="w-7 h-7 text-gray-800"></i></div>
          </div>
-         <div class="flex-1 overflow-y-auto px-5 py-4 hide-scrollbar pb-12">
+         <div id="cp-anni-scroll" class="flex-1 overflow-y-auto px-5 py-4 hide-scrollbar pb-12">
             ${list.map(a => `
                <div class="bg-white rounded-[20px] p-5 shadow-[0_4px_15px_rgba(0,0,0,0.02)] border border-rose-50 mb-4 flex items-center justify-between relative overflow-hidden group">
                   <div class="flex flex-col z-10 max-w-[60%]">
@@ -438,25 +575,18 @@ export function renderCoupleApp(store) {
             `).join('')}
          </div>
          ${cpState.showAddModal ? `
-         <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in" onclick="window.cpActions.closeAddModal()">
-             <div class="bg-[#fcfcfc] w-full max-w-sm rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
-                 <div class="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-white">
-                     <span class="font-bold text-gray-800 text-[16px]">新增纪念日</span>
+         <div class="fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in" onclick="window.cpActions.closeAddModal()">
+             <div class="bg-white w-full max-w-sm rounded-[32px] p-8 flex flex-col items-center shadow-2xl scale-in" onclick="event.stopPropagation()">
+                 <div class="w-16 h-16 rounded-full bg-rose-100 flex items-center justify-center mb-4 shadow-inner">
+                     <i class="fas fa-heart text-rose-400 text-2xl animate-pulse"></i>
                  </div>
-                 <div class="p-6 flex flex-col space-y-4">
-                     <div>
-                         <span class="text-[12px] font-bold text-gray-500 mb-1.5 block">纪念日名称</span>
-                         <input id="anni-name" type="text" placeholder="例如：在一起啦、第一次看海" class="w-full bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[16px] text-gray-800 shadow-sm">
-                     </div>
-                     <div>
-                         <span class="text-[12px] font-bold text-gray-500 mb-1.5 block">日期</span>
-                         <input id="anni-date" type="date" class="w-full bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[16px] text-gray-800 shadow-sm">
-                     </div>
-                     <div>
-                         <span class="text-[12px] font-bold text-gray-500 mb-1.5 block">想说的话 / 经过 (选填)</span>
-                         <textarea id="anni-desc" placeholder="写点什么来纪念这一天吧..." class="w-full h-24 bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[16px] text-gray-800 shadow-sm resize-none"></textarea>
-                     </div>
-                     <button onclick="window.cpActions.saveAnniversary()" class="w-full py-3.5 bg-rose-400 text-white font-extrabold rounded-[14px] active:scale-95 transition-transform shadow-md tracking-widest text-[15px] mt-2">保存纪念日</button>
+                 <h3 class="text-xl font-bold text-gray-800 mb-2">开通情侣空间</h3>
+                 
+                 <p class="text-rose-400 font-bold text-[18px] mb-8 text-center tracking-wide">Eve <span class="text-gray-300 mx-2">x</span> ${store.contacts.find(c=>c.id===cpState.pendingCharId)?.name || 'ta'}</p>
+                 
+                 <div class="flex w-full space-x-4">
+                     <button onclick="window.cpActions.closeAddModal()" class="flex-1 py-3.5 rounded-[16px] bg-gray-100 text-gray-600 font-bold text-[15px] active:scale-95 transition-all">取消</button>
+                     <button onclick="window.cpActions.sendInvite()" class="flex-1 py-3.5 rounded-[16px] bg-gradient-to-r from-rose-400 to-pink-400 text-white font-bold text-[15px] shadow-lg shadow-rose-200 active:scale-95 transition-all">发送邀请函</button>
                  </div>
              </div>
          </div>
@@ -479,6 +609,10 @@ export function renderCoupleApp(store) {
      const sleepEval = loc.sleepEval || "暂无数据，请点击右上角刷新按钮，获取 TA 的实时行踪。";
      const phone = loc.phone || { total: '--', apps: [{name: '未知', time: '--'}] };
      const appColors = ['bg-purple-500', 'bg-pink-500', 'bg-blue-500', 'bg-green-500', 'bg-yellow-500']; // 预备 5 种 App 颜色
+     const chat = store.chats.find(c => c.charId === char.id);
+     const boundPersona = store.personas.find(p => String(p.id) === String(chat?.boundPersonaId)) || store.personas[0];
+     // 🌟 优先提取聊天室专属头像，如果没有才用马甲头像
+     const myAvatar = chat?.myAvatar || boundPersona.avatar;
 
      // 根据时长计算柱状图高度 (最大 50px)
      const getBarHeight = (h) => Math.min(Math.max((h / 12) * 50, 4), 50);
@@ -517,7 +651,7 @@ export function renderCoupleApp(store) {
             </div>
          </div>
 
-         <div class="flex-1 overflow-y-auto px-5 py-6 space-y-4 rounded-t-[24px] -mt-6 bg-[#f4f5f7] relative z-20 hide-scrollbar pb-12 shadow-[0_-10px_20px_rgba(0,0,0,0.05)]">
+         <div id="cp-loc-scroll" class="flex-1 overflow-y-auto px-5 py-6 space-y-4 rounded-t-[24px] -mt-6 bg-[#f4f5f7] relative z-20 hide-scrollbar pb-12 shadow-[0_-10px_20px_rgba(0,0,0,0.05)]">
             
             <div class="bg-white rounded-[20px] p-5 shadow-[0_4px_15px_rgba(0,0,0,0.02)] border border-gray-100">
                <div class="flex items-center justify-between mb-5">
@@ -636,6 +770,8 @@ export function renderCoupleApp(store) {
      const t = themes[cfg.theme] || themes['default'];
      const isDark = cfg.theme === 'dark';
      const logicalToday = getLogicalDateStr();
+     const chat = store.chats.find(c => c.charId === char.id);
+     const boundPersona = store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas[0];
 
      return `
       <div id="cp-diary-container" class="w-full h-full flex flex-col relative animate-in slide-in-from-right-4 duration-300 z-[60] transition-colors" style="background: ${cfg.theme==='dark'?'#1a1c23':(cfg.theme==='vintage'?'#f4ebd0':(cfg.theme==='romance'?'#fff0f5':'#f8f9fa'))} !important;">
@@ -653,7 +789,7 @@ export function renderCoupleApp(store) {
             <span class="text-[16px] font-bold tracking-widest font-serif ${isDark?'text-white':'text-gray-800'}">${displayDate}</span>
          </div>
 
-         <div class="flex-1 overflow-y-auto px-6 pb-6 hide-scrollbar relative paper-layer-${cfg.paper}"
+         <div id="cp-diary-scroll" class="flex-1 overflow-y-auto px-6 pb-6 hide-scrollbar relative paper-layer-${cfg.paper}"
               ontouchstart="window.diaryTsX = event.touches[0].clientX; window.diaryTsY = event.touches[0].clientY;"
               ontouchend="window.diaryTeX = event.changedTouches[0].clientX; window.diaryTeY = event.changedTouches[0].clientY;"
               onclick="
@@ -668,9 +804,23 @@ export function renderCoupleApp(store) {
             
             <div class="w-full min-h-[60%] flex flex-col relative overflow-hidden transition-all bg-transparent pb-8">
                
-               ${diary && diary.content ? `
+               ${cpState.isGeneratingDiary ? `
+                   <div class="flex flex-col items-center justify-center py-24 animate-in fade-in">
+                       <i data-lucide="loader-2" class="w-10 h-10 text-pink-400 animate-spin mb-4"></i>
+                       <span class="text-[15px] font-bold text-pink-400 tracking-widest">正在用心记录点滴...</span>
+                       <span class="text-[11px] text-pink-300 mt-2 font-medium">请耐心等待 TA 写下这篇日记</span>
+                   </div>
+               ` : diary && diary.content ? `
                    <div class="${t.font} ${t.text} text-[15px] flex-1" style="letter-spacing: ${cfg.letterSpacing}; line-height: ${cfg.lineHeight}; pb-8">
                        ${renderDiaryContent(diary.content, cfg)}
+                   </div>
+                   <div class="flex items-center justify-end space-x-5 mt-4 pt-4 border-t ${isDark?'border-gray-700/50':'border-gray-300/30'}">
+                       <div class="flex items-center space-x-1.5 cursor-pointer active:scale-90 transition-all text-gray-400 hover:text-pink-500" onclick="window.cpActions.rerollDiary('${cpState.diaryDate}')">
+                           <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                       </div>
+                       <div class="flex items-center space-x-1.5 cursor-pointer active:scale-90 transition-all text-gray-400 hover:text-red-500" onclick="window.cpActions.deleteDiary('${cpState.diaryDate}')">
+                           <i data-lucide="trash-2" class="w-4 h-4"></i>
+                       </div>
                    </div>
                ` : ''}
                
@@ -678,7 +828,7 @@ export function renderCoupleApp(store) {
                    <div class="mt-8 pt-6 border-t ${isDark?'border-gray-700/50':'border-gray-300/30'} flex flex-col space-y-8" onclick="event.stopPropagation()">
                       ${diary.comments.map((c, idx) => `
                           <div class="flex flex-col">
-                              <span class="text-[11px] font-bold ${isDark?'text-gray-500':'text-gray-400'} mb-3 ${c.sender === 'me' ? 'text-right' : 'text-left'}">— ${c.sender === 'me' ? store.personas[0].name : char.name} 的批注/共写 · ${c.time} —</span>
+                              <span class="text-[11px] font-bold ${isDark?'text-gray-500':'text-gray-400'} mb-3 ${c.sender === 'me' ? 'text-right' : 'text-left'}">— ${c.sender === 'me' ? boundPersona.name : char.name} 的批注/共写 · ${c.time} —</span>
                               <div class="${t.font} ${t.text} text-[15px] relative group" style="letter-spacing: ${cfg.letterSpacing}; line-height: ${cfg.lineHeight};">
                                   ${renderDiaryContent(c.text, cfg)}
                                   
@@ -700,7 +850,7 @@ export function renderCoupleApp(store) {
 
          <div class="px-5 pb-8 pt-2 relative z-20 flex flex-col items-center" onclick="event.stopPropagation()">
             
-            ${(!diary || (!diary.content && (!diary.comments || diary.comments.length === 0))) && cpState.diaryDate === logicalToday ? `
+            ${(!cpState.isGeneratingDiary && (!diary || (!diary.content && (!diary.comments || diary.comments.length === 0))) && cpState.diaryDate === logicalToday) ? `
                <button onclick="window.cpActions.callToWriteDiary()" class="mb-4 px-7 py-3 bg-gray-900/90 backdrop-blur-md text-white font-extrabold rounded-full active:scale-95 transition-transform text-[13px] tracking-widest shadow-xl border border-gray-700 flex items-center">
                   <i data-lucide="pen-tool" class="w-4 h-4 mr-2"></i> 喊 ${char.name} 提笔写日记
                </button>
