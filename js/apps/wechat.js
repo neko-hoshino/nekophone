@@ -5662,19 +5662,20 @@ let lastLength = -1;
                 remainingText = '';
             }
         }
-        // 🌟 6. 装配切割好的气泡
-        const finalMsgs = [];
-        let _msgIdSeed = Date.now();
-        let msgOffset = 0; // 🌟 新增偏移量
-        let baseTime = msg.timestamp || Date.now(); // 🌟 提取云端时间
+        // ---------------- 🌟 5. 装配最终气泡，根治 ID 碰撞和时间错乱 ----------------
+        let finalMsgs = [];
+        let msgOffset = 0; 
+        // 🌟 核心杀虫：强制把时间转换为纯数字！彻底杜绝字符串拼接产生的 NaN 渲染崩溃！
+        let baseTime = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now(); 
 
         msgsToPush.forEach((m) => {
-            chat.messages.push({
-                id: baseTime + msgOffset, // 🌟 基础时间 + 偏移量，绝对不碰撞！
-                sender: m.sender || char.name,
+            finalMsgs.push({
+                id: baseTime + msgOffset,
+                sender: m.sender || char.id, // 🌟 必须传 ID，防止头像读取崩溃
                 text: m.text,
                 imageUrl: m.imageUrl,
                 virtualImageText: m.virtualImageText,
+                innerData: m.innerData,
                 isMe: false,
                 source: 'wechat',
                 isOffline: isOffline,
@@ -5683,39 +5684,45 @@ let lastLength = -1;
                 transferData: m.transferData,
                 transferState: m.transferState,
                 reqState: m.reqState,
-                time: cloudTime, // 给人类看的 UI 时间
-                timestamp: baseTime + msgOffset, // 给电脑看的时间戳
+                time: cloudTime, 
+                timestamp: baseTime + msgOffset, // 纯血统数字时间戳
                 isIntercepted: char.isBlocked
             });
-            msgOffset++; // 每推入一个气泡，偏移量加 1
+            msgOffset++; 
         });
 
-        // 🌟 7. 推送气泡上屏，并附带灵魂的“打字延迟”和“语音播放”
+        if (finalMsgs.length === 0 && !hasSystemAction) continue;
+
+        if (finalMsgs.length === 0 && hasSystemAction && isActive) {
+            if(typeof window.render === 'function') window.render();
+            if(window.wxActions && window.wxActions.scrollToBottom) window.wxActions.scrollToBottom();
+        }
+
         for (let i = 0; i < finalMsgs.length; i++) {
             const newMsg = finalMsgs[i];
             chat.messages.push(newMsg);
 
-            if (isActive) { 
-                if(typeof saveScroll === 'function') saveScroll(); 
-                if(typeof window.render === 'function') window.render(); 
-                if(typeof restoreScroll === 'function') restoreScroll(); 
-                if(window.wxActions && window.wxActions.scrollToBottom) window.wxActions.scrollToBottom(); 
+            // 🌟 极速 UI 唤醒：强制刷新当前页面
+            if (isActive) {
+                if(typeof saveScroll === 'function') saveScroll();
+                if(typeof window.render === 'function') window.render();
+                if(typeof restoreScroll === 'function') restoreScroll();
+                if(window.wxActions && window.wxActions.scrollToBottom) window.wxActions.scrollToBottom();
+                
+                // 物理斩杀“输入中”动画（双保险）
+                if (typeof wxState !== 'undefined' && wxState.typingStatus) wxState.typingStatus[chatId] = false;
             }
 
             let callAudioPlayed = false;
-            // 处理 Minimax 语音
             if (char.minimaxVoiceId && store.minimaxConfig?.enabled !== false && store.minimaxConfig?.apiKey) {
                 if (isCall && newMsg.msgType === 'text') {
                     const url = await fetchMinimaxVoice(newMsg.text, char.minimaxVoiceId);
-                    if (url && typeof wxState !== 'undefined' && wxState.view === 'call') { 
-                        newMsg.audioUrl = url; 
-                        await new Promise(resolve => { 
-                            if (!window.wxCallPlayer) window.wxCallPlayer = new Audio();
-                            window.wxCallPlayer.src = url; window.wxCallPlayer.onended = resolve; window.wxCallPlayer.onerror = resolve; window.wxCallPlayer.play().catch(() => resolve()); 
-                        });
-                        callAudioPlayed = true;
+                    if (url && typeof wxState !== 'undefined' && wxState.view === 'call') {
+                        newMsg.audioUrl = url;
+                        if(window.wxCallPlayer) { window.wxCallPlayer.src = url; window.wxCallPlayer.play().catch(()=>{}); callAudioPlayed = true; }
+                        if(isActive && typeof window.render === 'function') window.render();
                     }
-                } else if (newMsg.msgType === 'voice') {
+                } else if (!isCall && (newMsg.msgType === 'voice' || (newMsg.msgType === 'text' && char.minimaxVoiceEnabled))) {
                     const url = await fetchMinimaxVoice(newMsg.text, char.minimaxVoiceId);
                     if (url) { newMsg.audioUrl = url; if(isActive && typeof window.render === 'function') window.render(); }
                 }
@@ -5724,14 +5731,12 @@ let lastLength = -1;
             if (!isCall && newMsg.msgType !== 'system' && newMsg.msgType !== 'recall_system') {
                 try { new Audio(store.appearance?.newMsgSound || 'https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3').play().catch(()=>{}); } catch(e) {}
                 
-                // 🌟 未读红点逻辑：如果用户当前不在这个聊天室，就增加未读计数！
                 if (!isActive) {
                     chat.unreadCount = (chat.unreadCount || 0) + 1;
-                    if (typeof window.render === 'function') window.render(); // 实时刷新外面的小红点
+                    if (typeof window.render === 'function') window.render(); // 刷新红点
                 }
             }
 
-            // 🌟 削减做作的排队延迟，极速上屏！
             if (i < finalMsgs.length - 1 && !callAudioPlayed && !document.hidden) {
                 await new Promise(resolve => setTimeout(resolve, 300));
             }
@@ -5743,19 +5748,38 @@ let lastLength = -1;
   } catch (e) { console.error('同步信箱失败:', e); }
   finally { window.isSyncingMailbox = false; } // 🌟 开门
 };
-// ==========================================================
-// 🌟 终极心跳引擎：防止挂机时信箱罢工 (每 5 秒自动看一眼信箱)
-// ==========================================================
-if (!window.mailboxHeartbeat) {
-    window.mailboxHeartbeat = setInterval(() => {
-        // 只要信箱函数存在，并且当前网页没有被隐藏，就自动去拉取新消息！
-        if (typeof window.syncCloudMailbox === 'function' && !document.hidden) {
-            window.syncCloudMailbox();
-        }
-    }, 5000); // 5000 毫秒 = 5 秒
-}
 
 window.checkAutoMsg = async () => {}; 
 setInterval(window.syncCloudMailbox, 5000); // 🌟 加快信箱拉取频率，告别慢半拍！ 
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') window.syncCloudMailbox(); });
 window.addEventListener('load', () => { setTimeout(window.syncCloudMailbox, 2000); });
+
+// ==========================================================
+// 🌟 究极唤醒装甲：彻底解决“网页不刷新、永远输入中”的死局
+// 请务必将这段代码直接放在 wechat.js 的最底部！
+// ==========================================================
+
+// 🚀 引擎 1：主动心跳轮询 (每 4 秒强制看一眼信箱，无视挂机)
+if (!window.mailboxHeartbeat) {
+    window.mailboxHeartbeat = setInterval(() => {
+        if (typeof window.syncCloudMailbox === 'function') {
+            window.syncCloudMailbox();
+        }
+    }, 4000); // 4000 毫秒 = 4 秒极速轮询
+}
+
+// 🚀 引擎 2：后台推送物理监听 (只要 Service Worker 收到通知，立刻踹醒网页)
+if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.addEventListener('message', () => {
+        console.log('[系统] 侦测到后台推送信号，强制唤醒信箱！');
+        if (typeof window.syncCloudMailbox === 'function') window.syncCloudMailbox();
+    });
+}
+
+// 🚀 引擎 3：屏幕复活侦测 (当你从别的 App 切回网页，或者手机解锁亮屏时，瞬间拉取)
+document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && typeof window.syncCloudMailbox === 'function') {
+        console.log('[系统] 屏幕已亮起，极速拉取最新消息！');
+        window.syncCloudMailbox();
+    }
+});
