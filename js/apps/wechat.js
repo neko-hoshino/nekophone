@@ -1,4 +1,4 @@
-// js/apps/wechat.js
+﻿// js/apps/wechat.js
 import { store } from '../store.js';
 
 const getNowTime = () => new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
@@ -585,13 +585,13 @@ window.wxActions = {
                   const formattedGMsgs = latestGMsgs.map(m => {
                      const sName = m.isMe ? (store.personas.find(p=>p.id===groupChat.boundPersonaId)?.name || store.personas[0].name) : m.sender;
                      let text = m.msgType === 'text' ? m.text : `[${m.msgType}]`;
-                     if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.text}`;
-        else if (m.msgType === 'voice') content = `[语音]: ${m.text}`;
-        else if (m.msgType === 'location') content = `[发送定位]: ${m.text}`;
-        else if (m.msgType === 'transfer') content = `[发起转账] ${m.transferData?.amount}, 备注: ${m.transferData?.note}`;
-        else if (m.msgType === 'real_image') content = `[真实照片]`;
-        else if (m.msgType === 'emoji') content = `[表情包]: ${m.text}`;
-        else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
+                     if (m.msgType === 'virtual_image') text = `[虚拟照片]: ${m.text}`;
+        else if (m.msgType === 'voice') text = `[语音]: ${m.text}`;
+        else if (m.msgType === 'location') text = `[发送定位]: ${m.text}`;
+        else if (m.msgType === 'transfer') text = `[发起转账] ${m.transferData?.amount}, 备注: ${m.transferData?.note}`;
+        else if (m.msgType === 'real_image') text = `[真实照片]`;
+        else if (m.msgType === 'emoji') text = `[表情包]: ${m.text}`;
+        else if (m.msgType !== 'text' && m.msgType !== 'action') text = `[${m.msgType}] ${m.text}`;
                      return `${sName}: ${text}`;
                   }).join('\n');
                   injectedContext.push(`【群聊：${groupChat.groupName || '未知群聊'} 的最近记忆】\n${formattedGMsgs}`);
@@ -624,13 +624,13 @@ window.wxActions = {
                       const formattedPMsgs = latestPMsgs.map(m => {
                          const sName = m.isMe ? (store.personas.find(p=>p.id===privateChat.boundPersonaId)?.name || store.personas[0].name) : m.sender;
                          let text = m.msgType === 'text' ? m.text : `[${m.msgType}]`;
-                         if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.text}`;
-        else if (m.msgType === 'voice') content = `[语音]: ${m.text}`;
-        else if (m.msgType === 'location') content = `[发送定位]: ${m.text}`;
-        else if (m.msgType === 'transfer') content = `[发起转账] ${m.transferData?.amount}, 备注: ${m.transferData?.note}`;
-        else if (m.msgType === 'real_image') content = `[真实照片]`;
-        else if (m.msgType === 'emoji') content = `[表情包]: ${m.text}`;
-        else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
+                         if (m.msgType === 'virtual_image') text = `[虚拟照片]: ${m.text}`;
+        else if (m.msgType === 'voice') text = `[语音]: ${m.text}`;
+        else if (m.msgType === 'location') text = `[发送定位]: ${m.text}`;
+        else if (m.msgType === 'transfer') text = `[发起转账] ${m.transferData?.amount}, 备注: ${m.transferData?.note}`;
+        else if (m.msgType === 'real_image') text = `[真实照片]`;
+        else if (m.msgType === 'emoji') text = `[表情包]: ${m.text}`;
+        else if (m.msgType !== 'text' && m.msgType !== 'action') text = `[${m.msgType}] ${m.text}`;
                          return `"${sName}: ${text}"`;
                       }).join('\n');
                       injectedContext.push(`👉 ${char.name} 的私有记忆（只有 ${char.name} 自己知道）：\n${formattedPMsgs}`);
@@ -1859,7 +1859,7 @@ ${relation}
     memberIds.forEach(mId => {
         const mChar = store.contacts.find(c => c.id === mId);
         if (mChar && typeof window.planCloudBrain === 'function') {
-            window.planCloudBrain(0, mChar, [], 'AUTO|' + chat.charId + '|' + mId + '|0', 0, 0, true).catch(()=>{});
+            window.planCloudBrain(-1, mChar, [], 'AUTO|' + chat.charId + '|' + mId + '|0', 0, 0, true).catch(()=>{});
         }
     });
 }
@@ -1869,7 +1869,7 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
     memberIds.forEach(mId => {
         const mChar = store.contacts.find(c => c.id === mId);
         if (mChar && typeof window.planCloudBrain === 'function') {
-            window.planCloudBrain(0, mChar, [], 'MOMENT|' + chat.charId + '|' + mId + '|0', 0, 0, true).catch(()=>{});
+            window.planCloudBrain(-1, mChar, [], 'MOMENT|' + chat.charId + '|' + mId + '|0', 0, 0, true).catch(()=>{});
         }
     });
 }
@@ -2442,7 +2442,7 @@ export function renderWeChatApp(store) {
              <div class="flex justify-between items-center mb-2">
                <span class="text-[15px] font-medium text-gray-800 w-1/3">群聊头像</span>
                <div class="flex-1 flex justify-end">
-                 <div class="w-12 h-12 bg-gray-100 rounded-[12px] flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden text-2xl" onclick="window.wxActions.triggerAvatarUpload('upload-group-avatar')">${getVidHtml(chatData.groupAvatar, false) || '<i data-lucide="users" class="w-6 h-6 text-blue-400"></i>'}</div>
+                 <div class="w-12 h-12 bg-gray-100 rounded-[12px] flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden text-2xl" onclick="window.wxActions.triggerAvatarUpload('upload-group-avatar')">${getVidHtml(chatData.groupAvatar, '') || '<i data-lucide="users" class="w-6 h-6 text-blue-400"></i>'}</div>
                </div>
              </div>
              <div class="flex justify-between items-center border-t border-gray-100 pt-4">
@@ -2464,7 +2464,7 @@ export function renderWeChatApp(store) {
                  ${chatData.myAvatar ? `<span class="text-[10px] text-blue-500 font-bold cursor-pointer active:opacity-50 mt-0.5" onclick="window.wxActions.clearSettingMyAvatar()">恢复默认头像</span>` : `<span class="text-[10px] text-gray-400 mt-0.5">仅当前聊天生效</span>`}
                </div>
                <div class="flex-1 flex justify-end">
-                 <div class="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden" onclick="window.wxActions.triggerAvatarUpload('upload-my-avatar')">${getVidHtml(myAvatar, false)}</div>
+                 <div class="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden" onclick="window.wxActions.triggerAvatarUpload('upload-my-avatar')">${getVidHtml(myAvatar, '')}</div>
                </div>
              </div>
              <div class="flex justify-between items-center">
@@ -2475,7 +2475,7 @@ export function renderWeChatApp(store) {
              <div class="flex justify-between items-center border-t border-gray-100 pt-4 mb-2">
                <span class="text-[15px] font-medium text-gray-800 w-1/3">对方头像</span>
                <div class="flex-1 flex justify-end">
-                 <div class="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden" onclick="window.wxActions.triggerAvatarUpload('upload-char-avatar')">${getVidHtml(char.avatar, false)}</div>
+                 <div class="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden" onclick="window.wxActions.triggerAvatarUpload('upload-char-avatar')">${getVidHtml(char.avatar, '')}</div>
                </div>
              </div>
              <div class="flex justify-between items-center">
@@ -2487,11 +2487,11 @@ export function renderWeChatApp(store) {
           <div class="bg-white rounded-[16px] p-4 space-y-4 shadow-sm border border-gray-100 mb-4">
              <div class="flex justify-between items-center">
                <div class="flex flex-col w-2/3"><span class="text-[15px] font-medium text-gray-800">我的视频画面</span><span class="text-xs text-gray-500">仅本聊天室生效</span></div>
-               <div class="w-12 h-16 bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden" onclick="window.wxActions.triggerAvatarUpload('upload-my-video')">${getVidHtml(chatData.myVideoAvatar || store.personas[0].videoAvatar, myAvatar, false)}</div>
+               <div class="w-12 h-16 bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden" onclick="window.wxActions.triggerAvatarUpload('upload-my-video')">${getVidHtml(chatData.myVideoAvatar || store.personas[0].videoAvatar, myAvatar, '')}</div>
              </div>
              <div class="flex justify-between items-center border-t border-gray-100 pt-4">
                <div class="flex flex-col w-2/3"><span class="text-[15px] font-medium text-gray-800">对方视频画面</span><span class="text-xs text-gray-500">仅本聊天室生效</span></div>
-               <div class="w-12 h-16 bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden" onclick="window.wxActions.triggerAvatarUpload('upload-char-video')">${getVidHtml(chatData.charVideoAvatar || char.videoAvatar, char.avatar, false)}</div>
+               <div class="w-12 h-16 bg-gray-100 rounded-lg flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden" onclick="window.wxActions.triggerAvatarUpload('upload-char-video')">${getVidHtml(chatData.charVideoAvatar || char.videoAvatar, char.avatar, '')}</div>
              </div>
           </div>
 
@@ -2776,7 +2776,7 @@ export function renderWeChatApp(store) {
             <input type="file" id="upload-edit-avatar" accept="image/*" class="hidden" onchange="window.wxActions.handleContactAvatarUpload(event)" />
             
             <div class="bg-white rounded-[12px] p-6 shadow-sm border border-gray-100 flex flex-col items-center justify-center">
-               <div class="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden shadow-sm mb-3" onclick="document.getElementById('upload-edit-avatar').click()">${getVidHtml(displayAvatar, false)}</div>
+               <div class="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center cursor-pointer border border-gray-200 overflow-hidden shadow-sm mb-3" onclick="document.getElementById('upload-edit-avatar').click()">${getVidHtml(displayAvatar, '')}</div>
                <span class="text-xs text-gray-500 font-medium tracking-widest">点击更换头像</span>
             </div>
 
@@ -3231,7 +3231,7 @@ export function renderWeChatApp(store) {
     return `
       <div class="w-full h-full bg-[#111] flex flex-col relative animate-in zoom-in-95 duration-300 z-50" style="background: #111 !important;">
         <div class="flex-1 flex flex-col items-center pt-24 space-y-4">
-          <div class="w-28 h-28 rounded-full overflow-hidden shadow-[0_0_60px_rgba(74,222,128,0.3)] animate-pulse border-2 border-green-500 flex items-center justify-center bg-gray-800">${getVidHtml(char.videoAvatar, char.avatar, false)}</div>
+          <div class="w-28 h-28 rounded-full overflow-hidden shadow-[0_0_60px_rgba(74,222,128,0.3)] animate-pulse border-2 border-green-500 flex items-center justify-center bg-gray-800">${getVidHtml(char.videoAvatar, char.avatar, '')}</div>
           <h2 class="text-white text-2xl font-medium mt-4">${char.name}</h2>
           <p class="text-white/60 text-sm animate-pulse">邀请你进行${isVideo ? '视频' : '语音'}通话...</p>
         </div>
@@ -3530,7 +3530,7 @@ export function renderWeChatApp(store) {
 
           <div class="absolute inset-0 z-0 bg-gray-900 flex items-center justify-center">${getVidHtml(char.videoAvatar, char.avatar, true)}</div>
           
-          <div class="absolute top-16 right-5 w-24 h-36 bg-gray-800 rounded-xl border border-white/20 shadow-2xl overflow-hidden z-20">${getVidHtml(store.personas[0].videoAvatar, myAvatar, false)}</div>
+          <div class="absolute top-16 right-5 w-24 h-36 bg-gray-800 rounded-xl border border-white/20 shadow-2xl overflow-hidden z-20">${getVidHtml(store.personas[0].videoAvatar, myAvatar, '')}</div>
           <div class="absolute bottom-0 left-0 right-0 h-[45%] pt-5 pb-8 px-5 z-20 flex flex-col justify-between">
             <div id="call-scroll" class="flex-1 overflow-y-auto hide-scrollbar flex flex-col space-y-3 mask-image-top mb-4">
               <div class="mt-auto"></div>
@@ -3556,7 +3556,7 @@ export function renderWeChatApp(store) {
             <div class="text-white text-xl font-medium mb-1 tracking-wide drop-shadow-md">${char.name}</div>
             <div id="call-duration-display" class="text-white/80 text-[13px] font-mono mb-5 drop-shadow-md">00:00</div>
 
-            <div class="w-24 h-24 rounded-full overflow-hidden shadow-[0_0_40px_rgba(74,222,128,0.25)] animate-pulse ring-[3px] ring-green-500/30 flex items-center justify-center bg-gray-800 border border-gray-700">${getVidHtml(char.avatar, false)}</div>
+            <div class="w-24 h-24 rounded-full overflow-hidden shadow-[0_0_40px_rgba(74,222,128,0.25)] animate-pulse ring-[3px] ring-green-500/30 flex items-center justify-center bg-gray-800 border border-gray-700">${getVidHtml(char.avatar, '')}</div>
             <div class="mt-5 flex items-center space-x-1 text-green-500 opacity-80">
               <div class="w-1 h-2 bg-current rounded-full animate-pulse"></div>
               <div class="w-1 h-5 bg-current rounded-full animate-pulse" style="animation-delay: 200ms"></div>
@@ -3927,7 +3927,7 @@ export function renderWeChatApp(store) {
           
           ${!msg.isMe && msg.isIntercepted ? `<div class="self-center ml-2 w-[20px] h-[20px] rounded-full bg-red-500 text-white flex items-center justify-center font-bold text-[13px] shadow-sm flex-shrink-0" title="消息已被你拒收">!</div>` : ''}
           
-          ${msg.isMe ? `<div class="mc-avatar w-10 h-10 bg-white border border-gray-100 overflow-hidden rounded-full flex items-center justify-center text-xl ml-2 shadow-sm flex-shrink-0" style="font-family: var(--system-font)">${getVidHtml(myAvatar, myAvatar, false)}</div>` : ''}
+          ${msg.isMe ? `<div class="mc-avatar w-10 h-10 bg-white border border-gray-100 overflow-hidden rounded-full flex items-center justify-center text-xl ml-2 shadow-sm flex-shrink-0" style="font-family: var(--system-font)">${getVidHtml(myAvatar, myAvatar, '')}</div>` : ''}
         </div>
       </div>`;
     }).join('');
@@ -4294,7 +4294,7 @@ export function renderWeChatApp(store) {
                     
                     <div class="px-6 pt-8 pb-4 flex flex-col items-center relative shrink-0">
                         <div class="w-16 h-16 rounded-full overflow-hidden shadow-sm mb-3 border-2 border-white ring-4 ring-gray-50/50">
-                            ${getVidHtml(char.avatar, char.avatar, false)}
+                            ${getVidHtml(char.avatar, char.avatar, '')}
                         </div>
                         <h3 class="text-[19px] font-extrabold text-gray-800 tracking-wide">${char.name}</h3>
                         <span class="text-[11px] text-gray-400 font-bold tracking-widest uppercase mt-0.5">Inner Thoughts</span>
@@ -4469,7 +4469,7 @@ export function renderWeChatApp(store) {
         const c = store.contacts.find(x => x.id === chat.charId);
         if (!c) return '';
         name = chat.charRemark || c.name;
-        avatarHtml = getVidHtml(c.avatar, false);
+        avatarHtml = getVidHtml(c.avatar, '');
         // 🌟 核心修复 3：精确读取当前单聊房间的状态
         if (wxState.typingStatus && wxState.typingStatus[chat.charId]) {
             typingHtml = `<span class="text-gray-400 font-bold tracking-widest animate-pulse">[正在输入中...]</span>`;
@@ -4603,7 +4603,7 @@ export function renderWeChatApp(store) {
             <img src="${store.momentBg}" class="w-full h-full object-cover" />
             <div class="absolute inset-x-0 bottom-[-20px] flex justify-end items-end px-4">
                <span class="text-white font-bold text-[20px] mr-4 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] pb-6">${my.name}</span>
-               <div class="w-16 h-16 rounded-[12px] overflow-hidden border-2 border-white shadow-md bg-white flex items-center justify-center z-10">${getVidHtml(my.avatar, false)}</div>
+               <div class="w-16 h-16 rounded-[12px] overflow-hidden border-2 border-white shadow-md bg-white flex items-center justify-center z-10">${getVidHtml(my.avatar, '')}</div>
             </div>
          </div>
          <div class="h-10 bg-white"></div> <div class="flex flex-col">${feedHtml.length > 0 ? feedHtml : '<div class="text-center text-gray-400 mt-20 text-[13px] tracking-widest">点击右上角发表第一条动态吧</div>'}</div>
@@ -4615,7 +4615,7 @@ export function renderWeChatApp(store) {
       <div id="me-tab-scroll" class="flex-1 overflow-y-auto bg-[#f3f3f3] hide-scrollbar pt-2 pb-10">
         <div class="bg-white p-6 flex items-center mb-2 shadow-sm relative mx-3 rounded-[16px] border border-gray-100 mt-2">
            <input type="file" id="upload-my-avatar-main" accept="image/*" class="hidden" onchange="window.wxActions.handleMyAvatarUploadMain(event)" />
-           <div class="w-16 h-16 rounded-[12px] overflow-hidden bg-gray-100 flex items-center justify-center cursor-pointer mr-4 shadow-sm border border-gray-200" onclick="document.getElementById('upload-my-avatar-main').click()">${getVidHtml(my.avatar, false)}</div>
+           <div class="w-16 h-16 rounded-[12px] overflow-hidden bg-gray-100 flex items-center justify-center cursor-pointer mr-4 shadow-sm border border-gray-200" onclick="document.getElementById('upload-my-avatar-main').click()">${getVidHtml(my.avatar, '')}</div>
            <div class="flex-1 flex flex-col justify-center">
               <input value="${my.name}" onchange="window.wxActions.updateMyName(this.value)" class="text-xl font-bold text-gray-800 bg-transparent outline-none w-full" placeholder="输入你的名字" />
               <span class="text-[13px] text-gray-500 mt-1 font-mono">微信号：wxid_${Date.now().toString().slice(-6)}</span>
@@ -4959,19 +4959,20 @@ window.scheduleCloudTask = async (charId) => {
     if (!targetObj.autoMsgEnabled && (!targetObj.autoMomentFreq || targetObj.autoMomentFreq === 0)) return;
 
     try {
-        const { buildLLMPayload } = await import('../utils/llm.js');
-        let senderName = m.isMe ? boundPersona.name : sourceCharName;
-        let baseHistory = chat.messages.map(m => {
-            let content = m.text;
-            if (m.msgType === 'virtual_image') content = `[虚拟照片] ${m.text}`;
-        else if (m.msgType === 'voice') content = `[语音] ${m.text}`;
-        else if (m.msgType === 'location') content = `[定位] ${m.text}`;
-        else if (m.msgType === 'transfer') content = `[转账] ${m.transferData?.amount}元 - ${m.transferData?.note}`;
-        else if (m.msgType === 'real_image') content = `[真实照片]`;
-        else if (m.msgType === 'emoji') content = `[表情包]`;
-        else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
-        return `${senderName}: ${content}`;
-        });
+            const { buildLLMPayload } = await import('../utils/llm.js');
+            
+            // 🌟 终极净化：剔除了导致崩溃的 senderName，并保留 baseHistory 变量名！
+            let baseHistory = chat.messages.map(msg => {
+                let content = msg.text || '';
+                if (msg.msgType === 'voice') content = `[语音]: ${content}`;
+                else if (msg.msgType === 'virtual_image') content = `[虚拟照片]: ${msg.virtualImageText || content || '一张照片'}`;
+                else if (msg.msgType === 'location') content = `[发送定位]: ${content || '未知位置'}`;
+                else if (msg.msgType === 'transfer') content = `[发起转账] 金额：${msg.transferData?.amount || '未知'}，备注：${msg.transferData?.note || '无'}`;
+                else if (msg.msgType === 'real_image') content = `[真实照片]`;
+                else if (msg.msgType === 'emoji') content = `[表情包]: ${content}`;
+                
+                return { ...msg, text: content };
+            });
 
         let turnsCount = 0; let lastSender = null; let startIndex = 0;
         const limit = targetObj.contextLimit || 30; 
@@ -5041,9 +5042,12 @@ window.scheduleCloudTask = async (charId) => {
             }
 
             const chatMsgs = await buildLLMPayload(speakerChar.id, chatHistory, false, false, chat.isGroup ? chat : null, null);
-            
+
+            // 🌟 先发空包弹取消云端同名旧闹钟，再投递新闹钟，防止新旧并存
+            const autoTaskId = 'AUTO|' + chat.charId + '|' + speakerChar.id + '|0';
+            await planCloudBrain(-1, speakerChar, [], autoTaskId, 0, 0, true).catch(() => {});
             // 🚀 发射 AUTO 闹钟！首次唤醒使用算出的延迟，后续云端每隔 chatDelayMin 递归，最多 3 次！
-            planCloudBrain(initialDelayMinutes, speakerChar, chatMsgs, 'AUTO|' + chat.charId + '|' + speakerChar.id + '|0', chatDelayMin, 3).catch(e => console.error('主动聊天启动失败:', e));
+            planCloudBrain(initialDelayMinutes, speakerChar, chatMsgs, autoTaskId, chatDelayMin, 3).catch(e => console.error('主动聊天启动失败:', e));
         }
 
         // =================================================================
@@ -5146,6 +5150,39 @@ window.wxActions.submitReroll = async () => {
         chat = store.chats.find(c => c.charId === wxState.activeChatId);
     }
     if (!chat || chat.messages.length === 0) return;
+
+    // ===== 群聊导演重roll =====
+if (chat.isGroup) {
+    // 1. 找到最后一轮AI导演生成的回复（即最后一个用户消息之后的所有AI消息）
+    let lastUserMsgIndex = -1;
+    for (let i = chat.messages.length - 1; i >= 0; i--) {
+        if (chat.messages[i].isMe) {
+            lastUserMsgIndex = i;
+            break;
+        }
+    }
+    if (lastUserMsgIndex !== -1) {
+        // 删除该用户消息之后的所有消息（即AI导演本轮生成的所有消息）
+        chat.messages = chat.messages.slice(0, lastUserMsgIndex + 1);
+    } else {
+        // 如果连用户消息都没有（极端情况），则清空所有消息
+        chat.messages = [];
+    }
+
+    // 2. 显示“导演正在思考”状态
+    if (wxState.typingStatus) {
+        wxState.typingStatus[chat.charId] = 'director'; // 可以自定义显示
+    }
+    if (typeof window.render === 'function') window.render();
+    if (window.wxActions && window.wxActions.scrollToBottom) window.wxActions.scrollToBottom();
+
+    // 3. 调用导演生成函数（利用现有的 getReply 但传入导演提示）
+    // 注意：getReply 默认是单聊模式，我们需要通过 customPrompt 让AI生成多人回复
+    const directorPrompt = `(系统指令：你作为群聊导演，请根据当前对话上下文，生成群聊中所有人的下一轮对话。每个角色用“名字: 对话内容”的格式单独成行。确保回复符合每个人的性格和当前剧情。不要包含系统标签。)`;
+    await window.wxActions.getReply(false, null, directorPrompt, null, chat.charId, false);
+    return; // 群聊处理完毕，不再执行后续单聊代码
+}
+// ===== 群聊分支结束 =====
 
     // 2. 完美还原你的经典删除逻辑！
     if (msgId) {
@@ -5419,7 +5456,7 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
                     const lib = (store.emojiLibs || []).find(l => l.id === libId);
                     if (lib) { const ep = lib.emojis.find(e => (typeof e === 'object' ? e.name : '') === emojiName); if (ep) { foundUrl = ep.url; break; } }
                 }
-                if (foundUrl) { chat.messages.push({ id: Date.now(), sender: char.name, text: `[表情包] ${emojiName}`, imageUrl: foundUrl, isMe: false, source: 'wechat', msgType: 'emoji', time: getNowTime() }); hasSystemAction = true; }
+                if (foundUrl) { chat.messages.push({ id: Date.now(), sender: char.name, text: `[表情包] ${emojiName}`, imageUrl: foundUrl, isMe: false, source: 'wechat', msgType: 'emoji', time: getNowTime() }); }
             }
             remainingText = remainingText.replace(/\[(?:发送表情|表情包)\][:：]?\s*[^\n\[\]]*/, '').trim();
         }
@@ -5537,114 +5574,120 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
         
 // 🌟 加上无限连发引擎的安全锁
 let lastLength = -1;
-while (remainingText.trim().length > 0 && remainingText.length !== lastLength) {
-lastLength = remainingText.length; // 只要文本还在变短，就一直切！
+        // ---------------- 🌟 终极多媒体解析与换行切割引擎 ----------------
+        while (remainingText.trim().length > 0 && remainingText.length !== lastLength) {
+            lastLength = remainingText.length;
+            let matched = false;
 
-        // 🌟 5. 解析气泡与附件 (语音、虚拟照片、转账、定位)
-        if (/\[发起转账\]/.test(remainingText)) {
-            let parts = remainingText.split(/\[发起转账\][:：]?\s*/);
-            if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-            let nextLines = parts[1].split('\n');
-            const amount = (nextLines[0].match(/金额[:：]?\s*(\d+(\.\d+)?)/) || [])[1] || '520.00';
-            const note = (nextLines[0].match(/备注[:：]?\s*([^，,。\]\n]+)/) || [])[1] || '转账给你';
-            msgsToPush.push({ msgType: 'transfer', text: `[收到转账]`, transferData: { amount, note }, transferState: 'pending' });
-            if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
-        } else if (/\[(?:发送)?语音[:：]?\s*([^\]\n]+)?\]/.test(remainingText) || /\[(?:发送)?语音\]/.test(remainingText)) {
-            // 兼容格式 1：[语音: 哈哈哈] (极其宽容的冒号和空格)
-            const inlineMatch = remainingText.match(/\[(?:发送)?语音[:：]?\s*([^\]]+)\]/);
-            if (inlineMatch) {
-                const parts = remainingText.split(inlineMatch[0]);
-                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() }); // 推送语音前面的文字
-                msgsToPush.push({ msgType: 'voice', text: inlineMatch[1].trim() }); // 推送语音
-                
-                // 🌟 【绝不吞字核心】：把切断的后半部分无损塞回，供下一轮继续解析！
-                remainingText = parts.slice(1).join(inlineMatch[0]); 
-            } else {
-                // 兼容格式 2：[语音]\n哈哈哈
-                const parts = remainingText.split(/\[(?:发送)?语音\][:：]?\s*/);
-                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-                
-                // 提取换行符后的一行作为语音，【坚决不吞后面的行】！
-                const contentMatch = parts[1].match(/^([^\n]+)/);
-                if (contentMatch) {
-                    msgsToPush.push({ msgType: 'voice', text: contentMatch[1].trim() });
-                    // 🌟 【绝不吞字核心】：精密切割，把剩下的行原样留给 remainingText！
-                    remainingText = parts[1].substring(contentMatch[0].length);
-                } else {
-                    remainingText = parts[1]; // 没匹配到就直接扔回去，防卡死
+            // 🌟 史诗级进化：一网打尽的超级正则！
+            // 完美兼容：[类型] 内容、[类型: 内容]、[类型：内容]、甚至 [类型 内容]
+            const regex = /\[(?:发送)?(语音|虚拟照片|定位|发起转账|转账)(?:\][:：]?\s*([^\r\n]*)|[:：\s]*([^\]\r\n]+)\]?)/;
+            const match = remainingText.match(regex);
+
+            if (match) {
+                // 1. 提取标签前面的纯文本，并严格切分！
+                const beforeText = remainingText.substring(0, match.index);
+                if (beforeText.trim()) {
+                    if (isOffline) {
+                        msgsToPush.push({ msgType: 'text', text: beforeText.trim() });
+                    } else {
+                        // 🌟 修复：同时兼容 \r\n, \n, \r，大模型怎么发疯都能切成独立气泡！
+                        beforeText.split(/\r\n|\r|\n/).filter(p => p.trim()).forEach(p => msgsToPush.push({ msgType: 'text', text: p.trim() }));
+                    }
                 }
+
+                // 2. 提取标签类型和内容
+                const type = match[1];
+                let content = (match[2] || match[3] || '').trim();
+
+                // 3. 分发气泡
+                if (type === '发起转账' || type === '转账') {
+                    let tempText = remainingText.substring(match.index + match[0].length).trim();
+                    let nextLines = tempText.split(/\r\n|\r|\n/);
+                    const amount = (nextLines[0].match(/金额[:：]?\s*(\d+(\.\d+)?)/) || [])[1] || '520.00';
+                    const note = (nextLines[0].match(/备注[:：]?\s*([^，,。\]\n]+)/) || [])[1] || '转账给你';
+                    msgsToPush.push({ msgType: 'transfer', text: `[收到转账]`, transferData: { amount, note }, transferState: 'pending' });
+                    remainingText = nextLines.slice(1).join('\n').trim();
+                } else {
+                    let mType = 'text';
+                    if (type === '语音') mType = 'voice';
+                    if (type === '虚拟照片') mType = 'virtual_image';
+                    if (type === '定位') mType = 'location';
+
+                    msgsToPush.push({ msgType: mType, text: content });
+                    remainingText = remainingText.substring(match.index + match[0].length).trim();
+                }
+                matched = true;
+                continue;
             }
-        } else if (/\[(?:发送)?虚拟照片[:：]?\s*([^\]]+)?\]/.test(remainingText) || /\[虚拟照片\]/.test(remainingText)) {
-            // 兼容 [虚拟照片: 一只猫] 和 [虚拟照片]\n一只猫 两种格式
-            const match = remainingText.match(/\[(?:发送)?虚拟照片[:：]?\s*([^\]]+)\]/);
-            if (match) {
-                const parts = remainingText.split(match[0]);
-                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-                msgsToPush.push({ msgType: 'virtual_image', text: match[1].trim() });
-                if (parts[1] && parts[1].trim()) msgsToPush.push({ msgType: 'text', text: parts[1].trim() });
-            } else {
-                let parts = remainingText.split(/\[(?:发送)?虚拟照片\][:：]?\s*/);
-                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-                let nextLines = parts[1].split('\n');
-                if (nextLines[0].trim()) msgsToPush.push({ msgType: 'virtual_image', text: nextLines[0].replace(/\]$/, '').trim() });
-                if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
-            }
-        } else if (/\[(?:发送)?定位[:：]?\s*([^\]]+)?\]/.test(remainingText) || /\[发送定位\]/.test(remainingText)) {
-            const match = remainingText.match(/\[(?:发送)?定位[:：]?\s*([^\]]+)\]/);
-            if (match) {
-                const parts = remainingText.split(match[0]);
-                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-                msgsToPush.push({ msgType: 'location', text: match[1].trim() });
-                if (parts[1] && parts[1].trim()) msgsToPush.push({ msgType: 'text', text: parts[1].trim() });
-            } else {
-                let parts = remainingText.split(/\[发送定位\][:：]?\s*/);
-                if (parts[0].trim()) msgsToPush.push({ msgType: 'text', text: parts[0].trim() });
-                let nextLines = parts[1].split('\n');
-                if (nextLines[0].trim()) msgsToPush.push({ msgType: 'location', text: nextLines[0].replace(/\]$/, '').trim() });
-                if (nextLines.slice(1).join('\n').trim()) msgsToPush.push({ msgType: 'text', text: nextLines.slice(1).join('\n').trim() });
-            }
-        } else {
-            if (remainingText.trim()) {
-                if (isOffline) { 
+
+            // 4. 如果后面没有多媒体标签了，把剩下的普通文本切分开！
+            if (!matched && remainingText.trim()) {
+                if (isOffline) {
                     let finalOfflineText = remainingText.trim();
-                    codeBlocks.forEach((code, idx) => { finalOfflineText = finalOfflineText.replace(`__CODE_BLOCK_${idx}__`, `<br/><div class="mc-html-card my-2 w-full overflow-hidden">${code}</div><br/>`); });
+                    if (typeof codeBlocks !== 'undefined') {
+                        codeBlocks.forEach((code, idx) => {
+                            finalOfflineText = finalOfflineText.replace(`__CODE_BLOCK_${idx}__`, `<br/><div class="mc-html-card my-2 w-full overflow-hidden">${code}</div><br/>`);
+                        });
+                    }
                     msgsToPush.push({ msgType: 'text', text: finalOfflineText, sender: char.name });
                 } else {
-                    let parts = remainingText.split('\n').filter(p => p.trim());
+                    // 🌟 修复：同样兼容所有发疯的换行符！
+                    let parts = remainingText.split(/\r\n|\r|\n/).filter(p => p.trim());
                     let currentSpeakerName = char.name;
                     parts.forEach(p => {
                         let textToPush = p;
                         if (chat.isGroup) {
-                            const match = p.match(/^([^:：\[\]]{1,15})[:：]\s*(.*)$/);
-                            if (match) { currentSpeakerName = match[1].trim(); textToPush = match[2].trim(); }
+                            const gm = p.match(/^([^:：\[\]]{1,15})[:：]\s*(.*)$/);
+                            if (gm) { currentSpeakerName = gm[1].trim(); textToPush = gm[2].trim(); }
                         }
                         if (textToPush) {
-                            const fragments = textToPush.split(/(\*[^*]+\*)/); 
+                            const fragments = textToPush.split(/(\*[^*]+\*)/);
                             fragments.forEach(frag => {
-                                const t = frag.trim(); if (!t) return;
+                                const t = frag.trim();
+                                if (!t) return;
                                 let blockMatch = t.match(/__CODE_BLOCK_(\d+)__/);
-                                if (blockMatch) { msgsToPush.push({ sender: currentSpeakerName, msgType: 'html_card', text: codeBlocks[parseInt(blockMatch[1])] }); return; }
-                                if (t.startsWith('*') && t.endsWith('*') && isCall) msgsToPush.push({ sender: currentSpeakerName, msgType: 'action', text: t.slice(1, -1) });
-                                else msgsToPush.push({ sender: currentSpeakerName, msgType: 'text', text: t });
+                                if (blockMatch && typeof codeBlocks !== 'undefined') {
+                                    msgsToPush.push({ sender: currentSpeakerName, msgType: 'html_card', text: codeBlocks[parseInt(blockMatch[1])] });
+                                    return;
+                                }
+                                if (t.startsWith('*') && t.endsWith('*') && isCall)
+                                    msgsToPush.push({ sender: currentSpeakerName, msgType: 'action', text: t.slice(1, -1) });
+                                else
+                                    msgsToPush.push({ sender: currentSpeakerName, msgType: 'text', text: t });
                             });
                         }
                     });
                 }
+                remainingText = '';
             }
         }
-}
-
         // 🌟 6. 装配切割好的气泡
         const finalMsgs = [];
-        msgsToPush.forEach((m, index) => {
-            if (m.msgType === 'text' && !isOffline) {
-                const lines = m.text.split('\n').filter(l => l.trim());
-                lines.forEach((line, subIdx) => {
-                    finalMsgs.push({ id: Date.now() + index * 100 + subIdx, sender: m.sender || char.name, text: line.trim(), isMe: false, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: cloudTime, isIntercepted: char.isBlocked }); // 🌟 换成真实云端时间！
-                });
-            } else {
-                finalMsgs.push({ id: Date.now() + index * 100, sender: m.sender || char.name, text: m.text, isMe: false, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: m.msgType, transferData: m.transferData, transferState: m.transferState, time: cloudTime, isIntercepted: char.isBlocked }); // 🌟 换成真实云端时间！
-            }
+        let _msgIdSeed = Date.now();
+        let msgOffset = 0; // 🌟 新增偏移量
+        let baseTime = msg.timestamp || Date.now(); // 🌟 提取云端时间
+
+        msgsToPush.forEach((m) => {
+            chat.messages.push({
+                id: baseTime + msgOffset, // 🌟 基础时间 + 偏移量，绝对不碰撞！
+                sender: m.sender || char.name,
+                text: m.text,
+                imageUrl: m.imageUrl,
+                virtualImageText: m.virtualImageText,
+                isMe: false,
+                source: 'wechat',
+                isOffline: isOffline,
+                isCallMsg: isCall,
+                msgType: m.msgType,
+                transferData: m.transferData,
+                transferState: m.transferState,
+                reqState: m.reqState,
+                time: cloudTime, // 给人类看的 UI 时间
+                timestamp: baseTime + msgOffset, // 给电脑看的时间戳
+                isIntercepted: char.isBlocked
+            });
+            msgOffset++; // 每推入一个气泡，偏移量加 1
         });
 
         // 🌟 7. 推送气泡上屏，并附带灵魂的“打字延迟”和“语音播放”
@@ -5700,6 +5743,17 @@ lastLength = remainingText.length; // 只要文本还在变短，就一直切！
   } catch (e) { console.error('同步信箱失败:', e); }
   finally { window.isSyncingMailbox = false; } // 🌟 开门
 };
+// ==========================================================
+// 🌟 终极心跳引擎：防止挂机时信箱罢工 (每 5 秒自动看一眼信箱)
+// ==========================================================
+if (!window.mailboxHeartbeat) {
+    window.mailboxHeartbeat = setInterval(() => {
+        // 只要信箱函数存在，并且当前网页没有被隐藏，就自动去拉取新消息！
+        if (typeof window.syncCloudMailbox === 'function' && !document.hidden) {
+            window.syncCloudMailbox();
+        }
+    }, 5000); // 5000 毫秒 = 5 秒
+}
 
 window.checkAutoMsg = async () => {}; 
 setInterval(window.syncCloudMailbox, 5000); // 🌟 加快信箱拉取频率，告别慢半拍！ 
