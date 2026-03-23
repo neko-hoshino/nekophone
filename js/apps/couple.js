@@ -79,6 +79,80 @@ if (!window.cpActions) {
         cpState.showCreateSpaceModal = false;
         window.cpActions.cpRender();
     },
+    // 🌟 提问箱导航与设置
+  openQuestions: (charId) => { cpState.view = 'questions'; cpState.activeCharId = charId; if(window.renderCouple) window.renderCouple(); },
+  openQuestionSettings: () => { cpState.showQuestionSettings = true; if(window.renderCouple) window.renderCouple(); },
+  closeQuestionSettings: () => { cpState.showQuestionSettings = false; if(window.renderCouple) window.renderCouple(); },
+  
+  // 🌟 保存设置
+  saveQuestionSettings: (charId) => {
+      store.coupleSpacesData = store.coupleSpacesData || {};
+      store.coupleSpacesData[charId] = store.coupleSpacesData[charId] || {};
+      store.coupleSpacesData[charId].enableAiQuestions = document.getElementById('q-enable-toggle').checked;
+      store.coupleSpacesData[charId].aiQuestionFreq = parseInt(document.getElementById('q-freq-select').value);
+      window.actions.saveStore();
+      cpState.showQuestionSettings = false;
+      if(window.renderCouple) window.renderCouple();
+      if(window.actions.showToast) window.actions.showToast('设置已保存');
+  },
+
+  // 🌟 用户发起提问，呼唤 AI 答题
+  askQuestion: async (charId) => {
+      const input = document.getElementById('new-q-input');
+      const text = input.value.trim();
+      if (!text) return;
+      
+      store.coupleSpacesData = store.coupleSpacesData || {};
+      store.coupleSpacesData[charId] = store.coupleSpacesData[charId] || {};
+      const spaceData = store.coupleSpacesData[charId];
+      spaceData.questions = spaceData.questions || [];
+      
+      const qId = 'Q_' + Date.now();
+      spaceData.questions.unshift({ id: qId, asker: 'me', text: text, answer: null, timestamp: Date.now() });
+      input.value = '';
+      window.actions.saveStore();
+      if(window.renderCouple) window.renderCouple();
+
+      // 🧠 呼唤 LLM 答题
+      try {
+          const char = store.contacts.find(c => c.id === charId);
+          const chat = store.chats.find(c => c.charId === char.id);
+          const pId = chat.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+          const boundPersona = store.personas.find(p => String(p.id) === String(pId)) || store.personas[0];
+          
+          const promptMsg = `(系统通知：用户 ${boundPersona.name} 在【情侣提问箱】向你提问：“${text}”。请以情侣身份自然、真诚地回答，直接说话，绝不许包含系统标签。)`;
+          const tempHistory = [...chat.messages, { id: Date.now(), sender: boundPersona.name, text: promptMsg, isMe: true, isHidden: true, msgType: 'text' }];
+          
+          const { buildLLMPayload, getLLMReply } = await import('../utils/llm.js');
+          const llmMessages = await buildLLMPayload(char.id, tempHistory, false, false, null, null);
+          const response = await getLLMReply(llmMessages, char.id);
+          
+          if (response) {
+              const targetQ = spaceData.questions.find(q => q.id === qId);
+              if (targetQ) targetQ.answer = response;
+              window.actions.saveStore();
+              if(window.renderCouple) window.renderCouple();
+          }
+      } catch(e) {
+          console.error("提问箱回答失败", e);
+      }
+  },
+
+  // 🌟 用户回答 AI 的提问
+  answerQuestion: (qId) => {
+      const charId = cpState.activeCharId;
+      const input = document.getElementById('ans-input-' + qId);
+      const text = input.value.trim();
+      if (!text) return;
+      
+      const spaceData = store.coupleSpacesData[charId];
+      const targetQ = spaceData.questions.find(q => q.id === qId);
+      if (targetQ) {
+          targetQ.answer = text;
+          window.actions.saveStore();
+          if(window.renderCouple) window.renderCouple();
+      }
+  },
     // 🌟 日记重写与销毁引擎
     deleteDiary: (dateStr) => {
         if(!confirm('确定要彻底销毁这篇日记吗？（不可恢复）')) return;
@@ -500,7 +574,7 @@ export function renderCoupleApp(store) {
                   <i data-lucide="map-pin" class="w-[28px] h-[28px] text-blue-400 mb-2 stroke-[1.5]"></i>
                   <span class="text-[11px] font-extrabold text-gray-600 tracking-wider">定位共享</span>
                </div>
-               <div class="flex flex-col items-center cursor-pointer active:scale-90 transition-transform opacity-80 hover:opacity-100" onclick="window.cpActions.notBuilt('提问箱')">
+               <div class="flex flex-col items-center cursor-pointer active:scale-90 transition-transform opacity-80 hover:opacity-100" onclick="window.cpActions.openQuestions('${char.id}')">
                   <i data-lucide="box" class="w-[28px] h-[28px] text-purple-400 mb-2 stroke-[1.5]"></i>
                   <span class="text-[11px] font-extrabold text-gray-600 tracking-wider">提问箱</span>
                </div>
@@ -986,4 +1060,128 @@ export function renderCoupleApp(store) {
       </div>
      `;
   }
+
+  if (cpState.view === 'questions') {
+        const char = store.contacts.find(c => c.id === cpState.activeCharId);
+        const chat = store.chats.find(c => c.charId === char.id);
+        const myAvatar = chat?.myAvatar || (store.personas.find(p => String(p.id) === String(chat?.boundPersonaId)) || store.personas[0]).avatar;
+
+        store.coupleSpacesData = store.coupleSpacesData || {};
+        const spaceData = store.coupleSpacesData[char.id] || {};
+        spaceData.questions = spaceData.questions || [];
+
+        // 🌟 渲染粉蓝双色卡片列表
+        let qListHtml = spaceData.questions.length === 0 ? `
+            <div class="flex flex-col items-center justify-center h-40 opacity-50 mt-10">
+                <i data-lucide="inbox" class="w-12 h-12 mb-3 text-gray-400"></i>
+                <span class="text-[14px] font-bold text-gray-400">还没有任何提问哦</span>
+            </div>
+        ` : spaceData.questions.map((q) => {
+            if (q.asker === 'me') {
+                return `
+                <div class="w-full bg-rose-50 border border-rose-100/60 rounded-[24px] p-5 mb-4 shadow-sm flex flex-col">
+                    <div class="flex items-center space-x-2.5 mb-3">
+                        <img src="${myAvatar}" class="w-7 h-7 rounded-full object-cover border-2 border-white shadow-sm">
+                        <span class="text-[13px] font-black text-rose-400">我的提问</span>
+                        <span class="text-[11px] font-bold text-gray-300 ml-auto">${new Date(q.timestamp).toLocaleDateString()}</span>
+                    </div>
+                    <p class="text-[16px] text-gray-800 font-bold mb-4 leading-relaxed">${q.text}</p>
+                    <div class="bg-white/80 rounded-[16px] p-4 text-[14px] text-gray-700 shadow-sm border border-rose-50/50">
+                        ${q.answer ? `<div class="flex items-start space-x-2"><img src="${char.avatar}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-gray-100"><span class="leading-relaxed font-medium">${window.formatTextWithEmoticons ? window.formatTextWithEmoticons(q.answer) : q.answer}</span></div>` : `<div class="flex items-center space-x-1.5 text-rose-400"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span class="text-[12px] font-bold">呼唤 ${char.name} 中...</span></div>`}
+                    </div>
+                </div>`;
+            } else {
+                return `
+                <div class="w-full bg-blue-50 border border-blue-100/60 rounded-[24px] p-5 mb-4 shadow-sm flex flex-col">
+                    <div class="flex items-center space-x-2.5 mb-3">
+                        <img src="${char.avatar}" class="w-7 h-7 rounded-full object-cover border-2 border-white shadow-sm">
+                        <span class="text-[13px] font-black text-blue-500">${char.name}的提问</span>
+                        <span class="text-[11px] font-bold text-gray-300 ml-auto">${new Date(q.timestamp).toLocaleDateString()}</span>
+                    </div>
+                    <p class="text-[16px] text-gray-800 font-bold mb-4 leading-relaxed">${q.text}</p>
+                    ${q.answer ? `
+                        <div class="bg-white/80 rounded-[16px] p-4 text-[14px] text-gray-700 shadow-sm border border-blue-50/50">
+                            <div class="flex items-start space-x-2"><img src="${myAvatar}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-gray-100"><span class="leading-relaxed font-medium">${q.answer}</span></div>
+                        </div>
+                    ` : `
+                        <div class="flex items-center space-x-2 mt-1">
+                            <input type="text" id="ans-input-${q.id}" class="flex-1 bg-white border border-blue-100 rounded-full h-11 px-5 text-[14px] font-medium outline-none focus:border-blue-300 transition-colors shadow-inner" placeholder="写下你的回答...">
+                            <button onclick="window.cpActions.answerQuestion('${q.id}')" class="w-11 h-11 rounded-full bg-blue-500 text-white flex items-center justify-center hover:bg-blue-600 active:scale-95 transition-all shadow-md shrink-0">
+                                <i data-lucide="arrow-up" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                    `}
+                </div>`;
+            }
+        }).join('');
+
+        return `
+        <div class="w-full h-full flex flex-col bg-[#fcfcfc] relative animate-in fade-in slide-in-from-bottom-4 duration-300">
+            <div class="h-[68px] shrink-0 flex items-center justify-between px-5 bg-white/90 backdrop-blur-xl border-b border-gray-100 sticky top-0 z-20">
+                <button onclick="window.cpActions.openDashboard('${char.id}')" class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-50 active:bg-gray-100 transition-colors -ml-2">
+                    <i data-lucide="chevron-left" class="w-7 h-7 text-gray-800"></i>
+                </button>
+                <span class="text-[17px] font-black text-gray-900 tracking-wide">提问箱</span>
+                <button onclick="window.cpActions.openQuestionSettings()" class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-50 active:bg-gray-100 transition-colors -mr-2">
+                    <i data-lucide="settings" class="w-5 h-5 text-gray-600"></i>
+                </button>
+            </div>
+
+            <div class="p-5 bg-white border-b border-gray-50 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.05)] z-10 flex flex-col space-y-3">
+                <textarea id="new-q-input" class="w-full bg-gray-50 border border-transparent rounded-[20px] p-4 outline-none text-[15px] font-medium text-gray-800 resize-none h-24 focus:border-rose-200 focus:bg-rose-50/30 transition-all hide-scrollbar" placeholder="想问 ${char.name} 什么？写在这里..."></textarea>
+                <div class="flex justify-end">
+                    <button onclick="window.cpActions.askQuestion('${char.id}')" class="px-6 h-10 rounded-full bg-gray-900 text-white text-[14px] font-bold shadow-md active:scale-95 transition-all flex items-center">
+                        投递问题 <i data-lucide="send" class="w-3.5 h-3.5 ml-2"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex-1 overflow-y-auto p-5 space-y-2 pb-24 hide-scrollbar">
+                ${qListHtml}
+            </div>
+
+            ${cpState.showQuestionSettings ? `
+            <div class="absolute inset-0 z-50 bg-black/40 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in" onclick="window.cpActions.closeQuestionSettings()">
+                <div class="bg-white w-full max-w-sm rounded-[32px] p-6 shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+                    <div class="flex justify-between items-center mb-6 px-1">
+                        <span class="text-[18px] font-black text-gray-900">设置提问箱</span>
+                        <button onclick="window.cpActions.closeQuestionSettings()" class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 active:scale-95">
+                            <i data-lucide="x" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+                    
+                    <div class="flex flex-col space-y-4 bg-gray-50/50 p-4 rounded-[24px] border border-gray-100">
+                        <div class="flex items-center justify-between py-1">
+                            <div class="flex flex-col">
+                                <span class="text-[15px] font-bold text-gray-800">允许角色提问</span>
+                                <span class="text-[11px] font-medium text-gray-400 mt-1">开启后，对方会向你发起提问</span>
+                            </div>
+                            <label class="relative inline-flex items-center cursor-pointer">
+                              <input type="checkbox" id="q-enable-toggle" class="sr-only peer" ${spaceData.enableAiQuestions !== false ? 'checked' : ''}>
+                              <div class="w-12 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-green-500 shadow-inner"></div>
+                            </label>
+                        </div>
+                        
+                        <div class="w-full h-[1px] bg-gray-200/60"></div>
+
+                        <div class="flex items-center justify-between py-1">
+                            <span class="text-[15px] font-bold text-gray-800">每日提问频率</span>
+                            <select id="q-freq-select" class="bg-transparent border-none text-[15px] font-bold text-blue-500 outline-none cursor-pointer text-right dir-rtl">
+                                <option value="1" ${spaceData.aiQuestionFreq == 1 ? 'selected' : ''}>1条/天</option>
+                                <option value="2" ${(spaceData.aiQuestionFreq || 2) == 2 ? 'selected' : ''}>2条/天</option>
+                                <option value="3" ${spaceData.aiQuestionFreq == 3 ? 'selected' : ''}>3条/天</option>
+                                <option value="5" ${spaceData.aiQuestionFreq == 5 ? 'selected' : ''}>5条/天</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <button onclick="window.cpActions.saveQuestionSettings('${char.id}')" class="w-full py-4 mt-8 bg-gray-900 text-white rounded-[20px] font-black text-[15px] shadow-lg active:scale-95 transition-all">
+                        完成
+                    </button>
+                </div>
+            </div>
+            ` : ''}
+        </div>
+        `;
+    }
 }

@@ -22,6 +22,42 @@ const saveScroll = () => {
     if (el) savedScrollPositions[id] = { top: el.scrollTop, bottom: el.scrollHeight - el.scrollTop };
   });
 };
+// 通话语音播放队列
+let callAudioQueue = [];
+let isCallAudioPlaying = false;
+/**
+ * 通话模式下的语音顺序播放器
+ * @param {string} url - 语音音频的 Blob URL
+ */
+function playCallAudio(url) {
+    if (!url) return;
+    // 如果当前有音频正在播放，则推入队列等待
+    if (isCallAudioPlaying) {
+        callAudioQueue.push(url);
+        return;
+    }
+    isCallAudioPlaying = true;
+    const audio = new Audio(url);
+    audio.onended = () => {
+        // 当前播放结束，标记为空闲
+        isCallAudioPlaying = false;
+        // 如果队列中还有待播放的音频，继续播放
+        if (callAudioQueue.length > 0) {
+            const nextUrl = callAudioQueue.shift();
+            playCallAudio(nextUrl);
+        }
+    };
+    audio.play().catch(e => {
+        console.error('通话语音播放失败', e);
+        // 播放失败也要标记空闲，继续处理队列
+        isCallAudioPlaying = false;
+        if (callAudioQueue.length > 0) {
+            const nextUrl = callAudioQueue.shift();
+            playCallAudio(nextUrl);
+        }
+    });
+}
+
 const restoreScroll = () => {
   Object.keys(savedScrollPositions).forEach(id => {
     const el = document.getElementById(id);
@@ -399,9 +435,10 @@ window.wxActions = {
     const chat = store.chats.find(c => c.charId === charId);
     const char = store.contacts.find(c => c.id === charId);
     if (!chat || !char) return;
+    const displayName = chat.charRemark || char.name;
     const verb = char.nudgeMeVerb || '拍了拍';
     const suffix = char.nudgeMeSuffix || '';
-    const nudgeMsg = `我${verb}了${char.name}${suffix}`;
+    const nudgeMsg = `我${verb}了${displayName}${suffix}`;
     chat.messages.push({ id: Date.now(), sender: 'system', text: nudgeMsg, isMe: true, source: 'wechat', msgType: 'system', time: getNowTime() });
     
     window.render(); 
@@ -3980,6 +4017,9 @@ export function renderWeChatApp(store) {
     let transferDetailHtml = '';
     if (wxState.activeTransferId) {
       const tMsg = chatData.messages.find(m => m.id === wxState.activeTransferId);
+      // 🌟 安全提取：这里变量名叫 chatData，并且我们要去联系人列表里揪出这名角色
+            const targetChar = store.contacts.find(c => c.id === chatData.charId) || {};
+            const displayName = chatData.charRemark || targetChar.name || '对方';
       if (tMsg) {
         const isMe = tMsg.isMe, state = tMsg.transferState || 'pending';
         // 🌟 核心防爆：转账卡片的发送人直接读取 tMsg.sender，完美兼容群聊！
@@ -3995,7 +4035,7 @@ export function renderWeChatApp(store) {
                   <i data-lucide="arrow-right-left" style="width:24px; height:24px;"></i>
                 </div>
                 <span class="text-[13px] font-bold opacity-90 mb-1">
-                  ${isMe ? '你发起的转账' : `来自 ${tMsg.sender} 的转账`}
+                  ${isMe ? '你发起的转账' : `来自 ${displayName} 的转账`}
                 </span>
                 <span class="text-3xl font-bold font-mono mt-1 mb-2">¥${tMsg.transferData.amount}</span>
                 <div class="text-[13px] text-white/90 bg-transparent px-3 py-1.5 rounded-full mt-1 mb-2 font-medium break-all text-center max-w-[80%]">
@@ -5332,6 +5372,7 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
         if (!chat || !char) continue;
 
         const targetObj = chat.isGroup ? chat : char;
+        const displayName = chat.charRemark || char.name; // 🌟 提取专属备注
         
         // 🌟 如果你半路关掉了朋友圈频率，直接拦截作废这个过期动态！
         if (isMomentTask && (!targetObj.autoMomentFreq || targetObj.autoMomentFreq === 0)) {
@@ -5444,7 +5485,7 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
         
         if (/\[更换头像\]/.test(remainingText)) {
             const match = remainingText.match(/\[更换头像\][:：]?\s*([^\n\[\]]+)/);
-            if (match) { char.avatar = match[1].trim(); chat.messages.push({ id: Date.now(), sender: 'system', text: `${char.name} 更改了头像`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() }); hasSystemAction = true; }
+            if (match) { char.avatar = match[1].trim(); chat.messages.push({ id: Date.now(), sender: 'system', text: `${displayName} 更改了头像`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() }); hasSystemAction = true; }
             remainingText = remainingText.replace(/\[更换头像\][:：]?\s*[^\n\[\]]+/, '').trim();
         }
 
@@ -5463,30 +5504,30 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
 
         if (/\[修改备注\]/.test(remainingText)) {
             const match = remainingText.match(/\[修改备注\][:：]?\s*([^\n\[\]]+)/);
-            if (match) { chat.myRemark = match[1].trim().substring(0, 15); chat.messages.push({ id: Date.now(), sender: 'system', text: `${char.name} 将你的备注修改为“${chat.myRemark}”`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() }); hasSystemAction = true; }
+            if (match) { chat.myRemark = match[1].trim().substring(0, 15); chat.messages.push({ id: Date.now(), sender: 'system', text: `${displayName} 将你的备注修改为“${chat.myRemark}”`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() }); hasSystemAction = true; }
             remainingText = remainingText.replace(/\[修改备注\][:：]?\s*[^\n\[\]]+/, '').trim();
         }
 
         // 🌟 新增：解析修改戳一戳指令
         if (/\[修改被戳动作[:：]?([^\]]+)\]/.test(remainingText)) {
             const match = remainingText.match(/\[修改被戳动作[:：]?([^\]]+)\]/);
-            if (match) char.nudgeMeVerb = match[1].trim().substring(0, 10);
+            if (match) { char.nudgeMeVerb = match[1].trim().substring(0, 10); chat.messages.push({ id: Date.now(), sender: 'system', text: `${displayName} 将被戳动作修改为“${char.nudgeMeVerb}”`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() }); hasSystemAction = true; }
             remainingText = remainingText.replace(/\[修改被戳动作[:：]?[^\]]+\]/g, '').trim(); hasSystemAction = true;
         }
         if (/\[修改被戳后缀[:：]?([^\]]+)\]/.test(remainingText)) {
             const match = remainingText.match(/\[修改被戳后缀[:：]?([^\]]+)\]/);
-            if (match) char.nudgeMeSuffix = match[1].trim().substring(0, 20);
+            if (match) { char.nudgeMeSuffix = match[1].trim().substring(0, 20); chat.messages.push({ id: Date.now(), sender: 'system', text: `${displayName} 将被戳后缀修改为“${char.nudgeMeSuffix}”`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() }); hasSystemAction = true; }
             remainingText = remainingText.replace(/\[修改被戳后缀[:：]?[^\]]+\]/g, '').trim(); hasSystemAction = true;
         }
 
         if (/\[拉黑用户\]/.test(remainingText)) {
             char.isBlocked = true;
-            chat.messages.push({ id: Date.now(), sender: 'system', text: `你已被 ${char.name} 拉入黑名单`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() });
+            chat.messages.push({ id: Date.now(), sender: 'system', text: `你已被 ${displayName} 拉入黑名单`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() });
             remainingText = remainingText.replace(/\[拉黑用户\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
         if (/\[解除拉黑\]/.test(remainingText)) {
             char.isBlocked = false;
-            chat.messages.push({ id: Date.now(), sender: 'system', text: `${char.name} 已将你从黑名单中移除`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() });
+            chat.messages.push({ id: Date.now(), sender: 'system', text: `${displayName} 已将你从黑名单中移除`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() });
             remainingText = remainingText.replace(/\[解除拉黑\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
         if (/\[保持拉黑\]/.test(remainingText)) {
@@ -5516,13 +5557,13 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
         if (/\[撤回上一条消息\]/.test(remainingText)) {
             const aiMsgs = chat.messages.filter(m => !m.isMe && m.msgType !== 'system' && m.msgType !== 'recall_system');
             if (aiMsgs.length > 0) {
-                const lastAiMsg = aiMsgs[aiMsgs.length - 1]; lastAiMsg.recalledText = lastAiMsg.text; lastAiMsg.text = `${char.name} 撤回了一条消息`; lastAiMsg.msgType = 'recall_system'; lastAiMsg.quote = null;
+                const lastAiMsg = aiMsgs[aiMsgs.length - 1]; lastAiMsg.recalledText = lastAiMsg.text; lastAiMsg.text = `${displayName} 撤回了一条消息`; lastAiMsg.msgType = 'recall_system'; lastAiMsg.quote = null;
             }
             remainingText = remainingText.replace(/\[撤回上一条消息\][:：]?\s*/, '').trim(); hasSystemAction = true;
         }
 
         if (/\[戳一戳\]/.test(remainingText)) {
-            chat.messages.push({ id: Date.now(), sender: 'system', text: `${char.name}${char.nudgeAIVerb || '拍了拍'}了我${char.nudgeAISuffix || ''}`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() });
+            chat.messages.push({ id: Date.now(), sender: 'system', text: `${displayName}${char.nudgeAIVerb || '拍了拍'}了我${char.nudgeAISuffix || ''}`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() });
             remainingText = remainingText.replace(/\[戳一戳\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
 
@@ -5572,96 +5613,147 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
             console.log(`[系统] 主动搭话已关闭，已静默拦截 ${char.name} 的聊天气泡（朋友圈和后台指令已放行）`);
         }
         
+// 在 while 循环之前声明当前说话者（默认为角色名字）
+let currentSpeakerName = char.name;
+
 // 🌟 加上无限连发引擎的安全锁
 let lastLength = -1;
-        // ---------------- 🌟 终极多媒体解析与换行切割引擎 ----------------
-        while (remainingText.trim().length > 0 && remainingText.length !== lastLength) {
-            lastLength = remainingText.length;
-            let matched = false;
+while (remainingText.trim().length > 0 && remainingText.length !== lastLength) {
+    lastLength = remainingText.length;
+    let matched = false;
 
-            // 🌟 史诗级进化：一网打尽的超级正则！
-            // 完美兼容：[类型] 内容、[类型: 内容]、[类型：内容]、甚至 [类型 内容]
-            const regex = /\[(?:发送)?(语音|虚拟照片|定位|发起转账|转账)(?:\][:：]?\s*([^\r\n]*)|[:：\s]*([^\]\r\n]+)\]?)/;
-            const match = remainingText.match(regex);
+    // 🌟 史诗级进化：一网打尽的超级正则！
+    // 完美兼容：[类型] 内容、[类型: 内容]、[类型：内容]、甚至 [类型 内容]
+    const regex = /\[(?:发送)?(语音|虚拟照片|定位|发起转账|转账)(?:\][:：]?\s*([^\r\n]*)|[:：\s]*([^\]\r\n]+)\]?)/;
+    const match = remainingText.match(regex);
 
-            if (match) {
-                // 1. 提取标签前面的纯文本，并严格切分！
-                const beforeText = remainingText.substring(0, match.index);
-                if (beforeText.trim()) {
-                    if (isOffline) {
-                        msgsToPush.push({ msgType: 'text', text: beforeText.trim() });
-                    } else {
-                        // 🌟 修复：同时兼容 \r\n, \n, \r，大模型怎么发疯都能切成独立气泡！
-                        beforeText.split(/\r\n|\r|\n/).filter(p => p.trim()).forEach(p => msgsToPush.push({ msgType: 'text', text: p.trim() }));
-                    }
-                }
-
-                // 2. 提取标签类型和内容
-                const type = match[1];
-                let content = (match[2] || match[3] || '').trim();
-
-                // 3. 分发气泡
-                if (type === '发起转账' || type === '转账') {
-                    let tempText = remainingText.substring(match.index + match[0].length).trim();
-                    let nextLines = tempText.split(/\r\n|\r|\n/);
-                    const amount = (nextLines[0].match(/金额[:：]?\s*(\d+(\.\d+)?)/) || [])[1] || '520.00';
-                    const note = (nextLines[0].match(/备注[:：]?\s*([^，,。\]\n]+)/) || [])[1] || '转账给你';
-                    msgsToPush.push({ msgType: 'transfer', text: `[收到转账]`, transferData: { amount, note }, transferState: 'pending' });
-                    remainingText = nextLines.slice(1).join('\n').trim();
-                } else {
-                    let mType = 'text';
-                    if (type === '语音') mType = 'voice';
-                    if (type === '虚拟照片') mType = 'virtual_image';
-                    if (type === '定位') mType = 'location';
-
-                    msgsToPush.push({ msgType: mType, text: content });
-                    remainingText = remainingText.substring(match.index + match[0].length).trim();
-                }
-                matched = true;
-                continue;
-            }
-
-            // 4. 如果后面没有多媒体标签了，把剩下的普通文本切分开！
-            if (!matched && remainingText.trim()) {
-                if (isOffline) {
-                    let finalOfflineText = remainingText.trim();
-                    if (typeof codeBlocks !== 'undefined') {
-                        codeBlocks.forEach((code, idx) => {
-                            finalOfflineText = finalOfflineText.replace(`__CODE_BLOCK_${idx}__`, `<br/><div class="mc-html-card my-2 w-full overflow-hidden">${code}</div><br/>`);
-                        });
-                    }
-                    msgsToPush.push({ msgType: 'text', text: finalOfflineText, sender: char.name });
-                } else {
-                    // 🌟 修复：同样兼容所有发疯的换行符！
-                    let parts = remainingText.split(/\r\n|\r|\n/).filter(p => p.trim());
-                    let currentSpeakerName = char.name;
-                    parts.forEach(p => {
-                        let textToPush = p;
-                        if (chat.isGroup) {
-                            const gm = p.match(/^([^:：\[\]]{1,15})[:：]\s*(.*)$/);
-                            if (gm) { currentSpeakerName = gm[1].trim(); textToPush = gm[2].trim(); }
-                        }
-                        if (textToPush) {
-                            const fragments = textToPush.split(/(\*[^*]+\*)/);
-                            fragments.forEach(frag => {
-                                const t = frag.trim();
-                                if (!t) return;
-                                let blockMatch = t.match(/__CODE_BLOCK_(\d+)__/);
-                                if (blockMatch && typeof codeBlocks !== 'undefined') {
-                                    msgsToPush.push({ sender: currentSpeakerName, msgType: 'html_card', text: codeBlocks[parseInt(blockMatch[1])] });
-                                    return;
-                                }
-                                if (t.startsWith('*') && t.endsWith('*') && isCall)
-                                    msgsToPush.push({ sender: currentSpeakerName, msgType: 'action', text: t.slice(1, -1) });
-                                else
-                                    msgsToPush.push({ sender: currentSpeakerName, msgType: 'text', text: t });
-                            });
-                        }
-                    });
-                }
-                remainingText = '';
+    if (match) {
+        // 1. 获取标签前的文本
+        let beforeText = remainingText.substring(0, match.index);
+        let remainingAfterMatch = remainingText.substring(match.index + match[0].length);
+        
+        // 2. 从 beforeText 中提取可能的角色名
+        let extractedSpeaker = null;
+        let cleanedBeforeText = beforeText;
+        const lines = beforeText.split(/\r\n|\r|\n/);
+        let lastSpeakerLine = -1;
+        
+        // 从后往前找最后一个纯角色名行（格式：角色名: 或 角色名：）
+        for (let i = lines.length - 1; i >= 0; i--) {
+            const line = lines[i].trim();
+            const matchName = line.match(/^([^:：\[\]]{1,15})[:：]\s*$/);
+            if (matchName) {
+                extractedSpeaker = matchName[1].trim();
+                lastSpeakerLine = i;
+                break;
             }
         }
+        
+        if (extractedSpeaker) {
+            // 移除该行，其余部分作为 cleanedBeforeText
+            lines.splice(lastSpeakerLine, 1);
+            cleanedBeforeText = lines.join('\n');
+            currentSpeakerName = extractedSpeaker; // 更新当前说话者
+        }
+        
+        // 3. 如果清理后的文本非空，按行推送为普通文本，并解析其中的角色名
+if (cleanedBeforeText.trim()) {
+    const textLines = cleanedBeforeText.split(/\r\n|\r|\n/).filter(l => l.trim());
+    textLines.forEach(line => {
+        let textToPush = line.trim();
+        let speaker = currentSpeakerName;
+        if (chat.isGroup) {
+            const gm = line.match(/^([^:：\[\]]{1,15})[:：]\s*(.*)$/);
+            if (gm) {
+                speaker = gm[1].trim();
+                textToPush = gm[2].trim();
+                if (!textToPush) return; // 只有角色名没有内容，跳过
+                // 更新当前说话者，以便后续行使用
+                currentSpeakerName = speaker;
+            }
+        }
+        msgsToPush.push({ sender: speaker, msgType: 'text', text: textToPush });
+    });
+}
+        
+        // 4. 处理多媒体标签本身
+        const type = match[1];
+        let content = (match[2] || match[3] || '').trim();
+        
+        if (type === '发起转账' || type === '转账') {
+            // 转账处理，同样需要 sender
+            let nextLines = remainingAfterMatch.split(/\r\n|\r|\n/);
+            const amount = (nextLines[0].match(/金额[:：]?\s*(\d+(\.\d+)?)/) || [])[1] || '520.00';
+            const note = (nextLines[0].match(/备注[:：]?\s*([^，,。\]\n]+)/) || [])[1] || '转账给你';
+            msgsToPush.push({ 
+                sender: currentSpeakerName,
+                msgType: 'transfer', 
+                text: `[收到转账]`, 
+                transferData: { amount, note }, 
+                transferState: 'pending' 
+            });
+            remainingText = nextLines.slice(1).join('\n').trim();
+        } else {
+            let mType = 'text';
+            if (type === '语音') mType = 'voice';
+            if (type === '虚拟照片') mType = 'virtual_image';
+            if (type === '定位') mType = 'location';
+            
+            msgsToPush.push({ 
+                sender: currentSpeakerName, 
+                msgType: mType, 
+                text: content 
+            });
+        }
+        
+        remainingText = remainingAfterMatch;
+        matched = true;
+        continue;
+    }
+
+    // 4. 如果后面没有多媒体标签了，把剩下的普通文本切分开！
+    if (!matched && remainingText.trim()) {
+        if (isOffline) {
+            let finalOfflineText = remainingText.trim();
+            if (typeof codeBlocks !== 'undefined') {
+                codeBlocks.forEach((code, idx) => {
+                    finalOfflineText = finalOfflineText.replace(`__CODE_BLOCK_${idx}__`, `<br/><div class="mc-html-card my-2 w-full overflow-hidden">${code}</div><br/>`);
+                });
+            }
+            msgsToPush.push({ msgType: 'text', text: finalOfflineText, sender: currentSpeakerName });
+        } else {
+            let parts = remainingText.split(/\r\n|\r|\n/).filter(p => p.trim());
+            parts.forEach(p => {
+                let textToPush = p;
+                if (chat.isGroup) {
+                    const gm = p.match(/^([^:：\[\]]{1,15})[:：]\s*(.*)$/);
+                    if (gm) {
+                        currentSpeakerName = gm[1].trim();
+                        textToPush = gm[2].trim();
+                        if (!textToPush) return; // 只有角色名没有内容，跳过
+                    }
+                }
+                if (textToPush) {
+                    const fragments = textToPush.split(/(\*[^*]+\*)/);
+                    fragments.forEach(frag => {
+                        const t = frag.trim();
+                        if (!t) return;
+                        let blockMatch = t.match(/__CODE_BLOCK_(\d+)__/);
+                        if (blockMatch && typeof codeBlocks !== 'undefined') {
+                            msgsToPush.push({ sender: currentSpeakerName, msgType: 'html_card', text: codeBlocks[parseInt(blockMatch[1])] });
+                            return;
+                        }
+                        if (t.startsWith('*') && t.endsWith('*') && isCall)
+                            msgsToPush.push({ sender: currentSpeakerName, msgType: 'action', text: t.slice(1, -1) });
+                        else
+                            msgsToPush.push({ sender: currentSpeakerName, msgType: 'text', text: t });
+                    });
+                }
+            });
+        }
+        remainingText = '';
+    }
+}
         // ---------------- 🌟 5. 装配最终气泡，根治 ID 碰撞和时间错乱 ----------------
         let finalMsgs = [];
         let msgOffset = 0; 
@@ -5671,7 +5763,7 @@ let lastLength = -1;
         msgsToPush.forEach((m) => {
             finalMsgs.push({
                 id: baseTime + msgOffset,
-                sender: m.sender || char.id, // 🌟 必须传 ID，防止头像读取崩溃
+                sender: m.sender || char.name, // 🌟 必须传 ID，防止头像读取崩溃
                 text: m.text,
                 imageUrl: m.imageUrl,
                 virtualImageText: m.virtualImageText,
@@ -5701,6 +5793,22 @@ let lastLength = -1;
         for (let i = 0; i < finalMsgs.length; i++) {
             const newMsg = finalMsgs[i];
             chat.messages.push(newMsg);
+            // 🌟 关键修复：根据消息发送者名字查找正确的角色对象
+let senderChar = char; // 默认使用当前聊天对象（单聊时正确）
+if (newMsg.sender && typeof newMsg.sender === 'string') {
+    // 优先按名字查找（群聊中名字唯一）
+    let found = store.contacts.find(c => c.name === newMsg.sender);
+    if (!found && !chat.isGroup) {
+        // 单聊时如果名字不匹配，尝试按 ID 查找
+        found = store.contacts.find(c => c.id === newMsg.sender);
+    }
+    if (found) {
+        senderChar = found;
+    } else if (chat.isGroup) {
+        // 群聊中找不到发送者时，记录警告但不中断（使用回退角色）
+        console.warn(`[语音] 未找到发送者 ${newMsg.sender}，将使用回退角色 ${char.name}`);
+    }
+}
 
             // 🌟 极速 UI 唤醒：强制刷新当前页面
             if (isActive) {
@@ -5714,19 +5822,31 @@ let lastLength = -1;
             }
 
             let callAudioPlayed = false;
-            if (char.minimaxVoiceId && store.minimaxConfig?.enabled !== false && store.minimaxConfig?.apiKey) {
-                if (isCall && newMsg.msgType === 'text') {
-                    const url = await fetchMinimaxVoice(newMsg.text, char.minimaxVoiceId);
-                    if (url && typeof wxState !== 'undefined' && wxState.view === 'call') {
-                        newMsg.audioUrl = url;
-                        if(window.wxCallPlayer) { window.wxCallPlayer.src = url; window.wxCallPlayer.play().catch(()=>{}); callAudioPlayed = true; }
-                        if(isActive && typeof window.render === 'function') window.render();
-                    }
-                } else if (!isCall && (newMsg.msgType === 'voice' || (newMsg.msgType === 'text' && char.minimaxVoiceEnabled))) {
-                    const url = await fetchMinimaxVoice(newMsg.text, char.minimaxVoiceId);
-                    if (url) { newMsg.audioUrl = url; if(isActive && typeof window.render === 'function') window.render(); }
-                }
-            }
+            if (senderChar.minimaxVoiceId && store.minimaxConfig?.enabled !== false && store.minimaxConfig?.apiKey && senderChar.minimaxVoiceEnabled) {
+    if (isCall && newMsg.msgType === 'text') {
+    const url = await fetchMinimaxVoice(newMsg.text, senderChar.minimaxVoiceId);
+    if (url && typeof wxState !== 'undefined' && wxState.view === 'call') {
+        newMsg.audioUrl = url;
+        // 使用队列播放器，不再直接覆盖全局播放器
+        playCallAudio(url);
+        callAudioPlayed = true;
+        if(isActive && typeof window.render === 'function') window.render();
+    }
+} else if (!isCall && (newMsg.msgType === 'voice' || (newMsg.msgType === 'text' && senderChar.minimaxVoiceEnabled))) {
+        const url = await fetchMinimaxVoice(newMsg.text, senderChar.minimaxVoiceId);
+        if (url) {
+            newMsg.audioUrl = url;
+            if(isActive && typeof window.render === 'function') window.render();
+        } else {
+            console.warn(`[语音] 生成失败，角色: ${senderChar.name}`);
+        }
+    }
+} else {
+    // 可选：调试信息，帮助定位配置问题
+    if (chat.isGroup && newMsg.msgType === 'voice') {
+        console.log(`[语音] 未生成：角色 ${senderChar.name} 的语音未启用（音色ID: ${senderChar.minimaxVoiceId}, 启用开关: ${senderChar.minimaxVoiceEnabled}）`);
+    }
+}
 
             if (!isCall && newMsg.msgType !== 'system' && newMsg.msgType !== 'recall_system') {
                 try { new Audio(store.appearance?.newMsgSound || 'https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3').play().catch(()=>{}); } catch(e) {}
@@ -5745,8 +5865,35 @@ let lastLength = -1;
         // 🌟 完美接力：AI 消息上屏完毕，立刻启动下一轮的“主动搭话”巡逻！
         setTimeout(() => { if (typeof window.scheduleCloudTask === 'function') window.scheduleCloudTask(chatId); }, 2000);
     }
-  } catch (e) { console.error('同步信箱失败:', e); }
-  finally { window.isSyncingMailbox = false; } // 🌟 开门
+  } catch (e) { 
+      console.error('同步信箱失败:', e); 
+      
+      // 🌟 1. 翻译天书报错，转化为人类听得懂的 UI 弹窗！
+      let errMsg = '⚠️ 云端同步失败，请检查网络或服务端状态。';
+      if (e.message && (e.message.includes('Unexpected token') || e.message.includes('JSON'))) {
+          errMsg = '⚠️ 云端返回了乱码 (大模型抽风或服务器 502 拥堵)，请稍后再试或重Roll。';
+      } else if (e.message && e.message.includes('Failed to fetch')) {
+          errMsg = '⚠️ 无法连接到云端服务器，请检查后端是否存活。';
+      }
+
+      // 呼叫网页内部弹窗
+      if (window.actions && typeof window.actions.showToast === 'function') {
+          window.actions.showToast(errMsg);
+      } else if (typeof showToast === 'function') {
+          showToast(errMsg);
+      }
+
+      // 🌟 2. 物理斩杀所有卡死的“输入中”状态！绝对不能让用户干等！
+      if (typeof wxState !== 'undefined' && wxState.typingStatus) {
+          Object.keys(wxState.typingStatus).forEach(k => wxState.typingStatus[k] = false);
+      }
+      
+      // 🌟 3. 强制刷新界面，把死掉的 UI 救回来
+      if (typeof window.render === 'function') window.render();
+      
+  } finally { 
+      window.isSyncingMailbox = false; 
+  }
 };
 
 window.checkAutoMsg = async () => {}; 
