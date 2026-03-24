@@ -40,7 +40,7 @@ const cpState = {
 // 🌟 注入日记本满血默认配置
 if (!store.diaryConfig) {
     store.diaryConfig = { 
-        enabled: true, time: '22:00', theme: 'default',
+        enabled: false, time: '22:00', theme: 'default',
         paper: 'blank', letterSpacing: '1px', lineHeight: '2.0', textIndent: '2em',
         hiddenColor: '#ef4444', highlightColor: '#ec4899'
     };
@@ -59,12 +59,12 @@ if (!window.cpActions) {
                 id: Date.now(),
                 sender: 'me',
                 isMe: true, 
-                msgType: 'invite_card', // 🌟 正规军类型！
+                msgType: 'invite_card',
                 text: '[情侣空间开通邀请]',
                 timestamp: Date.now()
             });
 
-            // 2. 发送大模型隐身指令 (类型为 text，但 isHidden 为 true，完全隐形！)
+            // 2. 发送大模型隐身指令
             chat.messages.push({
                 id: Date.now() + 1,
                 sender: 'system',
@@ -75,14 +75,26 @@ if (!window.cpActions) {
                 timestamp: Date.now() + 1
             });
             if (typeof window.scheduleCloudTask === 'function') window.scheduleCloudTask(charId);
+            
+            // 🌟 注入神级反馈：加上这行绝美的 Toast！
+            if (window.actions && window.actions.showToast) {
+                window.actions.showToast('💌 邀请函已飞入 TA 的信箱，请耐心等待回信~');
+            }
         }
+        
         cpState.showCreateSpaceModal = false;
-        window.cpActions.cpRender();
+        
+        // 顺手修个潜在bug：如果原来的代码是 cpRender()，这里统一改成现代的 window.render()
+        if (typeof window.render === 'function') {
+            window.render();
+        } else if (window.cpActions && window.cpActions.cpRender) {
+            window.cpActions.cpRender();
+        }
     },
-    // 🌟 提问箱导航与设置
-  openQuestions: (charId) => { cpState.view = 'questions'; cpState.activeCharId = charId; if(window.renderCouple) window.renderCouple(); },
-  openQuestionSettings: () => { cpState.showQuestionSettings = true; if(window.renderCouple) window.renderCouple(); },
-  closeQuestionSettings: () => { cpState.showQuestionSettings = false; if(window.renderCouple) window.renderCouple(); },
+  // 🌟 提问箱导航与设置
+  openQuestions: (charId) => { cpState.view = 'questions'; cpState.activeCharId = charId; window.render(); },
+  openQuestionSettings: () => { cpState.showQuestionSettings = true; window.render(); },
+  closeQuestionSettings: () => { cpState.showQuestionSettings = false; window.render(); },
   
   // 🌟 保存设置
   saveQuestionSettings: (charId) => {
@@ -90,13 +102,49 @@ if (!window.cpActions) {
       store.coupleSpacesData[charId] = store.coupleSpacesData[charId] || {};
       store.coupleSpacesData[charId].enableAiQuestions = document.getElementById('q-enable-toggle').checked;
       store.coupleSpacesData[charId].aiQuestionFreq = parseInt(document.getElementById('q-freq-select').value);
-      window.actions.saveStore();
       cpState.showQuestionSettings = false;
-      if(window.renderCouple) window.renderCouple();
-      if(window.actions.showToast) window.actions.showToast('设置已保存');
+      window.render();
+      if(window.actions.showToast) window.actions.showToast('提问箱设置已保存！');
   },
 
-  // 🌟 用户发起提问，呼唤 AI 答题
+  // 🧠 核心：完美对齐 llm.js 的全息记忆提取引擎
+  getQContext: (charId, text='') => {
+      const char = store.contacts.find(c => c.id === charId);
+      const chat = store.chats.find(c => c.charId === charId);
+      const boundPId = chat?.boundPersonaId || store.personas[0].id;
+      const boundP = store.personas.find(p => String(p.id) === String(boundPId)) || store.personas[0];
+      const globalP = store.personas[0];
+
+      // 提取核心记忆
+      let coreMem = (store.memories || []).filter(m => m.charId === charId && m.type === 'core').map(m=>m.content).join('；');
+      
+      // 提取触发的碎片记忆
+      let fragMem = '';
+      if (text) {
+          fragMem = (store.memories || []).filter(m => m.charId === charId && m.type === 'fragment').filter(m => {
+              const kws = (m.keywords || '').split(',').map(k=>k.trim()).filter(k=>k);
+              return kws.some(k => text.includes(k));
+          }).map(m=>m.content).join('；');
+      }
+
+      const coreMemStr = coreMem ? `\n【核心记忆】\n${coreMem}` : '';
+      const fragMemStr = fragMem ? `\n【触发的回忆片段】\n${fragMem}` : '';
+      const globalPromptStr = globalP.prompt ? `\n【用户全局人设】\n${globalP.prompt}` : '';
+      const boundPromptStr = boundP.prompt ? `\n【当前绑定身份】\n${boundP.prompt}` : '';
+
+      const promptStr = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${coreMemStr}${fragMemStr}\n\n【用户】\n当前化名：${boundP.name}${globalPromptStr}${boundPromptStr}`;
+      
+      return { char, chat, boundP, promptStr };
+  },
+
+  // 🌟 删除提问卡片与回答
+  deleteQuestion: (charId, qId) => {
+      if (!confirm('确定彻底删除这个问题吗？')) return;
+      store.coupleSpacesData[charId].questions = store.coupleSpacesData[charId].questions.filter(q => q.id !== qId);
+      window.render();
+  },
+
+  // 🌟 用户发起提问
   askQuestion: async (charId) => {
       const input = document.getElementById('new-q-input');
       const text = input.value.trim();
@@ -104,42 +152,55 @@ if (!window.cpActions) {
       
       store.coupleSpacesData = store.coupleSpacesData || {};
       store.coupleSpacesData[charId] = store.coupleSpacesData[charId] || {};
-      const spaceData = store.coupleSpacesData[charId];
-      spaceData.questions = spaceData.questions || [];
+      store.coupleSpacesData[charId].questions = store.coupleSpacesData[charId].questions || [];
       
       const qId = 'Q_' + Date.now();
-      spaceData.questions.unshift({ id: qId, asker: 'me', text: text, answer: null, timestamp: Date.now() });
+      store.coupleSpacesData[charId].questions.unshift({ id: qId, asker: 'me', text: text, answer: null, timestamp: Date.now() });
       input.value = '';
-      window.actions.saveStore();
-      if(window.renderCouple) window.renderCouple();
+      window.render();
+      await window.cpActions.fetchQAnswer(charId, qId, text);
+  },
 
-      // 🧠 呼唤 LLM 答题
+  // 🌟 角色回答的重Roll引擎
+  rerollQAnswer: async (charId, qId) => {
+      const targetQ = store.coupleSpacesData[charId].questions.find(q => q.id === qId);
+      if (!targetQ) return;
+      targetQ.answer = null;
+      window.render();
+      await window.cpActions.fetchQAnswer(charId, qId, targetQ.text);
+  },
+
+  // 🧠 角色回答核心大脑
+  fetchQAnswer: async (charId, qId, text) => {
+      const ctx = window.cpActions.getQContext(charId, text);
       try {
-          const char = store.contacts.find(c => c.id === charId);
-          const chat = store.chats.find(c => c.charId === char.id);
-          const pId = chat.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
-          const boundPersona = store.personas.find(p => String(p.id) === String(pId)) || store.personas[0];
-          
-          const promptMsg = `(系统通知：用户 ${boundPersona.name} 在【情侣提问箱】向你提问：“${text}”。请以情侣身份自然、真诚地回答，直接说话，绝不许包含系统标签。)`;
-          const tempHistory = [...chat.messages, { id: Date.now(), sender: boundPersona.name, text: promptMsg, isMe: true, isHidden: true, msgType: 'text' }];
-          
-          const { buildLLMPayload, getLLMReply } = await import('../utils/llm.js');
-          const llmMessages = await buildLLMPayload(char.id, tempHistory, false, false, null, null);
-          const response = await getLLMReply(llmMessages, char.id);
-          
-          if (response) {
-              const targetQ = spaceData.questions.find(q => q.id === qId);
-              if (targetQ) targetQ.answer = response;
-              window.actions.saveStore();
-              if(window.renderCouple) window.renderCouple();
-          }
+          const prompt = `${ctx.promptStr}\n\n【系统任务】用户 ${ctx.boundP.name} 在情侣提问箱向你提问：“${text}”。\n请结合上述人设和记忆，真实、自然地回答。❗要求极度精简，字数严格控制在30字以内！直接输出回答正文，绝不要带任何前缀！`;
+          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+          });
+          const data = await res.json();
+          const targetQ = store.coupleSpacesData[charId].questions.find(q => q.id === qId);
+          if (targetQ) targetQ.answer = data.choices[0].message.content.trim();
+          window.render();
       } catch(e) {
-          console.error("提问箱回答失败", e);
+          if (window.actions.showToast) window.actions.showToast('网络波动，TA没能回答');
       }
   },
 
-  // 🌟 用户回答 AI 的提问
-  answerQuestion: (qId) => {
+// 🌟 删除卡片里的回答 (连带 TA 的反应一起撤销)
+  deleteQAnswer: (charId, qId) => {
+      if (!confirm('确定要撤回这个回答吗？')) return;
+      const targetQ = store.coupleSpacesData[charId].questions.find(q => q.id === qId);
+      if (targetQ) {
+          targetQ.answer = null;
+          targetQ.reaction = null; // 清空反应
+      }
+      window.render();
+  },
+
+  // 🌟 进阶：用户回答 AI 的提问，并立刻呼唤 AI 做出反应！
+  answerQuestion: async (qId) => {
       const charId = cpState.activeCharId;
       const input = document.getElementById('ans-input-' + qId);
       const text = input.value.trim();
@@ -147,10 +208,48 @@ if (!window.cpActions) {
       
       const spaceData = store.coupleSpacesData[charId];
       const targetQ = spaceData.questions.find(q => q.id === qId);
-      if (targetQ) {
-          targetQ.answer = text;
-          window.actions.saveStore();
-          if(window.renderCouple) window.renderCouple();
+      if (!targetQ) return;
+      
+      // 1. 先把你的答案存下来上屏 (输入框消失)
+      targetQ.answer = text;
+      window.render();
+
+      // 2. 呼唤大模型对你的答案做出反应
+      try {
+          const ctx = window.cpActions.getQContext(charId);
+          const prompt = `${ctx.promptStr}\n\n【系统任务】你之前在提问箱向用户提问：“${targetQ.text}”。\n用户刚才回答了你：“${text}”。\n请对用户的回答做出简短、自然的反应/评价。❗要求极度精简，字数严格控制在30字以内！直接输出反应正文，绝不要带任何前缀！`;
+          
+          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+          });
+          const data = await res.json();
+          targetQ.reaction = data.choices[0].message.content.trim();
+          window.render();
+      } catch(e) {
+          targetQ.reaction = "（TA 似乎在忙，轻轻摸了摸你的头...）";
+          window.render();
+      }
+  },
+  // 🌟 重 Roll 提问箱里的 AI 反应
+  rerollQReaction: async (charId, qId) => {
+      const targetQ = store.coupleSpacesData[charId].questions.find(q => q.id === qId);
+      if (!targetQ || !targetQ.answer) return;
+      targetQ.reaction = null;
+      window.render();
+      try {
+          const ctx = window.cpActions.getQContext(charId);
+          const prompt = `${ctx.promptStr}\n\n【系统任务】你之前在提问箱向用户提问：“${targetQ.text}”。\n用户刚才回答了你：“${targetQ.answer}”。\n请以伴侣的身份，对用户的回答做出简短、自然的反应/评价。❗要求极度精简，字数严格控制在30字以内！直接输出反应正文，绝不要带任何前缀！`;
+          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+          });
+          const data = await res.json();
+          targetQ.reaction = data.choices[0].message.content.trim();
+          window.render();
+      } catch(e) {
+          targetQ.reaction = "（TA 似乎在忙，轻轻摸了摸你的头...）";
+          window.render();
       }
   },
     // 🌟 日记重写与销毁引擎
@@ -267,7 +366,7 @@ if (!window.cpActions) {
             
             const promptStr = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n\n【今日聊天回忆】\n${historyStr}${diaryContent}${userContext}\n\n【用户的最新共写】\n${lastUserComment}\n\n【任务】用户对你刚才的续写不满意（要求重写）。请你以伴侣的身份，换一个更深情、更细腻的角度重新回复。\n❗要求：字数 150-300字，支持 ~~阴暗面~~ 和 **高光** 语法。直接输出正文！`;
             
-            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.9 }) });
+            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) }) });
             const data = await res.json();
             d.comments[idx].text = data.choices[0].message.content.trim();
         } catch (e) {
@@ -309,7 +408,7 @@ if (!window.cpActions) {
             
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.8 })
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
             });
             const data = await res.json();
             const content = data.choices[0].message.content.trim();
@@ -353,7 +452,7 @@ if (!window.cpActions) {
             
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.8 })
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
             });
             const data = await res.json();
             const replyContent = data.choices[0].message.content.trim();
@@ -394,7 +493,7 @@ if (!window.cpActions) {
             const promptStr = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${memoryStr}\n\n【今日聊天记录回忆】\n${historyStr}\n\n【任务】请结合上述信息、你的人设属性以及当前时间（${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'})}），脑洞大开，推测并生成TA今天极其符合人设的行踪与健康数据。\n必须返回合法的 JSON 格式数据，结构如下：\n{\n  "distance": 距离用户的公里数(浮点数，比如2.5，如果是异地恋可以设得很大),\n  "steps": 今日运动步数(整数),\n  "places": [\n    {"time": "08:30", "name": "温馨小窝 (出门)"}\n  ], // 按时间顺序排列今天去过的地方，至少1个最多5个\n  "sleepHours": [6.5, 7.0, 5.5], // 前天、昨天、今天凌晨的睡眠时长(3个浮点数)\n  "sleepEval": "以手机系统自带【健康管家】的口吻，客观评价用户的睡眠质量（30字以内，如：昨晚深度睡眠不足，建议今晚放下手机早点休息。）",\n  "phone": {\n    "total": "6.5h",\n    "apps": [\n      {"name": "微信", "time": "2.5h"},\n      {"name": "网易云音乐", "time": "1.8h"}\n    ] // 🌟 随机生成 3 到 5 个最符合TA当前人设和行踪的 App\n  }\n}\n❗警告：只能输出 JSON 格式文本，绝不要带有 \`\`\`json 等任何 Markdown 包裹，也不要有多余解释！`;
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.85 })
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
             });
             const data = await res.json();
             let content = data.choices[0].message.content.trim();
@@ -409,6 +508,364 @@ if (!window.cpActions) {
             cpState.isLocRefreshing = false; window.render();
         }
     },
+    // ==========================================
+  // 🌟 默契问答核心引擎
+  // ==========================================
+  openTacit: (charId) => { 
+      cpState.view = 'tacit'; cpState.activeCharId = charId; 
+      store.coupleSpacesData[charId] = store.coupleSpacesData[charId] || {};
+      const spaceData = store.coupleSpacesData[charId];
+      // 如果进来时没有题目，自动出题
+      if (!spaceData.tacitStatus) window.cpActions.fetchTacitQ(charId);
+      else window.render(); 
+  },
+
+  // 🧠 AI 出题大脑 (中立视角出题 + 全局温度挂载)
+  fetchTacitQ: async (charId) => {
+      const spaceData = store.coupleSpacesData[charId];
+      spaceData.tacitStatus = 'loading';
+      spaceData.currentTacit = null;
+      spaceData.tacitChat = []; // 🌟 点击刷新时，强制清空讨论区！
+      window.render();
+
+      try {
+          const ctx = window.cpActions.getQContext(charId);
+          // 🌟 注入“求生欲测试”与“灵魂拷问”的题库范式，并强制发散思维！
+          const prompt = `${ctx.promptStr}\n\n【系统任务】你现在是“情侣灵魂拷问/求生欲测试”的毒舌裁判。请以绝对中立的上帝视角，提出一道刁钻、有趣、测试你们默契度的题目。\n\n❗【出题方向指导】（严禁出诸如“生日、最爱吃什么”这种死板的记忆背诵题！）\n1. 假设性情景（例：“如果${ctx.boundP.name}中了一千万，第一件事会干嘛？”、“世界末日只能带一样东西，你会带啥？”）\n2. 深度观察/习惯拷问（例：“${ctx.char.name}最让${ctx.boundP.name}抓狂的小毛病是什么？”、“你们吵架时，${ctx.boundP.name}最吃哪一套？”）\n3. 感情回顾（例：“你们第一次冷战是因为什么微不足道的事？”）\n4. 情绪价值（例：“在极其疲惫的一天后，${ctx.boundP.name}最想听到的一句话是什么？”）\n\n❗你必须充分发散思维，结合上下文，每次提出截然不同的新题！严禁照搬上述例子！\n同时你需要作为 ${ctx.char.name} 给出你的真实答案。\n❗绝对红线：\n1. 问题必须是第三人称中立视角！\n2. 你的答案必须极度精简，严格在 10 个字内！\n3. 必须输出严格 JSON：{"question": "问题内容", "answer": "你的答案"}`;
+          
+          const temp = store.apiConfig?.temperature !== undefined ? Number(store.apiConfig.temperature) : 0.85; // 🌟 挂载用户设置的全局温度
+          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+          });
+          const data = await res.json();
+          let jsonStr = data.choices[0].message.content.trim();
+          const match = jsonStr.match(/\{[\s\S]*\}/); // 暴力提取 JSON
+          if (!match) throw new Error("JSON 解析失败");
+          
+          const qData = JSON.parse(match[0]);
+          spaceData.currentTacit = { question: qData.question, aiAns: qData.answer, userAns: '' };
+          spaceData.tacitStatus = 'answering';
+          window.render();
+      } catch(e) {
+          if (window.actions.showToast) window.actions.showToast('出题失败，请点击右上角重试');
+          spaceData.tacitStatus = 'error';
+          window.render();
+      }
+  },
+
+  // 🌟 提交答案并揭晓
+  submitTacitAns: (charId) => {
+      const input = document.getElementById('tacit-ans-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      const spaceData = store.coupleSpacesData[charId];
+      spaceData.currentTacit.userAns = text;
+      spaceData.tacitStatus = 'revealed';
+      
+      spaceData.tacitChat = spaceData.tacitChat || [];
+      spaceData.tacitChat.push({
+          id: Date.now(), sender: 'system', isMe: false, msgType: 'system',
+          text: `【本轮对答案】\nQ: ${spaceData.currentTacit.question}\n我的回答: ${text}\nTA的回答: ${spaceData.currentTacit.aiAns}`
+      });
+      window.render();
+      setTimeout(() => { const scrollEl = document.getElementById('cp-tacit-chat-scroll'); if (scrollEl) scrollEl.scrollTop = scrollEl.scrollHeight; }, 100);
+  },
+
+  // 💬 讨论区：仅发送消息上屏 (不再自动请求AI)
+  sendTacitMsg: (charId) => {
+      const input = document.getElementById('tacit-chat-input');
+      const text = input.value.trim();
+      if (!text) return;
+
+      const spaceData = store.coupleSpacesData[charId];
+      spaceData.tacitChat = spaceData.tacitChat || [];
+      spaceData.tacitChat.push({ id: Date.now(), sender: 'me', isMe: true, msgType: 'text', text: text });
+      input.value = '';
+      window.render();
+      setTimeout(() => { const el = document.getElementById('cp-tacit-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+  },
+
+  // 🧠 讨论区：单独请求 AI 回复大脑
+  requestTacitReply: async (charId) => {
+      const spaceData = store.coupleSpacesData[charId];
+      spaceData.tacitChat = spaceData.tacitChat || [];
+      
+      // 插入 Loading 气泡
+      const loadingId = Date.now();
+      spaceData.tacitChat.push({ id: loadingId, sender: 'ai', isMe: false, msgType: 'loading' });
+      window.render();
+      setTimeout(() => { const el = document.getElementById('cp-tacit-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+
+      try {
+          const ctx = window.cpActions.getQContext(charId);
+          const tacitContext = `【当前默契问答】\n问题：${spaceData.currentTacit.question}\n我的答案：${spaceData.currentTacit.userAns}\n你的答案：${spaceData.currentTacit.aiAns}`;
+          const chatHistory = spaceData.tacitChat.filter(m => m.msgType === 'text').slice(-15).map(m => `${m.isMe ? '用户' : '你'}: ${m.text}`).join('\n');
+          
+          const prompt = `${ctx.promptStr}\n\n${tacitContext}\n\n【讨论区记录】\n${chatHistory}\n\n【系统任务】结合对答案情况，以伴侣身份回复用户的聊天。❗要求：极度精简，像微信聊天，严格在30字内！直接输出正文！`;
+          
+          const temp = store.apiConfig?.temperature !== undefined ? Number(store.apiConfig.temperature) : 0.85;
+          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+          });
+          const data = await res.json();
+          
+          // 🌟 替换 Loading 气泡为真正的文字气泡
+          const targetIdx = spaceData.tacitChat.findIndex(m => m.id === loadingId);
+          if (targetIdx !== -1) {
+              spaceData.tacitChat[targetIdx] = { id: Date.now(), sender: 'ai', isMe: false, msgType: 'text', text: data.choices[0].message.content.trim() };
+          }
+          window.render();
+          setTimeout(() => { const el = document.getElementById('cp-tacit-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+      } catch(e) {
+          // 失败时移除 loading 气泡
+          spaceData.tacitChat = spaceData.tacitChat.filter(m => m.id !== loadingId);
+          if (window.actions.showToast) window.actions.showToast('TA 走神了，没能回复');
+          window.render();
+      }
+  },
+
+  // 🌟 讨论区：重 Roll 最后一句话
+  rerollTacitMsg: (charId) => {
+      const spaceData = store.coupleSpacesData[charId];
+      if (!spaceData || !spaceData.tacitChat) return;
+      // 找到最后一句 AI 的话，删掉它
+      let lastAiIdx = -1;
+      for (let i = spaceData.tacitChat.length - 1; i >= 0; i--) {
+          if (!spaceData.tacitChat[i].isMe && spaceData.tacitChat[i].msgType === 'text') { lastAiIdx = i; break; }
+      }
+      if (lastAiIdx !== -1) {
+          spaceData.tacitChat.splice(lastAiIdx, 1);
+          window.render();
+          // 重新呼叫 AI
+          window.cpActions.requestTacitReply(charId);
+      }
+  },
+  // ==========================================
+  // 🌟 100件小事 (恋爱副本) 核心引擎
+  // ==========================================
+  openHundredThings: (charId) => {
+      cpState.view = 'hundredThings'; cpState.activeCharId = charId;
+      store.coupleSpacesData[charId] = store.coupleSpacesData[charId] || {};
+      const spaceData = store.coupleSpacesData[charId];
+      
+      // 🌟 注入纯净且丰富的 100 件小事预设
+      if (!spaceData.hundredThings) {
+          const presets = [
+            "一起看日出", "一起看日落", "在星空下许愿", "共进浪漫烛光晚餐", "互相写一封情书", 
+            "一起学习烹饪新菜式", "参加一次情侣瑜伽", "裹着毯子看爱情电影", "在初雪的天气里打雪仗", "去动物园看喜欢的小动物",
+            "一起去滑雪或滑冰", "在周末去郊外露营野餐", "尝试一次极限运动", "潜水探索海底世界", "来一场说走就走的自驾游",
+            "挑战攀岩攀树", "去广阔的草原骑马", "探访神秘的古老村落", "乘船出海感受海风", "去冰川徒步",
+            "深入地下洞穴探险", "去天文台看星星", "参加一场狂欢的音乐节", "共同大扫除打理家务", "一起重新布置房间",
+            "共同制定完美的旅行计划", "互相按摩放松身心", "窝在沙发里追完一部剧", "一起去报班学个新技能", "精心准备度过一个节日",
+            "互换身份体验对方的一天", "手牵手去逛街买衣服", "参加朋友婚礼沾沾喜气", "一起去北欧看极光", "乘坐热气球俯瞰大地",
+            "体验高空跳伞/滑翔伞", "报名参加一次戏剧表演", "进录音棚合唱一首情歌", "去迪士尼当一天小朋友", "一起去做一件DIY手作",
+            "生病时温柔地互相照顾", "洗完澡帮彼此吹干头发", "教对方自己的一个特长", "互相给对方化一次妆", "手牵手去彼此的母校走走",
+            "为对方准备惊喜派对", "一起去鬼屋", "去寺庙一起求个平安符", "假装当陌生人一天", "庆祝纪念日",
+            "一起翻童年相册", "坐在摩天轮最高处接吻", "一起做蛋糕", "做对方一天的专属生活助理", "一起去电玩城",
+            "一起去敬老院或孤儿院", "一起写明信片给一年后的我们", "盲挑一套衣服给对方穿", "一起制作爱情相册", "一起写一首我们的歌",
+            "一起去对方长大的城市city walk", "一起拼酒，看谁先醉", "一起去水族馆", "拍一套搞怪又甜蜜的情侣写真", "闭上眼睛让对方牵着过马路",
+            "深夜下楼吃一次路边摊", "写一篇关于我的小文", "去菜市场买菜体验烟火气", "一起去一次彼此最想去的城市", "一起去挑战一个最不敢做的事",
+            "你给我扎一次辫子，我给你刮一次胡子", "互相给对方洗一次头发", "为对方写一首诗", "做一次对方的模特，让他自由创作", "交换手机玩一整天不生气",
+            "一起坐一辆从没做过的车，在不认识的地方下车到处逛", "互相模仿对方的行为习惯过一天", "亲手为对方剪一次头发", "互穿对方衣服", "一起参加一次情侣默契比赛",
+            "一起制定愿望清单", "给对方准备一个盲盒惊喜", "一起制定家规", "一起cosplay", "一起精心规划一次约会",
+            "一起讨论一条社会新闻", "一起去挑选情侣对戒", "冬天去泡一次暖呼呼的温泉", "把车停在路边听歌聊天到深夜", "去书店给对方盲挑一本书",
+            "一起分享自己最深的秘密", "一起学一支双人舞", "一起去医院体检", "一起去摆一次摊", "下雨接对方下班",
+            "一起去玩一次剧本杀", "一起去玩一次密室逃脱", "冬天为对方亲手织一条围巾", "在没人的海边偷偷放烟花", "互相画一幅对方的印象画"
+          ];
+          // 状态：0=去完成, 1=进行中, 2=已完成
+          spaceData.hundredThings = presets.map((title, idx) => ({ id: 'T_'+Date.now()+'_'+idx, title, status: 0, messages: [] }));
+          if(window.actions?.saveStore) window.actions.saveStore();
+      } else {
+          // 🌟 兼容老数据，把 completed 转化为 status
+          spaceData.hundredThings.forEach(t => { if(t.status === undefined) t.status = t.completed ? 2 : 0; });
+      }
+      window.render();
+  },
+
+  addHundredThing: (charId) => {
+      const input = document.getElementById('new-thing-input');
+      const text = input.value.trim();
+      if (!text) return;
+      const spaceData = store.coupleSpacesData[charId];
+      spaceData.hundredThings.unshift({ id: 'T_'+Date.now(), title: text, status: 0, messages: [] });
+      input.value = '';
+      if(window.actions?.saveStore) window.actions.saveStore();
+      window.render();
+  },
+
+  openHundredStory: async (charId, thingId) => {
+      cpState.view = 'hundredStory'; cpState.activeCharId = charId; cpState.activeThingId = thingId;
+      const target = store.coupleSpacesData[charId].hundredThings.find(t => t.id === thingId);
+      // 🌟 点进去如果未完成，立刻变成进行中！
+      if (target.status === 0) { target.status = 1; if(window.actions?.saveStore) window.actions.saveStore(); }
+      window.render();
+      
+      if (target.messages.length === 0) await window.cpActions.fetchHundredStoryReply(charId, thingId, true);
+      setTimeout(() => { const el = document.getElementById('cp-story-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+  },
+
+  // 🌟 退出时的状态拦截引擎
+  attemptExitHundredStory: (charId) => {
+      const target = store.coupleSpacesData[charId].hundredThings.find(t => t.id === cpState.activeThingId);
+      if (target && target.status === 1) {
+          cpState.showHundredExitModal = true;
+          window.render();
+      } else {
+          window.cpActions.openHundredThings(charId);
+      }
+  },
+  confirmExitHundredStory: (charId, action) => {
+      const target = store.coupleSpacesData[charId].hundredThings.find(t => t.id === cpState.activeThingId);
+      if (action === 'finish') {
+          target.status = 2; // 已完成！
+          // 🌟 触发超神级后台静默记忆提取，将番外写进主线记忆库！
+          window.cpActions.extractHundredMemory(charId, target);
+      }
+      if(window.actions?.saveStore) window.actions.saveStore();
+      cpState.showHundredExitModal = false;
+      window.cpActions.openHundredThings(charId);
+  },
+
+  // 🧠 后台静默记忆提取引擎 (恋爱小事专属版)
+  extractHundredMemory: async (charId, target) => {
+      if (!store.apiConfig?.apiKey || !target || !target.messages || target.messages.length === 0) return;
+      try {
+          const char = store.contacts.find(c => c.id === charId);
+          const chat = store.chats.find(c => c.charId === charId);
+          const pId = (chat?.isGroup ? chat.boundPersonaId : char?.boundPersonaId) || store.personas[0].id;
+          const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
+          
+          // 提取对话记录
+          const logText = target.messages.map(m => `${m.isMe ? boundPersona.name : char.name}: ${m.text}`).join('\n');
+          const promptStr = `【后台任务】用户和你刚刚完成了情侣100件小事之：【${target.title}】。\n以下是你们在这个番外副本里的互动剧情记录。请你以第三人称客观、简练地总结为一个记忆碎片（50字以内）。\n❗要求：\n1. 开头必须加上 [碎片] 标签。\n2. 示例：[碎片]和Eve一起去海边看日出，两人在沙滩漫步并深情相拥。\n\n【剧情】\n${logText}`;
+
+          // 调用大模型提取记忆
+          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.3 })
+          });
+          const data = await res.json();
+          let summary = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '').replace(/【?\[?碎片\]?】?/g, '').trim();
+
+          // 提取2个触发关键词
+          const kwRes = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: `请从以下总结中提取2个核心名词作为触发关键词，用英文逗号分隔，不要输出多余符号。\n${summary}` }], temperature: 0.3 })
+          });
+          const kwData = await kwRes.json();
+          const kws = kwData.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+
+          // 存入主线全局记忆库
+          const dateStr = new Date().toLocaleDateString('zh-CN');
+          const finalSummary = `[${dateStr} 小事成就] ${summary}`;
+          store.memories = store.memories || [];
+          store.memories.push({ id: Date.now(), charId: charId, type: 'fragment', content: finalSummary, keywords: kws, createdAt: Date.now() });
+          
+          if(window.actions?.saveStore) window.actions.saveStore();
+          console.log(`[系统] 100件小事完成！已为您存入🧩碎片记忆:`, finalSummary);
+      } catch (e) { console.error('[系统] 记忆提取失败', e); }
+  },
+
+  // 🌟 内部消息增删改查引擎
+  deleteHundredMsg: (charId, msgId) => {
+      if(!confirm("确定要删除这条消息吗？")) return;
+      const target = store.coupleSpacesData[charId].hundredThings.find(t => t.id === cpState.activeThingId);
+      target.messages = target.messages.filter(m => m.id !== msgId);
+      if(window.actions?.saveStore) window.actions.saveStore();
+      window.render();
+  },
+  openEditHundredMsg: (charId, msgId) => {
+      cpState.editingHundredMsgId = msgId; cpState.showHundredEditModal = true; window.render();
+  },
+  closeEditHundredMsg: () => {
+      cpState.showHundredEditModal = false; cpState.editingHundredMsgId = null; window.render();
+  },
+  saveEditHundredMsg: (charId) => {
+      const text = document.getElementById('hundred-edit-textarea').value.trim();
+      const target = store.coupleSpacesData[charId].hundredThings.find(t => t.id === cpState.activeThingId);
+      const msg = target.messages.find(m => m.id === cpState.editingHundredMsgId);
+      if (msg && text) msg.text = text;
+      cpState.showHundredEditModal = false;
+      if(window.actions?.saveStore) window.actions.saveStore();
+      window.render();
+  },
+  rerollHundredMsg: async (charId, msgId) => {
+      if(!confirm("确定让TA重新生成这段剧情吗？")) return;
+      const target = store.coupleSpacesData[charId].hundredThings.find(t => t.id === cpState.activeThingId);
+      const msgIdx = target.messages.findIndex(m => m.id === msgId);
+      if (msgIdx === -1) return;
+      target.messages = target.messages.slice(0, msgIdx); // 截断到这条之前
+      if(window.actions?.saveStore) window.actions.saveStore();
+      window.render();
+      await window.cpActions.fetchHundredStoryReply(charId, target.id, target.messages.length === 0);
+  },
+
+  // 🌟 发送与推演引擎
+  sendHundredStoryMsg: async (charId) => {
+      const input = document.getElementById('story-chat-input');
+      const text = input.value.trim(); if (!text) return;
+      const target = store.coupleSpacesData[charId].hundredThings.find(t => t.id === cpState.activeThingId);
+      target.messages.push({ id: Date.now(), sender: 'me', isMe: true, text: text });
+      input.value = '';
+      if(window.actions?.saveStore) window.actions.saveStore(); window.render();
+      setTimeout(() => { const el = document.getElementById('cp-story-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+      await window.cpActions.fetchHundredStoryReply(charId, target.id, false);
+  },
+  continueHundredStory: async (charId) => {
+      await window.cpActions.fetchHundredStoryReply(charId, cpState.activeThingId, false);
+  },
+
+  fetchHundredStoryReply: async (charId, thingId, isOpening) => {
+      const target = store.coupleSpacesData[charId].hundredThings.find(t => t.id === thingId);
+      target.isTyping = true; window.render();
+
+      try {
+          const ctx = window.cpActions.getQContext(charId);
+          const history = target.messages.slice(-10).map(m => `${m.isMe ? '用户指令/动作' : ctx.char.name}: ${m.text}`).join('\n');
+          let prompt = `${ctx.promptStr}\n\n【系统任务】你和用户正在体验恋爱100件小事之：【${target.title}】。这是一个独立于主线微信聊天的线下番外副本。\n`;
+          if (isOpening) prompt += `请结合人设，写出这段剧情的**沉浸式开场白**。交代环境、氛围以及你们正在做的事。\n`;
+          else prompt += `【当前剧情进展】\n${history}\n请顺着用户的动作往下推进剧情，若用户未发动作则继续叙述。\n`;
+          prompt += `❗绝对红线：\n1. 必须采用【轻小说体裁】！\n2. 严禁使用“名字: 台词”的剧本格式！\n3. 人物对话用双引号“”包裹，内心想法用全角括号（）包裹。`;
+
+          const temp = store.apiConfig?.temperature !== undefined ? Number(store.apiConfig.temperature) : 0.85;
+          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: temp })
+          });
+          const data = await res.json();
+          target.messages.push({ id: Date.now(), sender: 'ai', isMe: false, text: data.choices[0].message.content.trim() });
+      } catch(e) {
+          if (window.actions?.showToast) window.actions.showToast('TA 走神了，没写出来');
+      } finally {
+          target.isTyping = false;
+          if(window.actions?.saveStore) window.actions.saveStore(); window.render();
+          setTimeout(() => { const el = document.getElementById('cp-story-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+      }
+  },
+
+  openHundredSettings: () => { cpState.showHundredSettingsModal = true; window.render(); },
+  closeHundredSettings: () => { cpState.showHundredSettingsModal = false; window.render(); },
+  saveHundredSettings: (charId) => {
+      store.coupleSpacesData[charId].hundredCSS = document.getElementById('set-hundred-css').value;
+      cpState.showHundredSettingsModal = false;
+      if(window.actions?.saveStore) window.actions.saveStore(); window.render();
+  },
+  updateHundredTextColor: (charId, type, color) => {
+      const spaceData = store.coupleSpacesData[charId];
+      if (type === 'dialogue') spaceData.hundredDialogueColor = color;
+      if (type === 'thought') spaceData.hundredThoughtColor = color;
+      window.render();
+  },
+  handleHundredBgUpload: (charId, event) => {
+      const file = event.target.files[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => { store.coupleSpacesData[charId].hundredBg = e.target.result; window.render(); };
+      reader.readAsDataURL(file);
+  },
+  clearHundredBg: (charId) => { store.coupleSpacesData[charId].hundredBg = ''; window.render(); },
 
     notBuilt: (name) => { window.actions.showToast(name + ' 功能正在快马加鞭施工中！'); }
   };
@@ -581,10 +1038,10 @@ export function renderCoupleApp(store) {
             </div>
             
             <div class="grid grid-cols-2 gap-3.5 px-5 mb-5">
-               <div class="bg-gradient-to-br from-rose-50 to-pink-50/30 rounded-[24px] p-5 shadow-sm border border-pink-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.notBuilt('默契问答')"><i data-lucide="messages-square" class="w-6 h-6 text-rose-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">默契问答</span></div>
+               <div class="bg-gradient-to-br from-rose-50 to-pink-50/30 rounded-[24px] p-5 shadow-sm border border-pink-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.openTacit('${char.id}')"><i data-lucide="messages-square" class="w-6 h-6 text-rose-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">默契问答</span></div>
                <div class="bg-gradient-to-br from-orange-50 to-amber-50/30 rounded-[24px] p-5 shadow-sm border border-orange-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.notBuilt('恋爱挑战')"><i data-lucide="swords" class="w-6 h-6 text-orange-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">恋爱挑战</span></div>
                
-               <div class="bg-gradient-to-br from-blue-50 to-cyan-50/30 rounded-[24px] p-5 shadow-sm border border-blue-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.notBuilt('100件事')"><i data-lucide="check-square" class="w-6 h-6 text-blue-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">100件事</span></div>
+               <div class="bg-gradient-to-br from-blue-50 to-cyan-50/30 rounded-[24px] p-5 shadow-sm border border-blue-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.openHundredThings('${char.id}')"><i data-lucide="check-square" class="w-6 h-6 text-blue-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">100件小事</span></div>
                <div class="bg-gradient-to-br from-purple-50 to-fuchsia-50/30 rounded-[24px] p-5 shadow-sm border border-purple-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.notBuilt('真心话大冒险')"><i data-lucide="dices" class="w-6 h-6 text-purple-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">真心话大冒险</span></div>
             </div>
 
@@ -810,7 +1267,7 @@ export function renderCoupleApp(store) {
      `;
   }
 
-  // 📖 界面 4：日记本 (🌟 高级排版引擎)
+  // 📖 界面 4：日记本 
   if (cpState.view === 'diary') {
      const char = store.contacts.find(c => c.id === cpState.activeCharId);
      const diary = store.diaries.find(d => d.charId === cpState.activeCharId && d.date === cpState.diaryDate);
@@ -853,6 +1310,7 @@ export function renderCoupleApp(store) {
 
          <div class="pt-14 pb-4 px-6 sticky top-0 z-10 flex items-center justify-between backdrop-blur-md bg-transparent">
             <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.goBackToDashboard()"><i data-lucide="chevron-left" class="w-8 h-8 ${isDark?'text-white':'text-gray-800'}"></i></div>
+            <span class="absolute left-1/2 -translate-x-1/2 font-extrabold text-gray-800 text-lg">日记本</span>
             <div class="flex items-center space-x-4">
                 <i data-lucide="edit-3" class="w-5 h-5 cursor-pointer active:scale-90 ${isDark?'text-gray-400':'text-gray-500'}" onclick="window.cpActions.toggleDiaryEdit()"></i>
                 <i data-lucide="settings" class="w-5 h-5 cursor-pointer active:scale-90 ${isDark?'text-gray-400':'text-gray-500'}" onclick="window.cpActions.toggleDiarySettings()"></i>
@@ -880,9 +1338,9 @@ export function renderCoupleApp(store) {
                
                ${cpState.isGeneratingDiary ? `
                    <div class="flex flex-col items-center justify-center py-24 animate-in fade-in">
-                       <i data-lucide="loader-2" class="w-10 h-10 text-pink-400 animate-spin mb-4"></i>
-                       <span class="text-[15px] font-bold text-pink-400 tracking-widest">正在用心记录点滴...</span>
-                       <span class="text-[11px] text-pink-300 mt-2 font-medium">请耐心等待 TA 写下这篇日记</span>
+                       <i data-lucide="loader-2" class="w-10 h-10 text-gray-800 animate-spin mb-4"></i>
+                       <span class="text-[15px] font-bold text-gray-600 tracking-widest">正在用心记录点滴...</span>
+                       <span class="text-[11px] text-gray-400 mt-2 font-medium">请耐心等待 TA 写下这篇日记</span>
                    </div>
                ` : diary && diary.content ? `
                    <div class="${t.font} ${t.text} text-[15px] flex-1" style="letter-spacing: ${cfg.letterSpacing}; line-height: ${cfg.lineHeight}; pb-8">
@@ -949,11 +1407,13 @@ export function renderCoupleApp(store) {
                          <span class="text-[14px] font-bold text-gray-700">定时写日记</span>
                          <input type="checkbox" id="diary-enable-switch" class="ios-switch" ${cfg.enabled ? 'checked' : ''}>
                      </div>
+
+                     <div>
+                         <span class="text-[11px] font-bold text-gray-500 mb-1 block uppercase tracking-widest">每日撰写时间</span>
+                         <input id="diary-time-input" type="time" value="${cfg.time}" class="w-full bg-white border border-gray-200 rounded-[12px] px-3 py-2.5 outline-none text-[16px] text-gray-800 shadow-sm">
+                     </div>
+                     
                      <div class="grid grid-cols-2 gap-4">
-                         <div>
-                             <span class="text-[11px] font-bold text-gray-500 mb-1 block uppercase tracking-widest">每日撰写时间</span>
-                             <input id="diary-time-input" type="time" value="${cfg.time}" class="w-full bg-white border border-gray-200 rounded-[12px] px-3 py-2.5 outline-none text-[16px] text-gray-800 shadow-sm">
-                         </div>
                          <div>
                              <span class="text-[11px] font-bold text-gray-500 mb-1 block uppercase tracking-widest">整体风格</span>
                              <select id="diary-theme-select" class="w-full bg-white border border-gray-200 rounded-[12px] px-3 py-2.5 outline-none text-[16px] text-gray-800 shadow-sm">
@@ -963,23 +1423,23 @@ export function renderCoupleApp(store) {
                                  <option value="dark" ${cfg.theme==='dark'?'selected':''}>深夜暗黑</option>
                              </select>
                          </div>
+                         <div>
+                             <span class="text-[11px] font-bold text-gray-500 mb-1 block uppercase tracking-widest">纸张纹理</span>
+                             <select id="diary-paper-select" class="w-full bg-white border border-gray-200 rounded-[12px] px-3 py-2.5 outline-none text-[16px] text-gray-800 shadow-sm">
+                                 <option value="blank" ${cfg.paper==='blank'?'selected':''}>空白无痕</option>
+                                 <option value="lined" ${cfg.paper==='lined'?'selected':''}>横线信笺</option>
+                                 <option value="grid" ${cfg.paper==='grid'?'selected':''}>网格笔记</option>
+                                 <option value="dotted" ${cfg.paper==='dotted'?'selected':''}>点阵手帐</option>
+                             </select>
+                         </div>
                      </div>
                      
                      <div class="h-px w-full bg-gray-200/50"></div>
 
-                     <div>
-                         <span class="text-[11px] font-bold text-gray-500 mb-1 block uppercase tracking-widest">纸张纹理</span>
-                         <select id="diary-paper-select" class="w-full bg-white border border-gray-200 rounded-[12px] px-3 py-2.5 outline-none text-[16px] text-gray-800 shadow-sm">
-                             <option value="blank" ${cfg.paper==='blank'?'selected':''}>空白无痕</option>
-                             <option value="lined" ${cfg.paper==='lined'?'selected':''}>横线信笺</option>
-                             <option value="grid" ${cfg.paper==='grid'?'selected':''}>网格笔记</option>
-                             <option value="dotted" ${cfg.paper==='dotted'?'selected':''}>点阵手帐</option>
-                         </select>
-                     </div>
                      <div class="grid grid-cols-3 gap-3">
                          <div>
                              <span class="text-[10px] font-bold text-gray-500 mb-1 block">字距</span>
-                             <select id="diary-ls-select" class="w-full bg-white border border-gray-200 rounded-lg py-2 pl-2 pr-0 outline-none text-[16px] text-gray-800 shadow-sm">
+                             <select id="diary-ls-select" class="w-full bg-white border border-gray-200 rounded-[10px] py-2 pl-2 pr-0 outline-none text-[14px] text-gray-800 shadow-sm">
                                  <option value="normal" ${cfg.letterSpacing==='normal'?'selected':''}>默认</option>
                                  <option value="1px" ${cfg.letterSpacing==='1px'?'selected':''}>宽松</option>
                                  <option value="2px" ${cfg.letterSpacing==='2px'?'selected':''}>极宽</option>
@@ -987,7 +1447,7 @@ export function renderCoupleApp(store) {
                          </div>
                          <div>
                              <span class="text-[10px] font-bold text-gray-500 mb-1 block">行距</span>
-                             <select id="diary-lh-select" class="w-full bg-white border border-gray-200 rounded-lg py-2 pl-2 pr-0 outline-none text-[16px] text-gray-800 shadow-sm">
+                             <select id="diary-lh-select" class="w-full bg-white border border-gray-200 rounded-[10px] py-2 pl-2 pr-0 outline-none text-[14px] text-gray-800 shadow-sm">
                                  <option value="1.5" ${cfg.lineHeight==='1.5'?'selected':''}>紧凑</option>
                                  <option value="1.8" ${cfg.lineHeight==='1.8'?'selected':''}>舒适</option>
                                  <option value="2.2" ${cfg.lineHeight==='2.2'?'selected':''}>散文</option>
@@ -995,8 +1455,8 @@ export function renderCoupleApp(store) {
                          </div>
                          <div>
                              <span class="text-[10px] font-bold text-gray-500 mb-1 block">缩进</span>
-                             <select id="diary-ti-select" class="w-full bg-white border border-gray-200 rounded-lg py-2 pl-2 pr-0 outline-none text-[16px] text-gray-800 shadow-sm">
-                                 <option value="0" ${cfg.textIndent==='0'?'selected':''}>无缩进</option>
+                             <select id="diary-ti-select" class="w-full bg-white border border-gray-200 rounded-[10px] py-2 pl-2 pr-0 outline-none text-[14px] text-gray-800 shadow-sm">
+                                 <option value="0" ${cfg.textIndent==='0'?'selected':''}>无</option>
                                  <option value="2em" ${cfg.textIndent==='2em'?'selected':''}>空两格</option>
                              </select>
                          </div>
@@ -1006,14 +1466,14 @@ export function renderCoupleApp(store) {
 
                      <div class="grid grid-cols-2 gap-4">
                          <div class="flex flex-col">
-                             <span class="text-[11px] font-bold text-gray-500 mb-1 block">阴暗面字体色 (~~划线)</span>
+                             <span class="text-[11px] font-bold text-gray-500 mb-1 block">阴暗面色 (~~划线)</span>
                              <div class="flex items-center space-x-2">
                                  <input type="color" id="diary-hidden-color" value="${cfg.hiddenColor}" class="w-8 h-8 rounded border-none cursor-pointer p-0 bg-transparent">
                                  <span class="text-[11px] font-mono text-gray-400">隐藏的心事</span>
                              </div>
                          </div>
                          <div class="flex flex-col">
-                             <span class="text-[11px] font-bold text-gray-500 mb-1 block">高光字体色 (**加粗)</span>
+                             <span class="text-[11px] font-bold text-gray-500 mb-1 block">高光色 (**加粗)</span>
                              <div class="flex items-center space-x-2">
                                  <input type="color" id="diary-highlight-color" value="${cfg.highlightColor}" class="w-8 h-8 rounded border-none cursor-pointer p-0 bg-transparent">
                                  <span class="text-[11px] font-mono text-gray-400">最深的感触</span>
@@ -1021,7 +1481,7 @@ export function renderCoupleApp(store) {
                          </div>
                      </div>
 
-                     <button onclick="window.cpActions.saveDiarySettings()" class="w-full py-4 mt-2 bg-gray-900 text-white font-extrabold rounded-[16px] active:scale-95 transition-transform shadow-md tracking-widest text-[15px]">保存排版设置</button>
+                     <button onclick="window.cpActions.saveDiarySettings()" class="w-full py-3.5 mt-2 bg-gray-900 text-white font-extrabold rounded-[16px] active:scale-95 transition-transform shadow-md tracking-widest text-[15px]">保存排版设置</button>
                  </div>
              </div>
          </div>
@@ -1061,6 +1521,7 @@ export function renderCoupleApp(store) {
      `;
   }
 
+  // 🌟 界面 5：提问箱 
   if (cpState.view === 'questions') {
         const char = store.contacts.find(c => c.id === cpState.activeCharId);
         const chat = store.chats.find(c => c.charId === char.id);
@@ -1070,45 +1531,77 @@ export function renderCoupleApp(store) {
         const spaceData = store.coupleSpacesData[char.id] || {};
         spaceData.questions = spaceData.questions || [];
 
-        // 🌟 渲染粉蓝双色卡片列表
+        // 🌟 极简粉蓝卡片渲染流 (横线分割 + TA的反应)
         let qListHtml = spaceData.questions.length === 0 ? `
             <div class="flex flex-col items-center justify-center h-40 opacity-50 mt-10">
-                <i data-lucide="inbox" class="w-12 h-12 mb-3 text-gray-400"></i>
-                <span class="text-[14px] font-bold text-gray-400">还没有任何提问哦</span>
+                <i data-lucide="inbox" class="w-12 h-12 mb-3 text-gray-400"></i><span class="text-[14px] font-bold text-gray-400">还没互相提问过哦</span>
             </div>
         ` : spaceData.questions.map((q) => {
             if (q.asker === 'me') {
                 return `
-                <div class="w-full bg-rose-50 border border-rose-100/60 rounded-[24px] p-5 mb-4 shadow-sm flex flex-col">
+                <div class="w-full bg-rose-50 border border-rose-100/60 rounded-[24px] p-5 mb-4 shadow-sm flex flex-col relative group">
+                    <div class="absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <i data-lucide="trash-2" class="w-4 h-4 text-rose-300 hover:text-rose-500 cursor-pointer active:scale-90" onclick="window.cpActions.deleteQuestion('${char.id}', '${q.id}')"></i>
+                    </div>
                     <div class="flex items-center space-x-2.5 mb-3">
                         <img src="${myAvatar}" class="w-7 h-7 rounded-full object-cover border-2 border-white shadow-sm">
                         <span class="text-[13px] font-black text-rose-400">我的提问</span>
-                        <span class="text-[11px] font-bold text-gray-300 ml-auto">${new Date(q.timestamp).toLocaleDateString()}</span>
+                        <span class="text-[11px] font-bold text-gray-400 ml-auto mr-5">${new Date(q.timestamp).toLocaleDateString()}</span>
                     </div>
-                    <p class="text-[16px] text-gray-800 font-bold mb-4 leading-relaxed">${q.text}</p>
-                    <div class="bg-white/80 rounded-[16px] p-4 text-[14px] text-gray-700 shadow-sm border border-rose-50/50">
-                        ${q.answer ? `<div class="flex items-start space-x-2"><img src="${char.avatar}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-gray-100"><span class="leading-relaxed font-medium">${window.formatTextWithEmoticons ? window.formatTextWithEmoticons(q.answer) : q.answer}</span></div>` : `<div class="flex items-center space-x-1.5 text-rose-400"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span class="text-[12px] font-bold">呼唤 ${char.name} 中...</span></div>`}
+                    <p class="text-[16px] text-gray-800 font-bold leading-relaxed">${q.text}</p>
+                    
+                    <div class="mt-4 pt-4 border-t border-rose-100/60 relative">
+                        ${q.answer ? `
+                            <div class="flex items-start space-x-2.5">
+                                <img src="${char.avatar}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-white shadow-sm">
+                                <span class="text-[14px] text-gray-700 leading-relaxed font-medium">${window.formatTextWithEmoticons ? window.formatTextWithEmoticons(q.answer) : q.answer}</span>
+                            </div>
+                            <div class="mt-3 flex justify-end space-x-2.5 opacity-40 hover:opacity-100 transition-opacity">
+                                <i data-lucide="refresh-cw" class="w-4 h-4 text-gray-400 hover:text-rose-400 cursor-pointer active:scale-90" title="让他重答" onclick="window.cpActions.rerollQAnswer('${char.id}', '${q.id}')"></i>
+                                <i data-lucide="x-circle" class="w-4 h-4 text-gray-400 hover:text-red-400 cursor-pointer active:scale-90" title="撤回回答" onclick="window.cpActions.deleteQAnswer('${char.id}', '${q.id}')"></i>
+                            </div>
+                        ` : `<div class="flex items-center space-x-1.5 text-rose-400"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span class="text-[12px] font-bold">呼唤 ${char.name} 中...</span></div>`}
                     </div>
                 </div>`;
             } else {
                 return `
-                <div class="w-full bg-blue-50 border border-blue-100/60 rounded-[24px] p-5 mb-4 shadow-sm flex flex-col">
+                <div class="w-full bg-blue-50 border border-blue-100/60 rounded-[24px] p-5 mb-4 shadow-sm flex flex-col relative group">
+                    <div class="absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <i data-lucide="trash-2" class="w-4 h-4 text-blue-300 hover:text-blue-500 cursor-pointer active:scale-90" onclick="window.cpActions.deleteQuestion('${char.id}', '${q.id}')"></i>
+                    </div>
                     <div class="flex items-center space-x-2.5 mb-3">
                         <img src="${char.avatar}" class="w-7 h-7 rounded-full object-cover border-2 border-white shadow-sm">
                         <span class="text-[13px] font-black text-blue-500">${char.name}的提问</span>
-                        <span class="text-[11px] font-bold text-gray-300 ml-auto">${new Date(q.timestamp).toLocaleDateString()}</span>
+                        <span class="text-[11px] font-bold text-gray-400 ml-auto mr-5">${new Date(q.timestamp).toLocaleDateString()}</span>
                     </div>
-                    <p class="text-[16px] text-gray-800 font-bold mb-4 leading-relaxed">${q.text}</p>
+                    <p class="text-[16px] text-gray-800 font-bold leading-relaxed">${q.text}</p>
+                    
                     ${q.answer ? `
-                        <div class="bg-white/80 rounded-[16px] p-4 text-[14px] text-gray-700 shadow-sm border border-blue-50/50">
-                            <div class="flex items-start space-x-2"><img src="${myAvatar}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-gray-100"><span class="leading-relaxed font-medium">${q.answer}</span></div>
+                        <div class="mt-4 pt-4 border-t border-blue-100/60 relative">
+                            <div class="flex items-start space-x-2.5">
+                                <img src="${myAvatar}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-white shadow-sm">
+                                <span class="text-[14px] text-gray-700 leading-relaxed font-medium">${q.answer}</span>
+                            </div>
+                            <div class="mt-2 flex justify-end space-x-2.5 opacity-40 hover:opacity-100 transition-opacity">
+                                <i data-lucide="x-circle" class="w-4 h-4 text-gray-400 hover:text-red-400 cursor-pointer active:scale-90" title="撤回回答" onclick="window.cpActions.deleteQAnswer('${char.id}', '${q.id}')"></i>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-3 pt-3 border-t border-blue-100/60 relative">
+                            ${q.reaction ? `
+                                <div class="flex items-start space-x-2.5">
+                                    <img src="${char.avatar}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-white shadow-sm">
+                                    <span class="text-[14px] text-gray-700 leading-relaxed font-medium">${q.reaction}</span>
+                                </div>
+                                <div class="mt-2 flex justify-end space-x-2.5 opacity-40 hover:opacity-100 transition-opacity">
+                                    <i data-lucide="refresh-cw" class="w-4 h-4 text-gray-400 hover:text-blue-400 cursor-pointer active:scale-90" title="重摇反应" onclick="window.cpActions.rerollQReaction('${char.id}', '${q.id}')"></i>
+                                </div>
+                            ` : `<div class="flex items-center space-x-1.5 text-blue-400"><i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i><span class="text-[11px] font-bold">TA 正在看你的回答...</span></div>`}
                         </div>
                     ` : `
-                        <div class="flex items-center space-x-2 mt-1">
-                            <input type="text" id="ans-input-${q.id}" class="flex-1 bg-white border border-blue-100 rounded-full h-11 px-5 text-[14px] font-medium outline-none focus:border-blue-300 transition-colors shadow-inner" placeholder="写下你的回答...">
-                            <button onclick="window.cpActions.answerQuestion('${q.id}')" class="w-11 h-11 rounded-full bg-blue-500 text-white flex items-center justify-center hover:bg-blue-600 active:scale-95 transition-all shadow-md shrink-0">
-                                <i data-lucide="arrow-up" class="w-5 h-5"></i>
-                            </button>
+                        <div class="mt-4 pt-4 border-t border-blue-100/60 flex items-center space-x-2">
+                            <input type="text" id="ans-input-${q.id}" class="flex-1 bg-white border border-blue-100/80 rounded-full h-10 px-4 text-[14px] font-medium outline-none focus:border-blue-300 transition-colors shadow-inner text-gray-800 placeholder-gray-300" placeholder="写下你的回答...">
+                            <button onclick="window.cpActions.answerQuestion('${q.id}')" class="w-10 h-10 rounded-full bg-blue-500 text-white flex items-center justify-center hover:bg-blue-600 active:scale-95 transition-all shadow-md shrink-0"><i data-lucide="arrow-up" class="w-4 h-4"></i></button>
                         </div>
                     `}
                 </div>`;
@@ -1116,22 +1609,22 @@ export function renderCoupleApp(store) {
         }).join('');
 
         return `
-        <div class="w-full h-full flex flex-col bg-[#fcfcfc] relative animate-in fade-in slide-in-from-bottom-4 duration-300">
-            <div class="h-[68px] shrink-0 flex items-center justify-between px-5 bg-white/90 backdrop-blur-xl border-b border-gray-100 sticky top-0 z-20">
-                <button onclick="window.cpActions.openDashboard('${char.id}')" class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-50 active:bg-gray-100 transition-colors -ml-2">
-                    <i data-lucide="chevron-left" class="w-7 h-7 text-gray-800"></i>
-                </button>
-                <span class="text-[17px] font-black text-gray-900 tracking-wide">提问箱</span>
-                <button onclick="window.cpActions.openQuestionSettings()" class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-50 active:bg-gray-100 transition-colors -mr-2">
-                    <i data-lucide="settings" class="w-5 h-5 text-gray-600"></i>
-                </button>
+        <div class="w-full h-full flex flex-col bg-[#fcfcfc] relative animate-in fade-in slide-in-from-right-4 duration-300">
+            <div class="pt-14 pb-4 px-6 shrink-0 flex items-center justify-between bg-[#fcfcfc]/90 backdrop-blur-md sticky top-0 z-20">
+                <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.openDashboard('${char.id}')">
+                    <i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i>
+                </div>
+                <span class="text-lg font-extrabold text-gray-800 tracking-wide">提问箱</span>
+                <div class="cursor-pointer active:scale-90 p-1 -mr-1" onclick="window.cpActions.openQuestionSettings()">
+                    <i data-lucide="settings" class="w-6 h-6 text-gray-800"></i>
+                </div>
             </div>
 
-            <div class="p-5 bg-white border-b border-gray-50 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.05)] z-10 flex flex-col space-y-3">
-                <textarea id="new-q-input" class="w-full bg-gray-50 border border-transparent rounded-[20px] p-4 outline-none text-[15px] font-medium text-gray-800 resize-none h-24 focus:border-rose-200 focus:bg-rose-50/30 transition-all hide-scrollbar" placeholder="想问 ${char.name} 什么？写在这里..."></textarea>
-                <div class="flex justify-end">
-                    <button onclick="window.cpActions.askQuestion('${char.id}')" class="px-6 h-10 rounded-full bg-gray-900 text-white text-[14px] font-bold shadow-md active:scale-95 transition-all flex items-center">
-                        投递问题 <i data-lucide="send" class="w-3.5 h-3.5 ml-2"></i>
+            <div class="px-5 py-4 bg-white border-b border-gray-50 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.05)] z-10">
+                <div class="w-full bg-gray-50/80 border border-gray-100 rounded-[20px] flex items-center px-4 py-2 focus-within:bg-rose-50/50 focus-within:border-rose-200 transition-all shadow-inner">
+                    <textarea id="new-q-input" class="flex-1 bg-transparent border-none outline-none text-[15px] font-medium text-gray-800 resize-none h-10 mt-2 hide-scrollbar" placeholder="想问 ${char.name} 什么？"></textarea>
+                    <button onclick="window.cpActions.askQuestion('${char.id}')" class="w-9 h-9 flex items-center justify-center shrink-0 active:scale-90 transition-transform text-rose-400 hover:text-rose-500 ml-2">
+                        <i data-lucide="send" class="w-5 h-5"></i>
                     </button>
                 </div>
             </div>
@@ -1149,39 +1642,427 @@ export function renderCoupleApp(store) {
                             <i data-lucide="x" class="w-4 h-4"></i>
                         </button>
                     </div>
-                    
                     <div class="flex flex-col space-y-4 bg-gray-50/50 p-4 rounded-[24px] border border-gray-100">
                         <div class="flex items-center justify-between py-1">
                             <div class="flex flex-col">
                                 <span class="text-[15px] font-bold text-gray-800">允许角色提问</span>
-                                <span class="text-[11px] font-medium text-gray-400 mt-1">开启后，对方会向你发起提问</span>
                             </div>
-                            <label class="relative inline-flex items-center cursor-pointer">
-                              <input type="checkbox" id="q-enable-toggle" class="sr-only peer" ${spaceData.enableAiQuestions !== false ? 'checked' : ''}>
-                              <div class="w-12 h-7 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-6 after:w-6 after:transition-all peer-checked:bg-green-500 shadow-inner"></div>
-                            </label>
+                            <input type="checkbox" id="q-enable-toggle" class="ios-switch" ${spaceData.enableAiQuestions === true ? 'checked' : ''}>
                         </div>
-                        
                         <div class="w-full h-[1px] bg-gray-200/60"></div>
-
                         <div class="flex items-center justify-between py-1">
                             <span class="text-[15px] font-bold text-gray-800">每日提问频率</span>
                             <select id="q-freq-select" class="bg-transparent border-none text-[15px] font-bold text-blue-500 outline-none cursor-pointer text-right dir-rtl">
                                 <option value="1" ${spaceData.aiQuestionFreq == 1 ? 'selected' : ''}>1条/天</option>
-                                <option value="2" ${(spaceData.aiQuestionFreq || 2) == 2 ? 'selected' : ''}>2条/天</option>
+                                <option value="2" ${(spaceData.aiQuestionFreq || 1) == 2 ? 'selected' : ''}>2条/天</option>
                                 <option value="3" ${spaceData.aiQuestionFreq == 3 ? 'selected' : ''}>3条/天</option>
-                                <option value="5" ${spaceData.aiQuestionFreq == 5 ? 'selected' : ''}>5条/天</option>
                             </select>
                         </div>
                     </div>
-
-                    <button onclick="window.cpActions.saveQuestionSettings('${char.id}')" class="w-full py-4 mt-8 bg-gray-900 text-white rounded-[20px] font-black text-[15px] shadow-lg active:scale-95 transition-all">
-                        完成
-                    </button>
+                    <button onclick="window.cpActions.saveQuestionSettings('${char.id}')" class="w-full py-4 mt-8 bg-gray-900 text-white rounded-[20px] font-black text-[15px] shadow-lg active:scale-95 transition-all">完成</button>
                 </div>
             </div>
             ` : ''}
         </div>
         `;
-    }
+  }
+
+  // 🌟 界面 6：默契大考验
+  if (cpState.view === 'tacit') {
+        const char = store.contacts.find(c => c.id === cpState.activeCharId);
+        const chat = store.chats.find(c => c.charId === char.id);
+        const myAvatar = chat?.myAvatar || (store.personas.find(p => String(p.id) === String(chat?.boundPersonaId)) || store.personas[0]).avatar;
+
+        store.coupleSpacesData = store.coupleSpacesData || {};
+        const spaceData = store.coupleSpacesData[char.id] || {};
+        const tStatus = spaceData.tacitStatus || 'loading';
+        const tData = spaceData.currentTacit || {};
+        const tChat = spaceData.tacitChat || [];
+
+        // 🌟 上半屏：答题区 (图标按钮 + 红心对齐)
+        let topAreaHtml = '';
+        if (tStatus === 'loading') {
+            topAreaHtml = `<div class="flex-1 flex flex-col items-center justify-center py-10 opacity-70"><i data-lucide="loader-2" class="w-8 h-8 animate-spin text-purple-400 mb-3"></i><span class="text-[14px] font-bold text-purple-500">系统正在出题...</span></div>`;
+        } else if (tStatus === 'error') {
+            topAreaHtml = `<div class="flex-1 flex flex-col items-center justify-center py-10 opacity-70"><i data-lucide="alert-circle" class="w-8 h-8 text-red-400 mb-3"></i><span class="text-[14px] font-bold text-red-400 cursor-pointer" onclick="window.cpActions.fetchTacitQ('${char.id}')">出题失败，点击重试</span></div>`;
+        } else {
+            topAreaHtml = `
+            <div class="flex flex-col items-center pt-2 pb-4 w-full px-6">
+                <div class="bg-purple-50 text-purple-600 text-[10px] font-black px-3 py-1 rounded-full tracking-widest uppercase mb-4 shadow-sm border border-purple-100">题目</div>
+                <div class="text-[17px] font-black text-gray-800 text-center leading-relaxed mb-6">${tData.question}</div>
+                
+                ${tStatus === 'answering' ? `
+                    <div class="w-full relative">
+                        <input id="tacit-ans-input" type="text" class="w-full bg-gray-50 border border-gray-100 rounded-[16px] pl-5 pr-14 py-4 outline-none text-[15px] font-medium text-gray-800 focus:bg-purple-50/30 focus:border-purple-200 transition-all text-center shadow-inner" placeholder="写下你的答案...">
+                        <button onclick="window.cpActions.submitTacitAns('${char.id}')" class="absolute right-2 top-2 bottom-2 w-10 bg-purple-200 text-white rounded-full flex items-center justify-center hover:bg-purple-400 active:scale-95 transition-transform shadow-md"><i data-lucide="check" class="w-5 h-5"></i></button>
+                    </div>
+                ` : `
+                    <div class="w-full flex items-center justify-between space-x-4">
+                        <div class="flex-1 flex flex-col items-center bg-rose-50/50 border border-rose-100 rounded-[16px] p-4 relative shadow-sm">
+                            <img src="${myAvatar}" class="w-8 h-8 rounded-full border-2 border-white absolute -top-4 shadow-sm">
+                            <span class="text-[14px] font-bold text-gray-800 mt-2 text-center">${tData.userAns}</span>
+                        </div>
+                        <div class="flex flex-col items-center justify-center shrink-0">
+                            <i data-lucide="heart" class="w-6 h-6 text-pink-400 fill-pink-100 animate-pulse"></i>
+                        </div>
+                        <div class="flex-1 flex flex-col items-center bg-blue-50/50 border border-blue-100 rounded-[16px] p-4 relative shadow-sm">
+                            <img src="${char.avatar}" class="w-8 h-8 rounded-full border-2 border-white absolute -top-4 shadow-sm">
+                            <span class="text-[14px] font-bold text-gray-800 mt-2 text-center">${tData.aiAns}</span>
+                        </div>
+                    </div>
+                `}
+            </div>`;
+        }
+
+        // 🌟 寻找讨论区最后一句 AI 的话，用来挂载重 Roll 键
+        let lastAiIdx = -1;
+        for (let i = tChat.length - 1; i >= 0; i--) {
+            if (!tChat[i].isMe && tChat[i].msgType === 'text') { lastAiIdx = i; break; }
+        }
+
+        // 🌟 下半屏：讨论区渲染 (带 Loading 与 重Roll)
+        let chatHtml = tChat.map((m, idx) => {
+            if (m.msgType === 'system') {
+                return `<div class="flex justify-center my-4"><div class="bg-black/5 text-gray-400 text-[11px] font-bold px-4 py-2 rounded-full text-center whitespace-pre-wrap leading-relaxed max-w-[80%]">${m.text}</div></div>`;
+            } else if (m.msgType === 'loading') {
+                return `<div class="flex justify-start my-3 pr-12"><div class="bg-blue-100/60 text-blue-500 px-4 py-2.5 rounded-[18px] rounded-tl-sm shadow-sm flex items-center space-x-1.5"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span class="text-[12px] font-bold">正在输入...</span></div></div>`;
+            } else if (m.isMe) {
+                return `<div class="flex justify-end my-3 pl-12"><div class="bg-rose-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tr-sm shadow-sm break-words">${m.text}</div></div>`;
+            } else {
+                let rerollBtn = (idx === lastAiIdx) ? `<div class="flex flex-col justify-end ml-1.5 opacity-40 hover:opacity-100 transition-opacity"><i data-lucide="refresh-cw" class="w-4 h-4 text-gray-400 hover:text-blue-500 cursor-pointer active:scale-90" onclick="window.cpActions.rerollTacitMsg('${char.id}')"></i></div>` : '';
+                return `<div class="flex justify-start my-3 pr-12 items-end"><div class="bg-blue-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tl-sm shadow-sm break-words">${m.text}</div>${rerollBtn}</div>`;
+            }
+        }).join('');
+
+        return `
+        <div class="w-full h-full flex flex-col bg-transparent relative animate-in fade-in slide-in-from-right-4 duration-300">
+            <div class="w-full bg-[#fcfcfc] shrink-0 flex flex-col shadow-[0_10px_30px_-15px_rgba(0,0,0,0.1)] z-20 rounded-b-[32px] relative">
+                <div class="pt-14 pb-2 px-6 flex items-center justify-between">
+                    <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.openDashboard('${char.id}')"><i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i></div>
+                    <span class="text-lg font-extrabold text-gray-800 tracking-wide">默契问答</span>
+                    <div class="cursor-pointer active:scale-90 p-1 -mr-1" title="换一题 (将清空讨论)" onclick="window.cpActions.fetchTacitQ('${char.id}')"><i data-lucide="refresh-cw" class="w-6 h-6 text-gray-800"></i></div>
+                </div>
+                <div class="pb-6 pt-2 transition-all duration-300">
+                    ${topAreaHtml}
+                </div>
+            </div>
+
+            <div class="flex-1 flex flex-col overflow-hidden relative z-10">
+                ${tStatus !== 'revealed' ? `
+                    <div class="absolute inset-0 bg-white/40 backdrop-blur-[2px] z-20 flex flex-col items-center justify-center opacity-80">
+                        <i data-lucide="lock" class="w-10 h-10 text-gray-300 mb-3"></i>
+                        <span class="text-[13px] font-black text-gray-400 tracking-widest uppercase">答题期间禁止讨论</span>
+                    </div>
+                ` : ''}
+                
+                <div id="cp-tacit-chat-scroll" class="flex-1 overflow-y-auto p-5 hide-scrollbar">
+                    ${chatHtml}
+                </div>
+                
+                <div class="p-4 bg-white/80 backdrop-blur-md border-t border-gray-100/50 shrink-0">
+                    <div class="flex items-center space-x-1 bg-gray-100/80 rounded-full pl-4 pr-1.5 py-1.5 border border-white/50 shadow-inner">
+                        <input id="tacit-chat-input" type="text" class="flex-1 bg-transparent border-none outline-none text-[14px] font-medium text-gray-800 h-9" placeholder="吐槽点什么..." ${tStatus !== 'revealed' ? 'disabled' : ''}>
+                        <button onclick="window.cpActions.requestTacitReply('${char.id}')" class="w-9 h-9 rounded-full flex items-center justify-center text-gray-800 hover:bg-gray-200/60 active:scale-90 transition-all ${tStatus !== 'revealed' ? 'opacity-50' : ''}" ${tStatus !== 'revealed' ? 'disabled' : ''} title="获取 TA 的回复">
+                            <i data-lucide="sparkles" class="w-5 h-5"></i>
+                        </button>
+                        <button onclick="window.cpActions.sendTacitMsg('${char.id}')" class="w-9 h-9 rounded-full flex items-center justify-center text-gray-800 hover:bg-gray-200/60 active:scale-90 transition-all ${tStatus !== 'revealed' ? 'opacity-50' : ''}" ${tStatus !== 'revealed' ? 'disabled' : ''} title="仅发送">
+                            <i data-lucide="send" class="w-4 h-4 -ml-0.5"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        `;
+  }
+
+  //界面 7：100件小事 & 100个故事
+  if (cpState.view === 'hundredThings') {
+        const char = store.contacts.find(c => c.id === cpState.activeCharId);
+        const spaceData = store.coupleSpacesData[char.id] || {};
+        const things = spaceData.hundredThings || [];
+        
+        // 🌟 终极排序引擎：进行中(1) -> 去完成(0) -> 已完成(2 沉底)
+        const sortedThings = [...things].sort((a, b) => {
+            const getWeight = s => s === 1 ? 0 : s === 0 ? 1 : 2;
+            return getWeight(a.status) - getWeight(b.status);
+        });
+
+        return `
+        <div class="w-full h-full flex flex-col bg-[#fcfcfc] relative animate-in fade-in slide-in-from-right-4 duration-300">
+            <div class="pt-14 pb-4 px-6 shrink-0 flex items-center justify-between bg-[#fcfcfc]/90 backdrop-blur-md sticky top-0 z-20 shadow-sm border-b border-gray-100">
+                <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.openDashboard('${char.id}')"><i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i></div>
+                <span class="text-lg font-extrabold text-gray-800 tracking-wide">100件小事</span>
+                <div class="w-8"></div>
+            </div>
+
+            <div id="cp-hundred-scroll" class="flex-1 overflow-y-auto p-5 pb-24 hide-scrollbar scroll-smooth relative">
+                
+                <div class="flex items-center bg-white rounded-[20px] shadow-[0_4px_15px_rgba(0,0,0,0.03)] border border-rose-50 mb-6 focus-within:border-rose-200 transition-all overflow-hidden pl-5 pr-1.5 py-1.5">
+                    <input id="new-thing-input" type="text" class="flex-1 bg-transparent border-none outline-none text-[15px] font-bold text-gray-800 placeholder-gray-300 h-10" placeholder="写下一件想和 TA 一起做的事...">
+                    <button onclick="window.cpActions.addHundredThing('${char.id}')" class="w-10 h-10 rounded-full flex items-center justify-center text-rose-400 hover:bg-rose-50 active:scale-90 transition-all shrink-0"><i data-lucide="plus" class="w-6 h-6"></i></button>
+                </div>
+
+                <div class="space-y-3">
+                    ${sortedThings.map((t, idx) => {
+                        let statusHtml = '';
+                        if (t.status === 1) statusHtml = '<span class="text-[12px] font-bold text-amber-500 mr-1.5 tracking-widest">进行中</span><i data-lucide="loader-2" class="w-4 h-4 text-amber-500 animate-spin"></i>';
+                        else if (t.status === 2) statusHtml = '<span class="text-[12px] font-bold text-rose-400 mr-1.5 tracking-widest">已完成</span><i data-lucide="heart" class="w-4 h-4 fill-rose-300 text-rose-300"></i>';
+                        else statusHtml = '<span class="text-[12px] font-bold text-gray-400 mr-1 tracking-widest">去完成</span><i data-lucide="chevron-right" class="w-4 h-4 text-gray-400"></i>';
+                        return `
+                        <div class="group flex items-center justify-between bg-white p-4 rounded-[20px] shadow-[0_2px_10px_rgba(0,0,0,0.02)] border border-gray-50 cursor-pointer active:scale-[0.98] transition-all hover:shadow-md" onclick="window.cpActions.openHundredStory('${char.id}', '${t.id}')">
+                            <div class="flex items-center space-x-4 overflow-hidden">
+                                <span class="text-[16px] font-black text-gray-300 italic w-6 shrink-0">${idx + 1}</span>
+                                <span class="text-[15px] font-bold ${t.status === 2 ? 'text-gray-400 line-through' : 'text-gray-800'} truncate">${t.title}</span>
+                            </div>
+                            <div class="shrink-0 ml-3 flex items-center justify-center h-8 transition-all pointer-events-none">${statusHtml}</div>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+            
+            <div class="absolute bottom-28 right-4 flex flex-col space-y-3 z-30">
+                <button onclick="document.getElementById('cp-hundred-scroll').scrollTo({top: 0, behavior: 'smooth'})" class="w-10 h-10 bg-white/80 backdrop-blur border border-gray-100 shadow-lg rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 active:scale-90 transition-all"><i data-lucide="arrow-up" class="w-5 h-5"></i></button>
+                <button onclick="const el=document.getElementById('cp-hundred-scroll'); el.scrollTo({top: el.scrollHeight, behavior: 'smooth'})" class="w-10 h-10 bg-white/80 backdrop-blur border border-gray-100 shadow-lg rounded-full flex items-center justify-center text-gray-400 hover:text-gray-600 active:scale-90 transition-all"><i data-lucide="arrow-down" class="w-5 h-5"></i></button>
+            </div>
+        `;
+    } else if (cpState.view === 'hundredStory') {
+        const char = store.contacts.find(c => c.id === cpState.activeCharId);
+        const chat = store.chats.find(c => c.charId === char.id);
+        const boundPersona = store.personas.find(p => String(p.id) === String(chat?.boundPersonaId)) || store.personas[0];
+        const spaceData = store.coupleSpacesData[char.id] || {};
+        const target = spaceData.hundredThings.find(t => t.id === cpState.activeThingId);
+        
+        const bgUrl = spaceData.hundredBg || '';
+        const dialogueColor = spaceData.hundredDialogueColor || '#d4b856';
+        const thoughtColor = spaceData.hundredThoughtColor || '#9ca3af';
+        // 🌟 不管有没有背景图，旁白统统强制使用深灰色！
+        const descColor = '#374151'; 
+
+        let storyHtml = target.messages.map(msg => {
+            let nameStr = msg.isMe ? boundPersona.name : char.name;
+            let lines = msg.text.replace(/(“[^”]*”|"[^"]*")/g, '\\n$1\\n').replace(/(「[^」]*」)/g, '\\n$1\\n').replace(/[（(]([^）)]*)[）)]/g, '\\n（$1）\\n');
+            let formattedLines = lines.split('\\n').filter(l=>l.trim()).map(l => {
+                let line = l.trim();
+                if ((line.startsWith('“') && line.endsWith('”')) || (line.startsWith('"') && line.endsWith('"'))) return `<p class="cp-story-dialogue my-1.5 leading-relaxed">${line}</p>`; 
+                else if (line.startsWith('（') && line.endsWith('）')) return `<p class="cp-story-thought my-1.5 leading-relaxed">${line.slice(1, -1)}</p>`; 
+                else return `<p class="cp-story-desc my-1.5 leading-relaxed">${line}</p>`; 
+            }).join('');
+
+            return `
+            <div class="flex justify-center my-4 w-full">
+                <div class="cp-story-user-msg w-full bg-white/60 backdrop-blur-md border border-gray-100/50 rounded-[14px] p-5 relative flex flex-col shadow-[0_2px_15px_rgba(0,0,0,0.02)]">
+                    <div class="mb-3 text-[12px] font-black tracking-widest text-gray-400">${nameStr}</div>
+                    <div class="text-[15px] text-gray-800 leading-relaxed font-serif text-justify pb-6">${formattedLines}</div>
+                    <div class="absolute bottom-3 right-4 flex items-center space-x-3.5 opacity-20 hover:opacity-100 transition-opacity">
+                        ${!msg.isMe ? `<i data-lucide="refresh-cw" class="w-4 h-4 cursor-pointer active:scale-90 text-gray-500" onclick="window.cpActions.rerollHundredMsg('${char.id}', ${msg.id})" title="重摇"></i>` : ''}
+                        <i data-lucide="edit-3" class="w-4 h-4 cursor-pointer active:scale-90 text-gray-500" onclick="window.cpActions.openEditHundredMsg('${char.id}', ${msg.id})" title="编辑"></i>
+                        <i data-lucide="trash-2" class="w-4 h-4 cursor-pointer active:scale-90 text-red-400" onclick="window.cpActions.deleteHundredMsg('${char.id}', ${msg.id})" title="删除"></i>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        return `
+        <div class="cp-story-container w-full h-full flex flex-col relative font-serif z-[60] animate-in slide-in-from-bottom-4 duration-300" style="background: ${bgUrl ? `url('${bgUrl}') center/cover no-repeat` : '#fcfcfc'} !important;">
+            <style>.cp-story-dialogue { color: ${dialogueColor}; } .cp-story-thought { color: ${thoughtColor}; } .cp-story-desc { color: ${descColor}; } ${spaceData.hundredCSS || ''}</style>
+            
+            ${bgUrl ? `<div class="absolute inset-0 bg-white/50 backdrop-blur-[3px] z-0 pointer-events-none"></div>` : ''}
+            
+            <div class="cp-story-topbar bg-white/80 backdrop-blur-md pt-14 pb-4 px-4 flex items-center justify-between z-10 sticky top-0 border-b border-gray-100 shadow-sm">
+                 <div class="flex items-center cursor-pointer text-gray-800 active:opacity-50" onclick="window.cpActions.attemptExitHundredStory('${char.id}')"><i data-lucide="chevron-down" class="w-8 h-8"></i></div>
+                 <span class="cp-story-title flex-1 text-center font-bold text-[16px] tracking-widest text-gray-800 truncate px-4">${target.isTyping ? '正在构思...' : target.title}</span>
+                 <div class="flex justify-end cursor-pointer active:scale-90 text-gray-800" onclick="window.cpActions.openHundredSettings()"><i data-lucide="settings" class="w-6 h-6"></i></div>
+            </div>
+            
+            <div id="cp-story-scroll" class="cp-story-scroll flex-1 p-5 overflow-y-auto hide-scrollbar flex flex-col pb-6 z-10">
+                <div class="text-center text-xs text-gray-400 italic mb-8 mt-4 tracking-widest pointer-events-none">—— 番外篇 · 开始 ——</div>
+                ${storyHtml}
+                ${target.status === 2 ? `<div class="text-center text-xs text-rose-400 italic my-8 tracking-widest font-bold">—— 该小事已封存为浪漫回忆 ——</div>` : ''}
+            </div>
+            
+            <div class="cp-story-bottombar bg-white/80 backdrop-blur-md px-4 py-3 pb-8 border-t border-gray-100 flex flex-col shadow-2xl z-20 relative">
+                <div class="relative w-full bg-white/80 border border-gray-200 focus-within:bg-white rounded-[16px] p-1 flex items-end transition-all shadow-inner">
+                    <textarea id="story-chat-input" placeholder="${target.status === 2 ? '记忆已封存...' : '描写你的动作或对话...'}" class="flex-1 min-h-[80px] max-h-[150px] bg-transparent text-gray-800 placeholder-gray-400 p-3 outline-none text-[15px] resize-none font-serif leading-relaxed hide-scrollbar" ${target.isTyping || target.status === 2 ? 'disabled' : ''}></textarea>
+                    <div class="flex flex-col items-center justify-end pb-2 pr-2 space-y-3 shrink-0">
+                        <button onclick="window.cpActions.continueHundredStory('${char.id}')" class="w-9 h-9 flex items-center justify-center text-gray-400 hover:text-gray-700 active:scale-90 transition-all ${(target.isTyping || target.status === 2) ? 'opacity-30' : ''}" ${(target.isTyping || target.status === 2) ? 'disabled' : ''} title="让AI接着往下写"><i data-lucide="feather" class="w-5 h-5"></i></button>
+                        <button onclick="window.cpActions.sendHundredStoryMsg('${char.id}')" class="w-9 h-9 flex items-center justify-center text-gray-800 active:scale-90 transition-all ${(target.isTyping || target.status === 2) ? 'opacity-30' : ''}" ${(target.isTyping || target.status === 2) ? 'disabled' : ''} title="发送"><i data-lucide="send" class="w-5 h-5 -ml-0.5"></i></button>
+                    </div>
+                </div>
+            </div>
+            
+            ${cpState.showHundredExitModal ? `
+            <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in" onclick="window.cpActions.confirmExitHundredStory('${char.id}', 'leave')">
+                <div class="bg-[#fcfcfc] w-full max-w-sm rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+                    <div class="p-8 flex flex-col items-center text-center">
+                        <div class="w-16 h-16 rounded-full bg-rose-50 text-rose-400 flex items-center justify-center mb-5 shadow-inner"><i data-lucide="heart" class="w-8 h-8 fill-rose-300"></i></div>
+                        <span class="text-[18px] font-black text-gray-800 mb-2 tracking-wide">这件小事做完了吗？</span>
+                        <span class="text-[12px] font-bold text-gray-400 mb-8 leading-relaxed px-4">如果标记为已完成，这段美好的记忆将被永久封存提取，无法再继续往下写。</span>
+                        <div class="flex w-full space-x-3">
+                            <button onclick="window.cpActions.confirmExitHundredStory('${char.id}', 'leave')" class="flex-1 py-3.5 bg-gray-100 text-gray-600 font-bold rounded-[14px] active:scale-95 transition-all text-[14px]">暂离 (下次继续)</button>
+                            <button onclick="window.cpActions.confirmExitHundredStory('${char.id}', 'finish')" class="flex-1 py-3.5 bg-rose-400 text-white font-bold rounded-[14px] active:scale-95 transition-all shadow-md text-[14px]">已完成</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            ` : ''}
+
+            ${cpState.showHundredEditModal ? `
+            <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in" onclick="window.cpActions.closeEditHundredMsg()">
+                 <div class="bg-[#fcfcfc] w-full max-w-sm rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+                     <div class="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-white"><span class="font-bold text-gray-800 text-[16px]">编辑剧情内容</span></div>
+                     <div class="p-6 flex flex-col space-y-2">
+                         <textarea id="hundred-edit-textarea" class="w-full h-48 bg-white border border-gray-200 rounded-[16px] p-5 outline-none text-[15px] text-gray-800 shadow-sm resize-none hide-scrollbar leading-relaxed font-serif">${target.messages.find(m => m.id === cpState.editingHundredMsgId)?.text || ''}</textarea>
+                         <button onclick="window.cpActions.saveEditHundredMsg('${char.id}')" class="w-full py-4 bg-gray-900 text-white font-extrabold rounded-[16px] active:scale-95 transition-transform mt-2 tracking-widest text-[14px]">确认修改</button>
+                     </div>
+                 </div>
+             </div>
+            ` : ''}
+
+            ${cpState.showHundredSettingsModal ? `
+             <div class="absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in backdrop-blur-sm p-4 pb-8" onclick="window.cpActions.closeHundredSettings()">
+                <div class="bg-[#fcfcfc] w-full max-h-[75vh] rounded-[24px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+                   <div class="bg-white px-5 py-4 flex justify-between items-center border-b border-gray-100 shadow-sm shrink-0">
+                      <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="settings" class="text-gray-800 mr-2 w-5 h-5"></i>副本专属设置</span>
+                      <i data-lucide="x" class="text-gray-400 cursor-pointer active:scale-90 transition-transform bg-gray-50 p-1 rounded-full w-6 h-6" onclick="window.cpActions.closeHundredSettings()"></i>
+                   </div>
+                   <div class="flex-1 overflow-y-auto p-5 space-y-6 hide-scrollbar">
+                      <div>
+                         <span class="text-[13px] font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="image" class="w-4 h-4 mr-1 text-green-500"></i>副本背景图 (留空则为默认白底)</span>
+                         <div class="flex items-center justify-between bg-white border border-gray-100 p-3 rounded-xl shadow-sm">
+                            <div class="flex items-center space-x-3"><div class="w-10 h-10 rounded-lg bg-gray-50 border border-gray-200 overflow-hidden flex items-center justify-center relative cursor-pointer" onclick="document.getElementById('hundred-bg-upload').click()">${bgUrl ? `<img src="${bgUrl}" class="w-full h-full object-cover">` : `<i data-lucide="plus" class="text-gray-400"></i>`}</div><span class="text-[12px] font-bold text-gray-600">${bgUrl ? '已设置专属背景' : '默认纯白背景'}</span></div>
+                            <div class="flex space-x-2">
+                               ${bgUrl ? `<button onclick="window.cpActions.clearHundredBg('${char.id}')" class="px-3 py-1.5 bg-red-50 text-red-500 text-[11px] font-bold rounded-lg">清除</button>` : ''}
+                               <button onclick="document.getElementById('hundred-bg-upload').click()" class="px-3 py-1.5 bg-gray-800 text-white text-[11px] font-bold rounded-lg">上传</button>
+                               <input type="file" id="hundred-bg-upload" accept="image/*" class="hidden" onchange="window.cpActions.handleHundredBgUpload('${char.id}', event)">
+                            </div>
+                         </div>
+                      </div>
+                      <div>
+                         <span class="text-[13px] font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="palette" class="w-4 h-4 mr-1 text-orange-500"></i>文本解析颜色</span>
+                         <div class="grid grid-cols-2 gap-3">
+                            <div class="bg-white border border-gray-100 p-3 rounded-xl flex items-center justify-between shadow-sm"><span class="text-[12px] font-bold text-gray-700">人物对话</span><input type="color" value="${dialogueColor}" onchange="window.cpActions.updateHundredTextColor('${char.id}', 'dialogue', this.value)" class="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent"></div>
+                            <div class="bg-white border border-gray-100 p-3 rounded-xl flex items-center justify-between shadow-sm"><span class="text-[12px] font-bold text-gray-700">内心想法</span><input type="color" value="${thoughtColor}" onchange="window.cpActions.updateHundredTextColor('${char.id}', 'thought', this.value)" class="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent"></div>
+                         </div>
+                      </div>
+                      <div>
+                         <span class="text-[13px] font-bold text-gray-800 mb-2 flex items-center"><i data-lucide="code" class="w-4 h-4 mr-1 text-blue-500"></i>CSS 界面美化</span>
+                         <textarea id="set-hundred-css" rows="6" class="w-full bg-white border border-gray-200 rounded-xl p-3 outline-none text-[12px] font-mono resize-none hide-scrollbar shadow-inner leading-relaxed" placeholder="可用语义化标签：\n.cp-story-container\n.cp-story-topbar\n.cp-story-title\n.cp-story-scroll\n.cp-story-dialogue\n.cp-story-thought\n.cp-story-desc\n.cp-story-user-msg\n.cp-story-bottombar">${spaceData.hundredCSS || ''}</textarea>
+                      </div>
+                   </div>
+                   <div class="p-4 bg-white border-t border-gray-100 shrink-0"><button onclick="window.cpActions.saveHundredSettings('${char.id}')" class="w-full py-3.5 bg-gray-800 text-white font-bold rounded-[14px] active:scale-95 transition-transform shadow-md">保存并应用</button></div>
+                </div>
+             </div>
+            ` : ''}
+        </div>
+        `;
+  }
+}
+
+// ==========================================
+// 🌟 终极独立后台静默扫描引擎 (脱离 UI 独立挂载，永不宕机！)
+// ==========================================
+if (!window.cpBootScanStarted) {
+    window.cpBootScanStarted = true;
+    
+    // 🧠 独立的记忆提取器（不依赖情侣App是否打开）
+    const getBgContext = (charId) => {
+        const char = store.contacts.find(c => c.id === charId);
+        const chat = store.chats.find(c => c.charId === charId);
+        const boundPId = chat?.boundPersonaId || store.personas[0].id;
+        const boundP = store.personas.find(p => String(p.id) === String(boundPId)) || store.personas[0];
+        let coreMem = (store.memories || []).filter(m => m.charId === charId && m.type === 'core').map(m=>m.content).join('；');
+        const coreMemStr = coreMem ? `\n【核心记忆】\n${coreMem}` : '';
+        const promptStr = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${coreMemStr}\n\n【用户】\n当前化名：${boundP.name}\n设定：${boundP.prompt || store.personas[0].prompt}`;
+        return { char, chat, boundP, promptStr };
+    };
+
+    // 🌟 提问箱巡逻员
+    const doQuestionScan = async () => {
+        if (!store.coupleSpaces || !store.apiConfig?.apiKey) return;
+        for (const charId of store.coupleSpaces) {
+            store.coupleSpacesData = store.coupleSpacesData || {};
+            const spaceData = store.coupleSpacesData[charId] || {};
+            spaceData.questions = spaceData.questions || [];
+            if (spaceData.enableAiQuestions !== true) continue;
+            
+            const targetFreq = spaceData.aiQuestionFreq || 1;
+            const todayCount = spaceData.questions.filter(q => q.asker === 'ai' && new Date(q.timestamp).toLocaleDateString('zh-CN') === new Date().toLocaleDateString('zh-CN')).length;
+            
+            if (todayCount < targetFreq) {
+                const hasUnanswered = spaceData.questions.some(q => q.asker === 'ai' && !q.answer);
+                if (hasUnanswered) continue;
+                
+                try {
+                    const ctx = getBgContext(charId);
+                    const msgs = ctx.chat.messages.filter(m => m.msgType === 'text' && !m.isHidden).slice(-60);
+                    const last30 = msgs.map(m => `${m.isMe ? ctx.boundP.name : ctx.char.name}: ${m.text}`).join('\n');
+                    const historyPrompt = last30 ? `\n【最近30回合聊天记录】\n${last30}` : '';
+                    
+                    const prompt = `${ctx.promptStr}${historyPrompt}\n\n【系统任务】你现在在情侣提问箱。请向用户发起1个提问。你可以针对最近的聊天记录提问，也可以针对记忆中的事件提问，或者问一些哲学、生活习惯问题。\n❗要求：语言极度精简自然，字数严格在30字以内！直接输出问题正文，绝不要带任何前缀！`;
+                    
+                    const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                        body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+                    });
+                    const data = await res.json();
+                    const questionText = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+                    
+                    spaceData.questions.unshift({ id: 'Q_' + Date.now(), asker: 'ai', text: questionText, answer: null, timestamp: Date.now() });
+                    if (typeof window.render === 'function') window.render();
+                    console.log(`[CoupleApp] 🎯提问箱静默扫描成功：${ctx.char.name} 提出了一个新问题！`);
+                } catch(e) {}
+            }
+        }
+    };
+
+    // 🌟 日记本巡逻员
+    const doDiaryScan = async () => {
+        if (!store.coupleSpaces || !store.apiConfig?.apiKey || !store.diaryConfig?.enabled) return;
+        const now = new Date();
+        const currentStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+        if (currentStr < store.diaryConfig.time) return; // 还没到写日记的点
+
+        const logicalToday = getLogicalDateStr();
+        for (const charId of store.coupleSpaces) {
+            store.diaries = store.diaries || [];
+            const hasDiary = store.diaries.find(d => d.charId === charId && d.date === logicalToday);
+            if (hasDiary) continue; // 今天写过了
+
+            try {
+                console.log(`[CoupleApp] 🌙到点了！触发 ${charId} 的自动日记撰写...`);
+                const ctx = getBgContext(charId);
+                const history = getTodayChatHistory(charId, logicalToday); // 这两个方法都在当前文件顶部，能直接用到！
+                
+                const prompt = `${ctx.promptStr}\n\n【今日聊天记录】\n${history}\n\n【系统任务】今天即将结束，请你结合今天的聊天记录、人设和记忆，写一篇今天的私密日记。\n要求：\n1. 第一人称口吻，真实自然的情感表达。\n2. 总结今天的互动，或者表达对用户的思念/感受。\n3. 直接输出日记正文，严禁带有任何多余的系统标签、标题或格式！`;
+                
+                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+                });
+                const data = await res.json();
+                const content = data.choices[0].message.content.trim();
+                
+                store.diaries.push({ id: Date.now(), charId: charId, date: logicalToday, content: content, comments: [] });
+                if (typeof window.actions !== 'undefined' && window.actions.saveStore) window.actions.saveStore();
+                if (typeof window.render === 'function') window.render();
+                console.log(`[CoupleApp] 📖 ${ctx.char.name} 的日记已静默生成！`);
+            } catch(e) { console.error('静默写日记失败', e); }
+        }
+    };
+
+    // 🌟 心脏起搏器 (永远在后台跳动)
+    const bootPulse = () => {
+        // 等待 store 从硬盘加载出来
+        if (store && store.contacts && store.contacts.length > 0) {
+            console.log('[CoupleApp] ⚡ 数据库就绪，双引擎巡逻大脑已启动！');
+            doQuestionScan(); // 开机扫一次提问箱
+            doDiaryScan();    // 开机检查一遍日记
+            
+            // 每分钟心跳跳动一次
+            setInterval(doDiaryScan, 60000);
+        } else {
+            setTimeout(bootPulse, 1000);
+        }
+    };
+    setTimeout(bootPulse, 2000);
 }

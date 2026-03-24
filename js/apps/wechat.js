@@ -320,17 +320,17 @@ window.wxActions = {
       }
   },
   clearChatHistory: () => {
-      if(!confirm('⚠️ 确定要清空当前窗口的聊天记录吗？此操作不会删除角色或其记忆设定。')) return;
-      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
-      if(chat) {
-          chat.messages = [];
-          // 🌟 物理重置记忆提取游标，防止失忆 Bug！
-          chat.lastSummarizedIndex = 0;
-      }
-      window.actions.showToast('当前聊天记录已清空');
-      wxState.view = 'chatRoom';
-      window.render();
-  },
+    if(!confirm('⚠️ 确定要清空当前窗口的聊天记录吗？此操作不会删除角色或其记忆设定。')) return;
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    if(chat) {
+        chat.messages = [];
+        chat.lastSummarizedIndex = 0;
+        chat.lastSummarizedUserCount = 0;   // 新增
+    }
+    window.actions.showToast('当前聊天记录已清空');
+    wxState.view = 'chatRoom';
+    window.render();
+},
   // 🌟 群聊身份切换
   updateGroupPersona: (val) => {
       saveScroll();
@@ -1455,7 +1455,7 @@ window.wxActions = {
               
               const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                   method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                  body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: sysPrompt }], temperature: 0.8 })
+                  body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: sysPrompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
               });
               const data = await res.json();
               const cleanReply = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
@@ -1538,7 +1538,7 @@ ${relation}
 
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.9 })
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
             });
             const data = await res.json();
             let contentText = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
@@ -1632,7 +1632,7 @@ ${relation}
                   
                   const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                       method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                      body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: sysPrompt }], temperature: 0.8 })
+                      body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: sysPrompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
                   });
                   const data = await res.json();
                   const cleanReply = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
@@ -2265,11 +2265,26 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
         chat.lastSummarizedIndex = 0;
     }
     
-    const lastSumIndex = chat.lastSummarizedIndex || 0;
-    if (validMsgs.length - lastSumIndex >= 20) {
-       chat.lastSummarizedIndex = validMsgs.length;
-       triggerAutoMemory(charId, validMsgs.slice(lastSumIndex, validMsgs.length));
+    // 仅对单聊进行自动记忆提取，群聊不适用（可跳过）
+if (!chat.isGroup) {
+    const currentUserCount = validMsgs.filter(m => m.isMe).length;
+    const lastUserCount = chat.lastSummarizedUserCount || 0;
+    // 自愈：如果用户消息计数被重置（比如清空历史），则同步
+    if (currentUserCount < lastUserCount) {
+        chat.lastSummarizedUserCount = currentUserCount;
     }
+    if (currentUserCount - lastUserCount >= 20) {
+        // 获取自上次以来的所有新消息（需要基于消息总数切片，因为可能用户消息和AI消息交替）
+        const lastSumIndex = chat.lastSummarizedIndex || 0;
+        // 更新游标：当前有效消息总数
+        chat.lastSummarizedIndex = validMsgs.length;
+        chat.lastSummarizedUserCount = currentUserCount;
+        const newMessages = validMsgs.slice(lastSumIndex, validMsgs.length);
+        if (newMessages.length > 0) {
+            triggerAutoMemory(charId, newMessages);
+        }
+    }
+}
 
     let hiddenMsgId = null;
     if (isAuto || customPrompt) {
@@ -3748,7 +3763,7 @@ export function renderWeChatApp(store) {
         maxWidthClass = 'max-w-[40%]';
         bubbleClass = 'mc-bubble-img bg-white p-1 rounded-xl shadow-sm border border-gray-100'; 
         bubbleStyle = ''; 
-        contentHtml = `<img src="${msg.imageUrl}" class="w-full h-auto rounded-lg object-cover max-h-[200px] cursor-pointer" onclick="window.actions.showToast('查看大图')" alt="照片" />`;
+        contentHtml = `<img src="${msg.imageUrl}" class="w-full h-auto rounded-lg object-cover max-h-[200px] cursor-pointer" alt="照片" />`;
       } else if (msg.msgType === 'location') {
         maxWidthClass = 'max-w-[65%]';
         bubbleClass = 'mc-bubble-location bg-white rounded-[12px] shadow-sm border border-gray-100 overflow-hidden p-0 cursor-pointer active:scale-95 transition-transform';
@@ -4608,7 +4623,7 @@ export function renderWeChatApp(store) {
           <div class="flex-1 flex flex-col min-w-0">
             <span class="text-[#576b95] font-medium text-[15px] mb-1">${m.senderName}</span>
             ${m.text ? `<span class="text-gray-800 text-[15px] leading-relaxed break-words whitespace-pre-wrap">${m.text}</span>` : ''}
-            ${m.imageUrl ? `<img src="${m.imageUrl}" class="mt-2 max-w-[70%] max-h-48 object-cover rounded-[4px] border border-gray-100" onclick="window.actions.showToast('查看大图')" />` : ''}
+            ${m.imageUrl ? `<img src="${m.imageUrl}" class="mt-2 max-w-[70%] max-h-48 object-cover rounded-[4px] border border-gray-100" />` : ''}
             ${m.virtualImageText ? `
               <div class="mt-2 w-48 min-h-[12rem] bg-white cursor-pointer select-none rounded-[4px] shadow-sm overflow-hidden border border-gray-200 relative" onclick="const overlay = this.querySelector('.img-overlay'); overlay.classList.toggle('opacity-0'); overlay.classList.toggle('pointer-events-none');">
                 <div class="absolute inset-0 p-4 overflow-y-auto text-[13px] text-gray-700 leading-relaxed text-left bg-white hide-scrollbar">
@@ -5318,6 +5333,20 @@ if (chat.isGroup) {
 // ==================== 以下代码必须放在 wechat.js 的最最最底部 ====================
 
 window.syncCloudMailbox = async () => {
+  // 唯一 ID 生成器（基于时间戳 + 计数器 + 随机后缀）
+let _lastTimestamp = 0;
+let _counter = 0;
+const genUniqueId = () => {
+    let now = Date.now();
+    if (now === _lastTimestamp) {
+        _counter++;
+    } else {
+        _counter = 0;
+        _lastTimestamp = now;
+    }
+    // 毫秒时间戳 * 1000 + 计数器（保证同一毫秒内唯一）+ 随机数（进一步防冲突）
+    return now * 1000 + _counter + Math.floor(Math.random() * 100);
+};
   if (window.isSyncingMailbox) return; // 🌟 锁门，防止巡逻员闯入
   window.isSyncingMailbox = true;
   try {
@@ -5472,9 +5501,9 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
                 store.moments = store.moments || [];
                 // 🌟 修复：把 unshift 改成 push，配合渲染时的 reverse，完美置顶！
                 store.moments.push({ 
-                    id: Date.now(), senderId: char.id, senderName: char.name, avatar: char.avatar, 
+                    id: genUniqueId(), senderId: char.id, senderName: char.name, avatar: char.avatar, 
                     text: contentText.replace(/^["']|["']$/g, ''), imageUrl: null, virtualImageText: virtualText, 
-                    time: getNowTime(), likes: [], comments: [] 
+                    time: cloudTime, likes: [], comments: [] 
                 });
                 hasSystemAction = true;
                 if (typeof window.render === 'function' && wxState.view === 'moments') window.render();
@@ -5484,10 +5513,39 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
         }
         
         if (/\[更换头像\]/.test(remainingText)) {
-            const match = remainingText.match(/\[更换头像\][:：]?\s*([^\n\[\]]+)/);
-            if (match) { char.avatar = match[1].trim(); chat.messages.push({ id: Date.now(), sender: 'system', text: `${displayName} 更改了头像`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() }); hasSystemAction = true; }
-            remainingText = remainingText.replace(/\[更换头像\][:：]?\s*[^\n\[\]]+/, '').trim();
-        }
+    let newAvatar = null;
+
+    // 1. 优先从聊天记录中查找最后一张用户发送的真实图片
+    const userRealImages = chat.messages.filter(m => m.isMe && m.msgType === 'real_image');
+    if (userRealImages.length > 0) {
+        const lastImg = userRealImages[userRealImages.length - 1];
+        newAvatar = lastImg.imageUrl;
+    }
+
+    // 2. 如果没找到真实图片，再尝试从指令中提取（兼容旧格式）
+    if (!newAvatar) {
+        const match = remainingText.match(/\[更换头像\][:：]?\s*([^\n\[\]]+)/);
+        if (match) newAvatar = match[1].trim();
+    }
+
+    // 3. 如果成功获取到新头像，则更新并推送系统消息
+    if (newAvatar) {
+        char.avatar = newAvatar;                        // 更新角色头像
+        chat.messages.push({
+            id: Date.now(),
+            sender: 'system',
+            text: `${displayName} 更换了头像`,
+            isMe: false,
+            source: 'wechat',
+            msgType: 'system',
+            time: getNowTime()
+        });
+        hasSystemAction = true;
+    }
+
+    // 4. 从剩余文本中移除该指令
+    remainingText = remainingText.replace(/\[更换头像\][:：]?\s*[^\n\[\]]*/, '').trim();
+}
 
         while (/\[(?:发送表情|表情包)\]/.test(remainingText)) {
             const match = remainingText.match(/\[(?:发送表情|表情包)\][:：]?\s*([^\n\[\]]+)/);
@@ -5497,37 +5555,37 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
                     const lib = (store.emojiLibs || []).find(l => l.id === libId);
                     if (lib) { const ep = lib.emojis.find(e => (typeof e === 'object' ? e.name : '') === emojiName); if (ep) { foundUrl = ep.url; break; } }
                 }
-                if (foundUrl) { chat.messages.push({ id: Date.now(), sender: char.name, text: `[表情包] ${emojiName}`, imageUrl: foundUrl, isMe: false, source: 'wechat', msgType: 'emoji', time: getNowTime() }); }
+                if (foundUrl) { chat.messages.push({ id: genUniqueId(), sender: char.name, text: `[表情包] ${emojiName}`, imageUrl: foundUrl, isMe: false, source: 'wechat', msgType: 'emoji', time: cloudTime }); }
             }
             remainingText = remainingText.replace(/\[(?:发送表情|表情包)\][:：]?\s*[^\n\[\]]*/, '').trim();
         }
 
         if (/\[修改备注\]/.test(remainingText)) {
             const match = remainingText.match(/\[修改备注\][:：]?\s*([^\n\[\]]+)/);
-            if (match) { chat.myRemark = match[1].trim().substring(0, 15); chat.messages.push({ id: Date.now(), sender: 'system', text: `${displayName} 将你的备注修改为“${chat.myRemark}”`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() }); hasSystemAction = true; }
+            if (match) { chat.myRemark = match[1].trim().substring(0, 15); chat.messages.push({ id: genUniqueId(), sender: 'system', text: `${displayName} 将你的备注修改为“${chat.myRemark}”`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime }); hasSystemAction = true; }
             remainingText = remainingText.replace(/\[修改备注\][:：]?\s*[^\n\[\]]+/, '').trim();
         }
 
         // 🌟 新增：解析修改戳一戳指令
         if (/\[修改被戳动作[:：]?([^\]]+)\]/.test(remainingText)) {
             const match = remainingText.match(/\[修改被戳动作[:：]?([^\]]+)\]/);
-            if (match) { char.nudgeMeVerb = match[1].trim().substring(0, 10); chat.messages.push({ id: Date.now(), sender: 'system', text: `${displayName} 将被戳动作修改为“${char.nudgeMeVerb}”`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() }); hasSystemAction = true; }
+            if (match) { char.nudgeMeVerb = match[1].trim().substring(0, 10); chat.messages.push({ id: genUniqueId(), sender: 'system', text: `${displayName} 将被戳动作修改为“${char.nudgeMeVerb}”`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime }); hasSystemAction = true; }
             remainingText = remainingText.replace(/\[修改被戳动作[:：]?[^\]]+\]/g, '').trim(); hasSystemAction = true;
         }
         if (/\[修改被戳后缀[:：]?([^\]]+)\]/.test(remainingText)) {
             const match = remainingText.match(/\[修改被戳后缀[:：]?([^\]]+)\]/);
-            if (match) { char.nudgeMeSuffix = match[1].trim().substring(0, 20); chat.messages.push({ id: Date.now(), sender: 'system', text: `${displayName} 将被戳后缀修改为“${char.nudgeMeSuffix}”`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() }); hasSystemAction = true; }
+            if (match) { char.nudgeMeSuffix = match[1].trim().substring(0, 20); chat.messages.push({ id: genUniqueId(), sender: 'system', text: `${displayName} 将被戳后缀修改为“${char.nudgeMeSuffix}”`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime }); hasSystemAction = true; }
             remainingText = remainingText.replace(/\[修改被戳后缀[:：]?[^\]]+\]/g, '').trim(); hasSystemAction = true;
         }
 
         if (/\[拉黑用户\]/.test(remainingText)) {
             char.isBlocked = true;
-            chat.messages.push({ id: Date.now(), sender: 'system', text: `你已被 ${displayName} 拉入黑名单`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() });
+            chat.messages.push({ id: genUniqueId(), sender: 'system', text: `你已被 ${displayName} 拉入黑名单`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime });
             remainingText = remainingText.replace(/\[拉黑用户\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
         if (/\[解除拉黑\]/.test(remainingText)) {
             char.isBlocked = false;
-            chat.messages.push({ id: Date.now(), sender: 'system', text: `${displayName} 已将你从黑名单中移除`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() });
+            chat.messages.push({ id: genUniqueId(), sender: 'system', text: `${displayName} 已将你从黑名单中移除`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime });
             remainingText = remainingText.replace(/\[解除拉黑\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
         if (/\[保持拉黑\]/.test(remainingText)) {
@@ -5537,7 +5595,7 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
 
         // 🌟 恢复：解析 AI 发送的好友申请卡片！
         if (/\[(?:发送好友申请|请求添加好友)\]/.test(remainingText)) {
-            chat.messages.push({ id: Date.now(), sender: char.name, text: `我是 ${char.name}`, isMe: false, source: 'wechat', msgType: 'friend_request', reqState: 'pending', time: getNowTime() });
+            chat.messages.push({ id: genUniqueId(), sender: char.name, text: `我是 ${char.name}`, isMe: false, source: 'wechat', msgType: 'friend_request', reqState: 'pending', time: cloudTime });
             remainingText = remainingText.replace(/\[(?:发送好友申请|请求添加好友)\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
 
@@ -5563,7 +5621,7 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
         }
 
         if (/\[戳一戳\]/.test(remainingText)) {
-            chat.messages.push({ id: Date.now(), sender: 'system', text: `${displayName}${char.nudgeAIVerb || '拍了拍'}了我${char.nudgeAISuffix || ''}`, isMe: false, source: 'wechat', msgType: 'system', time: getNowTime() });
+            chat.messages.push({ id: genUniqueId(), sender: 'system', text: `${displayName}${char.nudgeAIVerb || '拍了拍'}了我${char.nudgeAISuffix || ''}`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime });
             remainingText = remainingText.replace(/\[戳一戳\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
 
@@ -5756,13 +5814,10 @@ if (cleanedBeforeText.trim()) {
 }
         // ---------------- 🌟 5. 装配最终气泡，根治 ID 碰撞和时间错乱 ----------------
         let finalMsgs = [];
-        let msgOffset = 0; 
-        // 🌟 核心杀虫：强制把时间转换为纯数字！彻底杜绝字符串拼接产生的 NaN 渲染崩溃！
-        let baseTime = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now(); 
 
         msgsToPush.forEach((m) => {
             finalMsgs.push({
-                id: baseTime + msgOffset,
+                id: genUniqueId(),
                 sender: m.sender || char.name, // 🌟 必须传 ID，防止头像读取崩溃
                 text: m.text,
                 imageUrl: m.imageUrl,
@@ -5777,10 +5832,8 @@ if (cleanedBeforeText.trim()) {
                 transferState: m.transferState,
                 reqState: m.reqState,
                 time: cloudTime, 
-                timestamp: baseTime + msgOffset, // 纯血统数字时间戳
                 isIntercepted: char.isBlocked
             });
-            msgOffset++; 
         });
 
         if (finalMsgs.length === 0 && !hasSystemAction) continue;

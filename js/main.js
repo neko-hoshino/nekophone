@@ -8,6 +8,19 @@ import { renderMemoryApp } from './apps/memory.js';
 import { renderAppearanceApp } from './apps/appearance.js';
 import { renderCoupleApp } from './apps/couple.js';
 
+// 🌟 核心：全局注入 iOS 开关样式，所有 App 均可白嫖！
+if (!document.getElementById('global-ios-switch-css')) {
+    const style = document.createElement('style');
+    style.id = 'global-ios-switch-css';
+    style.innerHTML = `
+        .ios-switch { position: relative; width: 44px; height: 24px; appearance: none; background: #e5e5ea; border-radius: 24px; outline: none; cursor: pointer; transition: background 0.3s ease; }
+        .ios-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: white; border-radius: 50%; box-shadow: 0 2px 4px rgba(0,0,0,0.2); transition: transform 0.3s ease; }
+        .ios-switch:checked { background: #34c759; }
+        .ios-switch:checked::after { transform: translateX(20px); }
+    `;
+    document.head.appendChild(style);
+}
+
 window.actions = {
   setCurrentApp: (appId) => {
     store.currentApp = appId;
