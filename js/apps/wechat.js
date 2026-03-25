@@ -5015,6 +5015,11 @@ window.scheduleCloudTask = async (charId) => {
 
     try {
             const { buildLLMPayload } = await import('../utils/llm.js');
+            let groupInfo = null;
+            if (chat.isGroup) {
+              const allNames = chat.memberIds.map(id => store.contacts.find(c => c.id === id)?.name).filter(Boolean).join('、');
+              groupInfo = { id: chat.charId, name: chat.groupName, allNames: allNames, notice: chat.groupNotice || '' };
+            }
             
             // 🌟 终极净化：剔除了导致崩溃的 senderName，并保留 baseHistory 变量名！
             let baseHistory = chat.messages.map(msg => {
@@ -5096,7 +5101,7 @@ window.scheduleCloudTask = async (charId) => {
                 }
             }
 
-            const chatMsgs = await buildLLMPayload(speakerChar.id, chatHistory, false, false, chat.isGroup ? chat : null, null);
+            const chatMsgs = await buildLLMPayload(speakerChar.id, chatHistory, false, false, groupInfo, null);
 
             // 🌟 先发空包弹取消云端同名旧闹钟，再投递新闹钟，防止新旧并存
             const autoTaskId = 'AUTO|' + chat.charId + '|' + speakerChar.id + '|0';
@@ -5161,7 +5166,7 @@ window.scheduleCloudTask = async (charId) => {
                 isMe: true, isHidden: true, msgType: 'text'
             });
 
-            const momentMsgs = await buildLLMPayload(speakerChar.id, momentHistory, false, false, chat.isGroup ? chat : null, null);
+            const momentMsgs = await buildLLMPayload(speakerChar.id, momentHistory, false, false, groupInfo, null);
             
             // 🚀 发射 MOMENT 闹钟！(朋友圈不需要云端递归，只触发一次)
             planCloudBrain(momentDelayMinutes, speakerChar, momentMsgs, 'MOMENT|' + chat.charId + '|' + speakerChar.id + '|0', 0, 0).catch(e => console.error('朋友圈启动失败:', e));
@@ -5315,7 +5320,13 @@ if (chat.isGroup) {
 
         // 修正为准确的线下模式判定名
         const isOffline = wxState.view === 'offlineStory';
-        const llmMessages = await buildLLMPayload(char.id, tempHistory, isOffline, false, chat.isGroup ? chat : null, null);
+        // 🌟 同理，重roll这里也必须规范化
+        let groupInfo = null;
+        if (chat.isGroup) {
+            const allNames = chat.memberIds.map(id => store.contacts.find(c => c.id === id)?.name).filter(Boolean).join('、');
+            groupInfo = { id: chat.charId, name: chat.groupName, allNames: allNames, notice: chat.groupNotice || '' };
+        }
+        const llmMessages = await buildLLMPayload(char.id, tempHistory, isOffline, false, groupInfo, null);
         
         // 发送给云端代跑
         await planCloudBrain(0, char, llmMessages, chat.charId + '|' + char.id + '|' + (isOffline ? '1' : '0'));
@@ -5333,20 +5344,6 @@ if (chat.isGroup) {
 // ==================== 以下代码必须放在 wechat.js 的最最最底部 ====================
 
 window.syncCloudMailbox = async () => {
-  // 唯一 ID 生成器（基于时间戳 + 计数器 + 随机后缀）
-let _lastTimestamp = 0;
-let _counter = 0;
-const genUniqueId = () => {
-    let now = Date.now();
-    if (now === _lastTimestamp) {
-        _counter++;
-    } else {
-        _counter = 0;
-        _lastTimestamp = now;
-    }
-    // 毫秒时间戳 * 1000 + 计数器（保证同一毫秒内唯一）+ 随机数（进一步防冲突）
-    return now * 1000 + _counter + Math.floor(Math.random() * 100);
-};
   if (window.isSyncingMailbox) return; // 🌟 锁门，防止巡逻员闯入
   window.isSyncingMailbox = true;
   try {
@@ -5371,6 +5368,7 @@ const genUniqueId = () => {
     // 🌟 核心升级：使用 for...of 保证语音和打字延迟能够“顺序执行”
     for (const msg of data.messages) {
         if (!msg.charId) continue;
+        let sysMsgOffset = 1; // 🌟 修复 1：引入局部计数器，确保同一毫秒内的指令 ID 绝对唯一且为纯整数！
         
         // 🌟 提取云端的真实时间戳 (不再使用用户拉取时的时间！)
         // 🌟 史诗级修复：精准读取云端的 timestamp 并转换为人类时间！
@@ -5501,7 +5499,7 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
                 store.moments = store.moments || [];
                 // 🌟 修复：把 unshift 改成 push，配合渲染时的 reverse，完美置顶！
                 store.moments.push({ 
-                    id: genUniqueId(), senderId: char.id, senderName: char.name, avatar: char.avatar, 
+                    id: Date.now() + sysMsgOffset++, senderId: char.id, senderName: char.name, avatar: char.avatar, 
                     text: contentText.replace(/^["']|["']$/g, ''), imageUrl: null, virtualImageText: virtualText, 
                     time: cloudTime, likes: [], comments: [] 
                 });
@@ -5532,7 +5530,7 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
     if (newAvatar) {
         char.avatar = newAvatar;                        // 更新角色头像
         chat.messages.push({
-            id: Date.now(),
+            id: Date.now()+ sysMsgOffset++,
             sender: 'system',
             text: `${displayName} 更换了头像`,
             isMe: false,
@@ -5555,37 +5553,37 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
                     const lib = (store.emojiLibs || []).find(l => l.id === libId);
                     if (lib) { const ep = lib.emojis.find(e => (typeof e === 'object' ? e.name : '') === emojiName); if (ep) { foundUrl = ep.url; break; } }
                 }
-                if (foundUrl) { chat.messages.push({ id: genUniqueId(), sender: char.name, text: `[表情包] ${emojiName}`, imageUrl: foundUrl, isMe: false, source: 'wechat', msgType: 'emoji', time: cloudTime }); }
+                if (foundUrl) { chat.messages.push({ id: Date.now()+ sysMsgOffset++, sender: char.name, text: `[表情包] ${emojiName}`, imageUrl: foundUrl, isMe: false, source: 'wechat', msgType: 'emoji', time: cloudTime }); }
             }
             remainingText = remainingText.replace(/\[(?:发送表情|表情包)\][:：]?\s*[^\n\[\]]*/, '').trim();
         }
 
         if (/\[修改备注\]/.test(remainingText)) {
             const match = remainingText.match(/\[修改备注\][:：]?\s*([^\n\[\]]+)/);
-            if (match) { chat.myRemark = match[1].trim().substring(0, 15); chat.messages.push({ id: genUniqueId(), sender: 'system', text: `${displayName} 将你的备注修改为“${chat.myRemark}”`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime }); hasSystemAction = true; }
+            if (match) { chat.myRemark = match[1].trim().substring(0, 15); chat.messages.push({ id: Date.now()+ sysMsgOffset++, sender: 'system', text: `${displayName} 将你的备注修改为“${chat.myRemark}”`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime }); hasSystemAction = true; }
             remainingText = remainingText.replace(/\[修改备注\][:：]?\s*[^\n\[\]]+/, '').trim();
         }
 
         // 🌟 新增：解析修改戳一戳指令
         if (/\[修改被戳动作[:：]?([^\]]+)\]/.test(remainingText)) {
             const match = remainingText.match(/\[修改被戳动作[:：]?([^\]]+)\]/);
-            if (match) { char.nudgeMeVerb = match[1].trim().substring(0, 10); chat.messages.push({ id: genUniqueId(), sender: 'system', text: `${displayName} 将被戳动作修改为“${char.nudgeMeVerb}”`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime }); hasSystemAction = true; }
+            if (match) { char.nudgeMeVerb = match[1].trim().substring(0, 10); chat.messages.push({ id: Date.now()+ sysMsgOffset++, sender: 'system', text: `${displayName} 将被戳动作修改为“${char.nudgeMeVerb}”`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime }); hasSystemAction = true; }
             remainingText = remainingText.replace(/\[修改被戳动作[:：]?[^\]]+\]/g, '').trim(); hasSystemAction = true;
         }
         if (/\[修改被戳后缀[:：]?([^\]]+)\]/.test(remainingText)) {
             const match = remainingText.match(/\[修改被戳后缀[:：]?([^\]]+)\]/);
-            if (match) { char.nudgeMeSuffix = match[1].trim().substring(0, 20); chat.messages.push({ id: genUniqueId(), sender: 'system', text: `${displayName} 将被戳后缀修改为“${char.nudgeMeSuffix}”`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime }); hasSystemAction = true; }
+            if (match) { char.nudgeMeSuffix = match[1].trim().substring(0, 20); chat.messages.push({ id: Date.now()+ sysMsgOffset++, sender: 'system', text: `${displayName} 将被戳后缀修改为“${char.nudgeMeSuffix}”`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime }); hasSystemAction = true; }
             remainingText = remainingText.replace(/\[修改被戳后缀[:：]?[^\]]+\]/g, '').trim(); hasSystemAction = true;
         }
 
         if (/\[拉黑用户\]/.test(remainingText)) {
             char.isBlocked = true;
-            chat.messages.push({ id: genUniqueId(), sender: 'system', text: `你已被 ${displayName} 拉入黑名单`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime });
+            chat.messages.push({ id: Date.now()+ sysMsgOffset++, sender: 'system', text: `你已被 ${displayName} 拉入黑名单`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime });
             remainingText = remainingText.replace(/\[拉黑用户\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
         if (/\[解除拉黑\]/.test(remainingText)) {
             char.isBlocked = false;
-            chat.messages.push({ id: genUniqueId(), sender: 'system', text: `${displayName} 已将你从黑名单中移除`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime });
+            chat.messages.push({ id: Date.now()+ sysMsgOffset++, sender: 'system', text: `${displayName} 已将你从黑名单中移除`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime });
             remainingText = remainingText.replace(/\[解除拉黑\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
         if (/\[保持拉黑\]/.test(remainingText)) {
@@ -5595,7 +5593,7 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
 
         // 🌟 恢复：解析 AI 发送的好友申请卡片！
         if (/\[(?:发送好友申请|请求添加好友)\]/.test(remainingText)) {
-            chat.messages.push({ id: genUniqueId(), sender: char.name, text: `我是 ${char.name}`, isMe: false, source: 'wechat', msgType: 'friend_request', reqState: 'pending', time: cloudTime });
+            chat.messages.push({ id: Date.now()+ sysMsgOffset++, sender: char.name, text: `我是 ${char.name}`, isMe: false, source: 'wechat', msgType: 'friend_request', reqState: 'pending', time: cloudTime });
             remainingText = remainingText.replace(/\[(?:发送好友申请|请求添加好友)\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
 
@@ -5621,7 +5619,7 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
         }
 
         if (/\[戳一戳\]/.test(remainingText)) {
-            chat.messages.push({ id: genUniqueId(), sender: 'system', text: `${displayName}${char.nudgeAIVerb || '拍了拍'}了我${char.nudgeAISuffix || ''}`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime });
+            chat.messages.push({ id: Date.now()+ sysMsgOffset++, sender: 'system', text: `${displayName}${char.nudgeAIVerb || '拍了拍'}了我${char.nudgeAISuffix || ''}`, isMe: false, source: 'wechat', msgType: 'system', time: cloudTime });
             remainingText = remainingText.replace(/\[戳一戳\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
 
@@ -5652,9 +5650,14 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
             setTimeout(async () => {
                 try {
                     const promptMsg = `(系统自动触发：你设定的 ${customAlarmMinutes < 60 ? Math.ceil(customAlarmMinutes) + '分钟' : (customAlarmMinutes/60).toFixed(1) + '小时'} 后的闹钟已到。请主动发消息找用户，可以叫醒ta或者提醒ta约定的事。注意：符合语境，直接说话，绝不许包含系统标签。)`;
-                    const tempHistory = [...chat.messages, { id: Date.now(), sender: boundPersona.name, text: promptMsg, isMe: true, isHidden: true, msgType: 'text' }];
+                    const tempHistory = [...chat.messages, { id: Date.now()+ sysMsgOffset++, sender: boundPersona.name, text: promptMsg, isMe: true, isHidden: true, msgType: 'text' }];
+                    let groupInfo = null;
+                    if (chat.isGroup) {
+                        const allNames = chat.memberIds.map(id => store.contacts.find(c => c.id === id)?.name).filter(Boolean).join('、');
+                        groupInfo = { id: chat.charId, name: chat.groupName, allNames: allNames, notice: chat.groupNotice || '' };
+                    }
+                    const llmMessages = await buildLLMPayload(char.id, tempHistory, false, false, groupInfo, null);
                     const { buildLLMPayload } = await import('../utils/llm.js');
-                    const llmMessages = await buildLLMPayload(char.id, tempHistory, false, false, null, null);
                     // 借用云端托管理由引擎
                     // 🌟 核心进化：在标识符前加上 'ALARM|' 前缀！
 // 这样云端就会把它当成一条完全独立的 VIP 线程，哪怕你们疯狂聊天，也绝不会打碎这个闹钟！
@@ -5664,12 +5667,6 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
         }
 
         if (isActive && typeof wxState !== 'undefined' && wxState.view === 'chatRoom') remainingText = remainingText.replace(/\*[^*]*\*/g, '').replace(/[(（][^)）]*[)）]/g, '').trim();
-
-        // 🌟 解耦版粉碎机：提取完所有的朋友圈和系统闹钟后，如果不允许主动搭话，将剩余文本彻底清空，绝不上屏！
-        if (shouldSmashChat) {
-            remainingText = '';
-            console.log(`[系统] 主动搭话已关闭，已静默拦截 ${char.name} 的聊天气泡（朋友圈和后台指令已放行）`);
-        }
         
 // 在 while 循环之前声明当前说话者（默认为角色名字）
 let currentSpeakerName = char.name;
@@ -5814,10 +5811,13 @@ if (cleanedBeforeText.trim()) {
 }
         // ---------------- 🌟 5. 装配最终气泡，根治 ID 碰撞和时间错乱 ----------------
         let finalMsgs = [];
+        let msgOffset = 0; 
+        // 🌟 核心杀虫：强制把时间转换为纯数字！彻底杜绝字符串拼接产生的 NaN 渲染崩溃！
+        let baseTime = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now(); 
 
         msgsToPush.forEach((m) => {
             finalMsgs.push({
-                id: genUniqueId(),
+                id: baseTime + msgOffset,
                 sender: m.sender || char.name, // 🌟 必须传 ID，防止头像读取崩溃
                 text: m.text,
                 imageUrl: m.imageUrl,
@@ -5832,8 +5832,10 @@ if (cleanedBeforeText.trim()) {
                 transferState: m.transferState,
                 reqState: m.reqState,
                 time: cloudTime, 
+                timestamp: baseTime + msgOffset, // 纯血统数字时间戳
                 isIntercepted: char.isBlocked
             });
+            msgOffset++; 
         });
 
         if (finalMsgs.length === 0 && !hasSystemAction) continue;
