@@ -205,7 +205,7 @@ export function renderHomeApp(store) {
         <div class="w-full h-full flex-shrink-0 snap-center flex flex-col pt-12 px-5 pb-4 relative justify-end">
               <div id="keep-alive-status" class="flex flex-row items-center justify-between py-4 px-5 rounded-[24px] border relative ${isDark?'bg-black/10 border-white/5':'bg-white/40 border-white/10 shadow-lg'} mb-6 relative z-10 font-serif leading-relaxed">
                  
-                 <div class="absolute top-4 right-4 z-10 p-1 cursor-pointer active:scale-90 transition-transform opacity-40 hover:opacity-100" onclick="window.homeActions.openAddAudioModal()" title="添加音乐">
+                 <div class="absolute top-4 right-4 z-10 p-1 cursor-pointer active:scale-90 transition-transform opacity-80" onclick="window.homeActions.openAddAudioModal()" title="添加音乐">
                      <i data-lucide="plus" class="w-5 h-5 text-green-500 drop-shadow-sm"></i>
                  </div>
 

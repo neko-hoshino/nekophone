@@ -78,7 +78,7 @@ if (!window.cpActions) {
             
             // 🌟 注入神级反馈：加上这行绝美的 Toast！
             if (window.actions && window.actions.showToast) {
-                window.actions.showToast('💌 邀请函已飞入 TA 的信箱，请耐心等待回信~');
+                window.actions.showToast('邀请函已飞入 TA 的信箱，请耐心等待回信~');
             }
         }
         
@@ -98,13 +98,18 @@ if (!window.cpActions) {
   
   // 🌟 保存设置
   saveQuestionSettings: (charId) => {
-      store.coupleSpacesData = store.coupleSpacesData || {};
       store.coupleSpacesData[charId] = store.coupleSpacesData[charId] || {};
       store.coupleSpacesData[charId].enableAiQuestions = document.getElementById('q-enable-toggle').checked;
       store.coupleSpacesData[charId].aiQuestionFreq = parseInt(document.getElementById('q-freq-select').value);
       cpState.showQuestionSettings = false;
+      if(window.actions?.saveStore) window.actions.saveStore();
       window.render();
-      if(window.actions.showToast) window.actions.showToast('提问箱设置已保存！');
+      if(window.actions?.showToast) window.actions.showToast('提问箱设置已保存！');
+      
+      // 🌟 修复：保存后立刻强行唤醒后台扫描一次！
+      if (store.coupleSpacesData[charId].enableAiQuestions && window.cpActions?.doQuestionScan) {
+          window.cpActions.doQuestionScan();
+      }
   },
 
   // 🧠 核心：完美对齐 llm.js 的全息记忆提取引擎
@@ -271,6 +276,8 @@ if (!window.cpActions) {
     
     // 纪念日
     openAnniversaries: () => { cpState.view = 'anniversaries'; window.render(); },
+    openAddModal: () => { cpState.showAddModal = true; window.render(); },
+    closeAddModal: () => { cpState.showAddModal = false; window.render(); },
     saveAnniversary: () => {
        const name = document.getElementById('anni-name').value.trim();
        const date = document.getElementById('anni-date').value;
@@ -828,7 +835,7 @@ if (!window.cpActions) {
           let prompt = `${ctx.promptStr}\n\n【系统任务】你和用户正在体验恋爱100件小事之：【${target.title}】。这是一个独立于主线微信聊天的线下番外副本。\n`;
           if (isOpening) prompt += `请结合人设，写出这段剧情的**沉浸式开场白**。交代环境、氛围以及你们正在做的事。\n`;
           else prompt += `【当前剧情进展】\n${history}\n请顺着用户的动作往下推进剧情，若用户未发动作则继续叙述。\n`;
-          prompt += `❗绝对红线：\n1. 必须采用【轻小说体裁】！\n2. 严禁使用“名字: 台词”的剧本格式！\n3. 人物对话用双引号“”包裹，内心想法用全角括号（）包裹。`;
+          prompt += `❗绝对红线：\n1. 必须采用【轻小说体裁】！\n2. 严禁使用“名字: 台词”的剧本格式！\n3. 人物对话对话用『』包裹，内心想法用全角括号（）包裹。`;
 
           const temp = store.apiConfig?.temperature !== undefined ? Number(store.apiConfig.temperature) : 0.85;
           const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -866,6 +873,119 @@ if (!window.cpActions) {
       reader.readAsDataURL(file);
   },
   clearHundredBg: (charId) => { store.coupleSpacesData[charId].hundredBg = ''; window.render(); },
+  // ==========================================
+  // 🌟 真心话大冒险核心引擎
+  // ==========================================
+  openToD: (charId) => {
+      cpState.view = 'tod'; cpState.activeCharId = charId;
+      store.coupleSpacesData[charId] = store.coupleSpacesData[charId] || {};
+      const spaceData = store.coupleSpacesData[charId];
+      spaceData.todChat = spaceData.todChat || [];
+      window.render();
+  },
+
+  // 🧠 核心：呼唤 AI 开启新一轮冒险 (强制输出 JSON)
+  nextToDRound: async (charId) => {
+      const spaceData = store.coupleSpacesData[charId];
+      spaceData.todLoading = true; spaceData.currentToD = null; window.render();
+
+      try {
+          const ctx = window.cpActions.getQContext(charId);
+          // 🌟 注入超刁钻的情侣专属题库范式
+          const prompt = `${ctx.promptStr}\n\n【系统任务】你现在是情侣游戏“真心话大冒险”的中立裁判。请你立刻开启新一轮游戏。\n\n❗❗你的任务链：\n1. 【摇骰子】随机生成本轮的[输家]。必须是“用户”或“${ctx.char.name}”中的一个。\n2. 【二选一】随机生成惩罚类型。必须是“真心话”或“大冒险”中的一个。\n3. 【定惩罚】结合你们的人设、记忆和最近聊天氛围，制定一个极具情侣暧昧感、吐槽点或测试求生欲的惩罚内容。\n   - 真心话例子：“世界末日只能带一样东西，TA会带啥？”、“第一次见我时，心里的真实想法是什么？”\n   - 大冒险例子：“立刻用语音对我说一句土味情话”、“给我发一张你现在窗外的风景照，我也发给你。”\n4. 【演反应】扮演 ${ctx.char.name}，对这个抽卡结果（不论输赢）说一句极其简短、符合傲娇/腹黑人设的单行反应（15字内）。\n\n❗红线：必须输出严格 JSON：{"loser": "user/ai", "type": "truth/dare", "content": "惩罚内容", "reaction": "角色的简短反应"}`;
+
+          const temp = Number(store.apiConfig?.temperature ?? 0.85);
+          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: temp })
+          });
+          const data = await res.json();
+          let jsonStr = data.choices[0].message.content.trim();
+          const match = jsonStr.match(/\{[\s\S]*\}/); 
+          if (!match) throw new Error("JSON Parsing Failed");
+          
+          const result = JSON.parse(match[0]);
+          spaceData.currentToD = { id: 'TOD_'+Date.now(), ...result };
+          
+          // 将角色的反应塞进下方的讨论区
+          spaceData.todChat.push({ id: Date.now(), sender: 'ai', text: result.reaction });
+          
+          if(window.actions?.saveStore) window.actions.saveStore();
+      } catch(e) {
+          if (window.actions?.showToast) window.actions.showToast('发牌员走神了，点击右上角重试');
+      } finally {
+          spaceData.todLoading = false; window.render();
+          setTimeout(() => { const el = document.getElementById('cp-tod-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+      }
+  },
+
+  // 💬 真心话：用户在讨论区回答或吐槽
+  sendToDMsg: (charId) => {
+      const input = document.getElementById('tod-chat-input');
+      const text = input.value.trim(); if (!text) return;
+      const spaceData = store.coupleSpacesData[charId];
+      spaceData.todChat.push({ id: Date.now(), sender: 'me', text: text });
+      input.value = '';
+      if(window.actions?.saveStore) window.actions.saveStore(); window.render();
+      setTimeout(() => { const el = document.getElementById('cp-tod-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+  },
+
+  // 🌟 大冒险：进入专属副本剧情模式 (WeChat style + AutoOpener)
+  openDareStory: async (charId) => {
+      const spaceData = store.coupleSpacesData[charId];
+      const tod = spaceData.currentToD;
+      // 初始化大冒险副本数据结构 (复用副本引擎)
+      tod.messages = tod.messages || [];
+      cpState.view = 'dareStory'; cpState.activeCharId = charId; cpState.activeToDId = tod.id;
+      window.render();
+      
+      // 如果第一次进入，呼唤 AI 写沉浸式开场白！
+      if (tod.messages.length === 0) {
+          await window.cpActions.fetchDareStoryReply(charId, tod.id, true);
+      }
+      setTimeout(() => { const el = document.getElementById('cp-dare-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+  },
+
+  // 🧠 副本写作大脑 (视觉小说级 Prompt - 抹除"书写"气泡，增加常驻按钮)
+  fetchDareStoryReply: async (charId, todId, isOpening) => {
+      const spaceData = store.coupleSpacesData[charId];
+      const tod = spaceData.currentToD; // 因为一次只存在一个当前 ToD
+      tod.isTyping = true; window.render();
+
+      try {
+          const ctx = window.cpActions.getQContext(charId);
+          const history = tod.messages.slice(-8).map(m => `${m.isMe ? '用户指令/动作' : ctx.char.name}: ${m.text}`).join('\n');
+          let prompt = `${ctx.promptStr}\n\n【系统任务】你和用户正在体验真心话大冒险之大冒险项目：【${tod.content}】。\n`;
+          if (isOpening) prompt += `请结合人设，写出这段剧情的**沉浸式开场白**，交代环境、氛围以及你们正在做的事。\n`;
+          else prompt += `【剧情进展】\n${history}\n请顺着用户的动作往下写剧情。❗严禁剧本格式！用双引号“”包裹对话，全角括号（）包裹心声。描写动作和神态！`;
+
+          const temp = Number(store.apiConfig?.temperature ?? 0.85);
+          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: temp })
+          });
+          const data = await res.json();
+          tod.messages.push({ id: Date.now(), sender: 'ai', text: data.choices[0].message.content.trim() });
+      } catch(e) { } finally {
+          tod.isTyping = false;
+          if(window.actions?.saveStore) window.actions.saveStore(); window.render();
+          setTimeout(() => { const el = document.getElementById('cp-dare-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+      }
+  },
+  
+  // 大冒险副本动作 (WeChat style)
+  sendDareMsg: async (charId) => {
+      const input = document.getElementById('dare-chat-input');
+      const text = input.value.trim(); if (!text) return;
+      const tod = store.coupleSpacesData[charId].currentToD;
+      tod.messages.push({ id: Date.now(), sender: 'me', isMe: true, text: text });
+      input.value = ''; window.render();
+      setTimeout(() => { const el = document.getElementById('cp-dare-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+      await window.cpActions.fetchDareStoryReply(charId, tod.id, false);
+  },
+  continueDareStory: async (charId) => {
+      await window.cpActions.fetchDareStoryReply(charId, store.coupleSpacesData[charId].currentToD.id, false);
+  },
 
     notBuilt: (name) => { window.actions.showToast(name + ' 功能正在快马加鞭施工中！'); }
   };
@@ -917,7 +1037,7 @@ export function renderCoupleApp(store) {
   if (cpState.view === 'select') {
      return `
       <div class="w-full h-full bg-[#fcfcfc] flex flex-col relative animate-in slide-in-from-right-4 duration-300 z-[60]">
-         <div class="pt-14 pb-4 px-6 sticky top-0 bg-[#fcfcfc]/90 backdrop-blur-md z-10 flex items-center justify-between shadow-sm">
+         <div class="pt-8 pb-3 px-4 sticky top-0 bg-[#fcfcfc]/90 backdrop-blur-md z-10 flex items-center justify-between shadow-sm">
             <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.closeApp()"><i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i></div>
             <span class="text-lg font-extrabold text-gray-800 tracking-wide">情侣空间</span>
             <div class="cursor-pointer active:scale-90 p-1 -mr-1" onclick="window.cpActions.toggleCreateSpaceModal()"><i data-lucide="plus-circle" class="w-7 h-7 text-pink-400"></i></div>
@@ -958,7 +1078,7 @@ export function renderCoupleApp(store) {
 
          ${cpState.showCreateSpaceModal ? `
          <div class="fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in" onclick="window.cpActions.toggleCreateSpaceModal()">
-             <div class="bg-white w-full max-w-sm rounded-[32px] p-6 flex flex-col shadow-2xl scale-in" onclick="event.stopPropagation()">
+             <div style="background: #ffffff !important;" class="w-full max-w-sm rounded-[32px] p-6 flex flex-col shadow-2xl scale-in" onclick="event.stopPropagation()">
                  <div class="flex justify-between items-center mb-6">
                      <span class="font-black text-gray-800 text-[18px]">发送专属邀请函</span>
                      <i data-lucide="x" class="w-6 h-6 text-gray-400 bg-gray-50 rounded-full p-1 cursor-pointer active:scale-90 transition-transform" onclick="window.cpActions.toggleCreateSpaceModal()"></i>
@@ -999,7 +1119,7 @@ export function renderCoupleApp(store) {
      
      return `
       <div class="w-full h-full bg-[#fdfdfd] flex flex-col relative animate-in slide-in-from-right-4 duration-300 z-[60]">
-         <div class="pt-12 pb-2 px-4 sticky top-0 z-10 flex items-center justify-between">
+         <div class="pt-8 pb-3 px-4 sticky top-0 z-10 flex items-center justify-between">
             <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.goBack()"><i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i></div>
             <div class="w-8"></div>
          </div>
@@ -1042,7 +1162,7 @@ export function renderCoupleApp(store) {
                <div class="bg-gradient-to-br from-orange-50 to-amber-50/30 rounded-[24px] p-5 shadow-sm border border-orange-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.notBuilt('恋爱挑战')"><i data-lucide="swords" class="w-6 h-6 text-orange-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">恋爱挑战</span></div>
                
                <div class="bg-gradient-to-br from-blue-50 to-cyan-50/30 rounded-[24px] p-5 shadow-sm border border-blue-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.openHundredThings('${char.id}')"><i data-lucide="check-square" class="w-6 h-6 text-blue-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">100件小事</span></div>
-               <div class="bg-gradient-to-br from-purple-50 to-fuchsia-50/30 rounded-[24px] p-5 shadow-sm border border-purple-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.notBuilt('真心话大冒险')"><i data-lucide="dices" class="w-6 h-6 text-purple-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">真心话大冒险</span></div>
+               <div class="bg-gradient-to-br from-purple-50 to-fuchsia-50/30 rounded-[24px] p-5 shadow-sm border border-purple-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.openToD('${char.id}')"><i data-lucide="dices" class="w-6 h-6 text-purple-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">真心话大冒险</span></div>
             </div>
 
             <div class="px-5 mb-8">
@@ -1080,7 +1200,7 @@ export function renderCoupleApp(store) {
 
      return `
       <div class="w-full h-full bg-[#fcfcfc] flex flex-col relative animate-in slide-in-from-right-4 duration-300 z-[60]">
-         <div class="pt-14 pb-4 px-6 sticky top-0 bg-[#fcfcfc]/90 backdrop-blur-md z-10 flex items-center justify-between">
+         <div class="pt-8 pb-3 px-4 sticky top-0 bg-[#fcfcfc]/90 backdrop-blur-md z-10 flex items-center justify-between">
             <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.goBackToDashboard()"><i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i></div>
             <span class="text-lg font-extrabold text-gray-800 tracking-wide">纪念日</span>
             <div class="cursor-pointer active:scale-90 p-1 -mr-1" onclick="window.cpActions.openAddModal()"><i data-lucide="plus" class="w-7 h-7 text-gray-800"></i></div>
@@ -1107,17 +1227,25 @@ export function renderCoupleApp(store) {
          </div>
          ${cpState.showAddModal ? `
          <div class="fixed inset-0 z-[200] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in" onclick="window.cpActions.closeAddModal()">
-             <div class="bg-white w-full max-w-sm rounded-[32px] p-8 flex flex-col items-center shadow-2xl scale-in" onclick="event.stopPropagation()">
-                 <div class="w-16 h-16 rounded-full bg-rose-100 flex items-center justify-center mb-4 shadow-inner">
-                     <i class="fas fa-heart text-rose-400 text-2xl animate-pulse"></i>
+             <div class="w-full max-w-sm rounded-[32px] p-6 flex flex-col shadow-2xl scale-in" style="background: #ffffff !important;" onclick="event.stopPropagation()">
+                 <div class="flex justify-between items-center mb-6 px-2">
+                     <span class="font-black text-gray-800 text-[18px]">添加纪念日</span>
+                     <i data-lucide="x" class="w-6 h-6 text-gray-400 bg-gray-50 rounded-full p-1 cursor-pointer active:scale-90 transition-transform" onclick="window.cpActions.closeAddModal()"></i>
                  </div>
-                 <h3 class="text-xl font-bold text-gray-800 mb-2">开通情侣空间</h3>
-                 
-                 <p class="text-rose-400 font-bold text-[18px] mb-8 text-center tracking-wide">Eve <span class="text-gray-300 mx-2">x</span> ${store.contacts.find(c=>c.id===cpState.pendingCharId)?.name || 'ta'}</p>
-                 
-                 <div class="flex w-full space-x-4">
-                     <button onclick="window.cpActions.closeAddModal()" class="flex-1 py-3.5 rounded-[16px] bg-gray-100 text-gray-600 font-bold text-[15px] active:scale-95 transition-all">取消</button>
-                     <button onclick="window.cpActions.sendInvite()" class="flex-1 py-3.5 rounded-[16px] bg-gradient-to-r from-rose-400 to-pink-400 text-white font-bold text-[15px] shadow-lg shadow-rose-200 active:scale-95 transition-all">发送邀请函</button>
+                 <div class="flex flex-col space-y-4 px-2">
+                     <div>
+                         <span class="text-[12px] font-bold text-gray-500 mb-1.5 block">纪念日名称</span>
+                         <input id="anni-name" type="text" class="w-full bg-gray-50 border border-gray-100 rounded-[16px] px-4 py-3 outline-none text-[15px] font-bold text-gray-800 focus:bg-rose-50/50 focus:border-rose-200 transition-all" placeholder="例如：第一次相遇">
+                     </div>
+                     <div>
+                         <span class="text-[12px] font-bold text-gray-500 mb-1.5 block">日期</span>
+                         <input id="anni-date" type="date" class="w-full bg-gray-50 border border-gray-100 rounded-[16px] px-4 py-3 outline-none text-[15px] font-bold text-gray-800 focus:bg-rose-50/50 focus:border-rose-200 transition-all">
+                     </div>
+                     <div>
+                         <span class="text-[12px] font-bold text-gray-500 mb-1.5 block">想说的话 (选填)</span>
+                         <textarea id="anni-desc" class="w-full bg-gray-50 border border-gray-100 rounded-[16px] px-4 py-3 outline-none text-[15px] text-gray-800 focus:bg-rose-50/50 focus:border-rose-200 transition-all resize-none h-20" placeholder="写下这一刻的感受..."></textarea>
+                     </div>
+                     <button onclick="window.cpActions.saveAnniversary()" class="w-full mt-2 py-3.5 bg-gray-900 text-white font-extrabold rounded-[16px] active:scale-95 transition-transform shadow-md">保存纪念日</button>
                  </div>
              </div>
          </div>
@@ -1155,11 +1283,11 @@ export function renderCoupleApp(store) {
             <div class="absolute inset-0 opacity-20" style="background-image: radial-gradient(#94a3b8 2px, transparent 2px); background-size: 24px 24px;"></div>
             <div class="absolute inset-0 opacity-10" style="background-image: linear-gradient(0deg, transparent 24%, rgba(148, 163, 184, 0.3) 25%, rgba(148, 163, 184, 0.3) 26%, transparent 27%, transparent 74%, rgba(148, 163, 184, 0.3) 75%, rgba(148, 163, 184, 0.3) 76%, transparent 77%, transparent), linear-gradient(90deg, transparent 24%, rgba(148, 163, 184, 0.3) 25%, rgba(148, 163, 184, 0.3) 26%, transparent 27%, transparent 74%, rgba(148, 163, 184, 0.3) 75%, rgba(148, 163, 184, 0.3) 76%, transparent 77%, transparent); background-size: 50px 50px;"></div>
             
-            <div class="absolute top-12 left-5 z-20 cursor-pointer active:scale-90 p-2 bg-white/70 backdrop-blur-md rounded-full shadow-sm border border-white/50" onclick="window.cpActions.goBackToDashboard()">
+            <div class="absolute top-8 left-4 z-20 cursor-pointer active:scale-90 p-2 bg-white/70 backdrop-blur-md rounded-full shadow-sm border border-white/50" onclick="window.cpActions.goBackToDashboard()">
                <i data-lucide="chevron-left" class="w-6 h-6 text-gray-800"></i>
             </div>
 
-            <div class="absolute top-12 right-5 z-20 cursor-pointer active:scale-90 p-2 bg-white/70 backdrop-blur-md rounded-full shadow-sm border border-white/50" onclick="window.cpActions.refreshLocationData()">
+            <div class="absolute top-8 right-4 z-20 cursor-pointer active:scale-90 p-2 bg-white/70 backdrop-blur-md rounded-full shadow-sm border border-white/50" onclick="window.cpActions.refreshLocationData()">
                <i data-lucide="refresh-cw" class="w-6 h-6 text-gray-800 ${cpState.isLocRefreshing ? 'animate-spin' : ''}"></i>
             </div>
             
@@ -1308,7 +1436,7 @@ export function renderCoupleApp(store) {
       <div id="cp-diary-container" class="w-full h-full flex flex-col relative animate-in slide-in-from-right-4 duration-300 z-[60] transition-colors" style="background: ${cfg.theme==='dark'?'#1a1c23':(cfg.theme==='vintage'?'#f4ebd0':(cfg.theme==='romance'?'#fff0f5':'#f8f9fa'))} !important;">
          <style>${customCss}</style>
 
-         <div class="pt-14 pb-4 px-6 sticky top-0 z-10 flex items-center justify-between backdrop-blur-md bg-transparent">
+         <div class="pt-8 pb-3 px-4 sticky top-0 z-10 flex items-center justify-between backdrop-blur-md bg-transparent">
             <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.goBackToDashboard()"><i data-lucide="chevron-left" class="w-8 h-8 ${isDark?'text-white':'text-gray-800'}"></i></div>
             <span class="absolute left-1/2 -translate-x-1/2 font-extrabold text-gray-800 text-lg">日记本</span>
             <div class="flex items-center space-x-4">
@@ -1364,7 +1492,7 @@ export function renderCoupleApp(store) {
                               <div class="${t.font} ${t.text} text-[15px] relative group" style="letter-spacing: ${cfg.letterSpacing}; line-height: ${cfg.lineHeight};">
                                   ${renderDiaryContent(c.text, cfg)}
                                   
-                                  <div class="mt-3 flex items-center space-x-3 opacity-30 group-hover:opacity-100 transition-opacity ${c.sender === 'me' ? 'justify-end' : 'justify-start'}">
+                                  <div class="mt-3 flex items-center space-x-3 opacity-80 transition-opacity ${c.sender === 'me' ? 'justify-end' : 'justify-start'}">
                                       ${c.sender !== 'me' ? `
                                           <i data-lucide="edit-3" class="w-4 h-4 cursor-pointer hover:text-gray-800 active:scale-90" onclick="event.stopPropagation(); window.cpActions.openCommentEdit(${idx})" title="编辑"></i>
                                           <i data-lucide="refresh-cw" class="w-4 h-4 cursor-pointer hover:text-gray-800 active:scale-90" onclick="event.stopPropagation(); window.cpActions.rerollComment(${idx})" title="重Roll"></i>
@@ -1398,7 +1526,7 @@ export function renderCoupleApp(store) {
 
          ${cpState.showDiarySettings ? `
          <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-5 backdrop-blur-sm animate-in fade-in" onclick="window.cpActions.toggleDiarySettings(false)">
-             <div class="bg-[#fcfcfc] w-full max-w-sm max-h-[85vh] overflow-y-auto hide-scrollbar rounded-[28px] shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+             <div style="background: #fcfcfc !important;" class="w-full max-w-sm max-h-[85vh] overflow-y-auto hide-scrollbar rounded-[28px] shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
                  <div class="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-white sticky top-0 z-10">
                      <span class="font-bold text-gray-800 text-[16px] flex items-center"><i data-lucide="sliders-horizontal" class="w-5 h-5 mr-2 text-gray-800"></i>日记本排版引擎</span>
                  </div>
@@ -1410,7 +1538,7 @@ export function renderCoupleApp(store) {
 
                      <div>
                          <span class="text-[11px] font-bold text-gray-500 mb-1 block uppercase tracking-widest">每日撰写时间</span>
-                         <input id="diary-time-input" type="time" value="${cfg.time}" class="w-full bg-white border border-gray-200 rounded-[12px] px-3 py-2.5 outline-none text-[16px] text-gray-800 shadow-sm">
+                         <input id="diary-time-input" type="time" value="${cfg.time}" class="w-80% bg-white border border-gray-200 rounded-[12px] px-3 py-2.5 outline-none text-[16px] text-gray-800 shadow-sm">
                      </div>
                      
                      <div class="grid grid-cols-2 gap-4">
@@ -1489,7 +1617,7 @@ export function renderCoupleApp(store) {
 
          ${cpState.showDiaryEdit ? `
          <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in" onclick="window.cpActions.toggleDiaryEdit(false)">
-             <div class="bg-[#fcfcfc] w-full max-w-sm rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+             <div style="background: #fcfcfc !important;" class="w-full max-w-sm rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
                  <div class="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-white">
                      <span class="font-bold text-gray-800 text-[16px]">编辑日记内容</span>
                  </div>
@@ -1504,7 +1632,7 @@ export function renderCoupleApp(store) {
 
          ${cpState.showCommentEdit ? `
          <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in" onclick="window.cpActions.closeCommentEdit()">
-             <div class="bg-[#fcfcfc] w-full max-w-sm rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+             <div style="background: #fcfcfc !important;" class="w-full max-w-sm rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
                  <div class="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-white">
                      <span class="font-bold text-gray-800 text-[16px]">编辑回复内容</span>
                  </div>
@@ -1540,7 +1668,7 @@ export function renderCoupleApp(store) {
             if (q.asker === 'me') {
                 return `
                 <div class="w-full bg-rose-50 border border-rose-100/60 rounded-[24px] p-5 mb-4 shadow-sm flex flex-col relative group">
-                    <div class="absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div class="absolute right-4 top-4 opacity-80 transition-opacity">
                         <i data-lucide="trash-2" class="w-4 h-4 text-rose-300 hover:text-rose-500 cursor-pointer active:scale-90" onclick="window.cpActions.deleteQuestion('${char.id}', '${q.id}')"></i>
                     </div>
                     <div class="flex items-center space-x-2.5 mb-3">
@@ -1556,7 +1684,7 @@ export function renderCoupleApp(store) {
                                 <img src="${char.avatar}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-white shadow-sm">
                                 <span class="text-[14px] text-gray-700 leading-relaxed font-medium">${window.formatTextWithEmoticons ? window.formatTextWithEmoticons(q.answer) : q.answer}</span>
                             </div>
-                            <div class="mt-3 flex justify-end space-x-2.5 opacity-40 hover:opacity-100 transition-opacity">
+                            <div class="mt-3 flex justify-end space-x-2.5 opacity-80 transition-opacity">
                                 <i data-lucide="refresh-cw" class="w-4 h-4 text-gray-400 hover:text-rose-400 cursor-pointer active:scale-90" title="让他重答" onclick="window.cpActions.rerollQAnswer('${char.id}', '${q.id}')"></i>
                                 <i data-lucide="x-circle" class="w-4 h-4 text-gray-400 hover:text-red-400 cursor-pointer active:scale-90" title="撤回回答" onclick="window.cpActions.deleteQAnswer('${char.id}', '${q.id}')"></i>
                             </div>
@@ -1566,7 +1694,7 @@ export function renderCoupleApp(store) {
             } else {
                 return `
                 <div class="w-full bg-blue-50 border border-blue-100/60 rounded-[24px] p-5 mb-4 shadow-sm flex flex-col relative group">
-                    <div class="absolute right-4 top-4 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div class="absolute right-4 top-4 opacity-80 transition-opacity">
                         <i data-lucide="trash-2" class="w-4 h-4 text-blue-300 hover:text-blue-500 cursor-pointer active:scale-90" onclick="window.cpActions.deleteQuestion('${char.id}', '${q.id}')"></i>
                     </div>
                     <div class="flex items-center space-x-2.5 mb-3">
@@ -1582,7 +1710,7 @@ export function renderCoupleApp(store) {
                                 <img src="${myAvatar}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-white shadow-sm">
                                 <span class="text-[14px] text-gray-700 leading-relaxed font-medium">${q.answer}</span>
                             </div>
-                            <div class="mt-2 flex justify-end space-x-2.5 opacity-40 hover:opacity-100 transition-opacity">
+                            <div class="mt-2 flex justify-end space-x-2.5 opacity-80 transition-opacity">
                                 <i data-lucide="x-circle" class="w-4 h-4 text-gray-400 hover:text-red-400 cursor-pointer active:scale-90" title="撤回回答" onclick="window.cpActions.deleteQAnswer('${char.id}', '${q.id}')"></i>
                             </div>
                         </div>
@@ -1593,14 +1721,14 @@ export function renderCoupleApp(store) {
                                     <img src="${char.avatar}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-white shadow-sm">
                                     <span class="text-[14px] text-gray-700 leading-relaxed font-medium">${q.reaction}</span>
                                 </div>
-                                <div class="mt-2 flex justify-end space-x-2.5 opacity-40 hover:opacity-100 transition-opacity">
+                                <div class="mt-2 flex justify-end space-x-2.5 opacity-80 transition-opacity">
                                     <i data-lucide="refresh-cw" class="w-4 h-4 text-gray-400 hover:text-blue-400 cursor-pointer active:scale-90" title="重摇反应" onclick="window.cpActions.rerollQReaction('${char.id}', '${q.id}')"></i>
                                 </div>
                             ` : `<div class="flex items-center space-x-1.5 text-blue-400"><i data-lucide="loader-2" class="w-3.5 h-3.5 animate-spin"></i><span class="text-[11px] font-bold">TA 正在看你的回答...</span></div>`}
                         </div>
                     ` : `
                         <div class="mt-4 pt-4 border-t border-blue-100/60 flex items-center space-x-2">
-                            <input type="text" id="ans-input-${q.id}" class="flex-1 bg-white border border-blue-100/80 rounded-full h-10 px-4 text-[14px] font-medium outline-none focus:border-blue-300 transition-colors shadow-inner text-gray-800 placeholder-gray-300" placeholder="写下你的回答...">
+                            <input type="text" id="ans-input-${q.id}" class="flex-1 bg-white border border-blue-100/80 rounded-full h-10 px-4 text-[14px] font-medium outline-none focus:border-blue-300 transition-colors shadow-inner text-gray-800 placeholder-gray-300" onkeydown="if(event.key==='Enter'){event.preventDefault();window.cpActions.answerQuestion('${q.id}')}" placeholder="写下你的回答...">
                             <button onclick="window.cpActions.answerQuestion('${q.id}')" class="w-10 h-10 rounded-full bg-blue-500 text-white flex items-center justify-center hover:bg-blue-600 active:scale-95 transition-all shadow-md shrink-0"><i data-lucide="arrow-up" class="w-4 h-4"></i></button>
                         </div>
                     `}
@@ -1610,7 +1738,7 @@ export function renderCoupleApp(store) {
 
         return `
         <div class="w-full h-full flex flex-col bg-[#fcfcfc] relative animate-in fade-in slide-in-from-right-4 duration-300">
-            <div class="pt-14 pb-4 px-6 shrink-0 flex items-center justify-between bg-[#fcfcfc]/90 backdrop-blur-md sticky top-0 z-20">
+            <div class="pt-8 pb-3 px-4 shrink-0 flex items-center justify-between bg-[#fcfcfc]/90 backdrop-blur-md sticky top-0 z-20">
                 <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.openDashboard('${char.id}')">
                     <i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i>
                 </div>
@@ -1622,7 +1750,7 @@ export function renderCoupleApp(store) {
 
             <div class="px-5 py-4 bg-white border-b border-gray-50 shadow-[0_4px_20px_-10px_rgba(0,0,0,0.05)] z-10">
                 <div class="w-full bg-gray-50/80 border border-gray-100 rounded-[20px] flex items-center px-4 py-2 focus-within:bg-rose-50/50 focus-within:border-rose-200 transition-all shadow-inner">
-                    <textarea id="new-q-input" class="flex-1 bg-transparent border-none outline-none text-[15px] font-medium text-gray-800 resize-none h-10 mt-2 hide-scrollbar" placeholder="想问 ${char.name} 什么？"></textarea>
+                    <textarea id="new-q-input" class="flex-1 bg-transparent border-none outline-none text-[15px] font-medium text-gray-800 resize-none h-10 mt-2 hide-scrollbar" onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault();window.cpActions.askQuestion('${char.id}')}" placeholder="想问 ${char.name} 什么？"></textarea>
                     <button onclick="window.cpActions.askQuestion('${char.id}')" class="w-9 h-9 flex items-center justify-center shrink-0 active:scale-90 transition-transform text-rose-400 hover:text-rose-500 ml-2">
                         <i data-lucide="send" class="w-5 h-5"></i>
                     </button>
@@ -1635,7 +1763,7 @@ export function renderCoupleApp(store) {
 
             ${cpState.showQuestionSettings ? `
             <div class="absolute inset-0 z-50 bg-black/40 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in" onclick="window.cpActions.closeQuestionSettings()">
-                <div class="bg-white w-full max-w-sm rounded-[32px] p-6 shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+                <div style="background: #ffffff !important;" class="w-full max-w-sm rounded-[32px] p-6 shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
                     <div class="flex justify-between items-center mb-6 px-1">
                         <span class="text-[18px] font-black text-gray-900">设置提问箱</span>
                         <button onclick="window.cpActions.closeQuestionSettings()" class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 active:scale-95">
@@ -1667,7 +1795,7 @@ export function renderCoupleApp(store) {
         `;
   }
 
-  // 🌟 界面 6：默契大考验
+  // 🌟 界面 6：默契问答
   if (cpState.view === 'tacit') {
         const char = store.contacts.find(c => c.id === cpState.activeCharId);
         const chat = store.chats.find(c => c.charId === char.id);
@@ -1693,7 +1821,7 @@ export function renderCoupleApp(store) {
                 
                 ${tStatus === 'answering' ? `
                     <div class="w-full relative">
-                        <input id="tacit-ans-input" type="text" class="w-full bg-gray-50 border border-gray-100 rounded-[16px] pl-5 pr-14 py-4 outline-none text-[15px] font-medium text-gray-800 focus:bg-purple-50/30 focus:border-purple-200 transition-all text-center shadow-inner" placeholder="写下你的答案...">
+                        <input id="tacit-ans-input" type="text" class="w-full bg-gray-50 border border-gray-100 rounded-[16px] pl-5 pr-14 py-4 outline-none text-[15px] font-medium text-gray-800 focus:bg-purple-50/30 focus:border-purple-200 transition-all text-center shadow-inner" onkeydown="if(event.key==='Enter'){event.preventDefault();window.cpActions.submitTacitAns('${char.id}')}" placeholder="写下你的答案...">
                         <button onclick="window.cpActions.submitTacitAns('${char.id}')" class="absolute right-2 top-2 bottom-2 w-10 bg-purple-200 text-white rounded-full flex items-center justify-center hover:bg-purple-400 active:scale-95 transition-transform shadow-md"><i data-lucide="check" class="w-5 h-5"></i></button>
                     </div>
                 ` : `
@@ -1729,7 +1857,7 @@ export function renderCoupleApp(store) {
             } else if (m.isMe) {
                 return `<div class="flex justify-end my-3 pl-12"><div class="bg-rose-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tr-sm shadow-sm break-words">${m.text}</div></div>`;
             } else {
-                let rerollBtn = (idx === lastAiIdx) ? `<div class="flex flex-col justify-end ml-1.5 opacity-40 hover:opacity-100 transition-opacity"><i data-lucide="refresh-cw" class="w-4 h-4 text-gray-400 hover:text-blue-500 cursor-pointer active:scale-90" onclick="window.cpActions.rerollTacitMsg('${char.id}')"></i></div>` : '';
+                let rerollBtn = (idx === lastAiIdx) ? `<div class="flex flex-col justify-end ml-1.5 opacity-80 transition-opacity"><i data-lucide="refresh-cw" class="w-4 h-4 text-gray-400 hover:text-blue-500 cursor-pointer active:scale-90" onclick="window.cpActions.rerollTacitMsg('${char.id}')"></i></div>` : '';
                 return `<div class="flex justify-start my-3 pr-12 items-end"><div class="bg-blue-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tl-sm shadow-sm break-words">${m.text}</div>${rerollBtn}</div>`;
             }
         }).join('');
@@ -1737,7 +1865,7 @@ export function renderCoupleApp(store) {
         return `
         <div class="w-full h-full flex flex-col bg-transparent relative animate-in fade-in slide-in-from-right-4 duration-300">
             <div class="w-full bg-[#fcfcfc] shrink-0 flex flex-col shadow-[0_10px_30px_-15px_rgba(0,0,0,0.1)] z-20 rounded-b-[32px] relative">
-                <div class="pt-14 pb-2 px-6 flex items-center justify-between">
+                <div class="pt-8 pb-3 px-4 flex items-center justify-between">
                     <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.openDashboard('${char.id}')"><i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i></div>
                     <span class="text-lg font-extrabold text-gray-800 tracking-wide">默契问答</span>
                     <div class="cursor-pointer active:scale-90 p-1 -mr-1" title="换一题 (将清空讨论)" onclick="window.cpActions.fetchTacitQ('${char.id}')"><i data-lucide="refresh-cw" class="w-6 h-6 text-gray-800"></i></div>
@@ -1759,16 +1887,13 @@ export function renderCoupleApp(store) {
                     ${chatHtml}
                 </div>
                 
-                <div class="p-4 bg-white/80 backdrop-blur-md border-t border-gray-100/50 shrink-0">
-                    <div class="flex items-center space-x-1 bg-gray-100/80 rounded-full pl-4 pr-1.5 py-1.5 border border-white/50 shadow-inner">
-                        <input id="tacit-chat-input" type="text" class="flex-1 bg-transparent border-none outline-none text-[14px] font-medium text-gray-800 h-9" placeholder="吐槽点什么..." ${tStatus !== 'revealed' ? 'disabled' : ''}>
-                        <button onclick="window.cpActions.requestTacitReply('${char.id}')" class="w-9 h-9 rounded-full flex items-center justify-center text-gray-800 hover:bg-gray-200/60 active:scale-90 transition-all ${tStatus !== 'revealed' ? 'opacity-50' : ''}" ${tStatus !== 'revealed' ? 'disabled' : ''} title="获取 TA 的回复">
-                            <i data-lucide="sparkles" class="w-5 h-5"></i>
-                        </button>
-                        <button onclick="window.cpActions.sendTacitMsg('${char.id}')" class="w-9 h-9 rounded-full flex items-center justify-center text-gray-800 hover:bg-gray-200/60 active:scale-90 transition-all ${tStatus !== 'revealed' ? 'opacity-50' : ''}" ${tStatus !== 'revealed' ? 'disabled' : ''} title="仅发送">
-                            <i data-lucide="send" class="w-4 h-4 -ml-0.5"></i>
-                        </button>
+                <div class="flex p-4 bg-white/80 backdrop-blur-md border-t border-gray-100/50 shrink-0">
+                    <div class="flex-1 bg-white rounded-[20px] flex items-center border border-gray-200/60 px-2 py-0.5">
+                        <input id="tacit-chat-input" type="text" class="flex-1 h-[38px] py-1.5 px-2 outline-none text-[15px] bg-transparent text-gray-800 placeholder-gray-400" onkeydown="if(event.key==='Enter'){event.preventDefault();window.cpActions.sendTacitMsg('${char.id}')}" placeholder="吐槽点什么..." ${tStatus !== 'revealed' ? 'disabled' : ''}>
                     </div>
+                    <button onclick="window.cpActions.requestTacitReply('${char.id}')" class="w-[60px] h-[40px] flex items-center justify-center bg-transperant rounded-full text-gray-500 active:scale-90 transition-transform flex-shrink-0 ${tStatus !== 'revealed' ? 'opacity-50' : ''}" ${tStatus !== 'revealed' ? 'disabled' : ''} title="获取 TA 的回复">
+                        <i data-lucide="sparkles" class="w-7 h-7 ml-1"></i>
+                    </button>
                 </div>
             </div>
         </div>
@@ -1789,7 +1914,7 @@ export function renderCoupleApp(store) {
 
         return `
         <div class="w-full h-full flex flex-col bg-[#fcfcfc] relative animate-in fade-in slide-in-from-right-4 duration-300">
-            <div class="pt-14 pb-4 px-6 shrink-0 flex items-center justify-between bg-[#fcfcfc]/90 backdrop-blur-md sticky top-0 z-20 shadow-sm border-b border-gray-100">
+            <div class="pt-8 pb-3 px-4 shrink-0 flex items-center justify-between bg-[#fcfcfc]/90 backdrop-blur-md sticky top-0 z-20 shadow-sm border-b border-gray-100">
                 <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.openDashboard('${char.id}')"><i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i></div>
                 <span class="text-lg font-extrabold text-gray-800 tracking-wide">100件小事</span>
                 <div class="w-8"></div>
@@ -1798,7 +1923,7 @@ export function renderCoupleApp(store) {
             <div id="cp-hundred-scroll" class="flex-1 overflow-y-auto p-5 pb-24 hide-scrollbar scroll-smooth relative">
                 
                 <div class="flex items-center bg-white rounded-[20px] shadow-[0_4px_15px_rgba(0,0,0,0.03)] border border-rose-50 mb-6 focus-within:border-rose-200 transition-all overflow-hidden pl-5 pr-1.5 py-1.5">
-                    <input id="new-thing-input" type="text" class="flex-1 bg-transparent border-none outline-none text-[15px] font-bold text-gray-800 placeholder-gray-300 h-10" placeholder="写下一件想和 TA 一起做的事...">
+                    <input id="new-thing-input" type="text" class="flex-1 bg-transparent border-none outline-none text-[15px] font-medium text-gray-800 placeholder-gray-300 h-10" onkeydown="if(event.key==='Enter'){event.preventDefault();window.cpActions.addHundredThing('${char.id}')}" placeholder="写下一件想和 TA 一起做的事...">
                     <button onclick="window.cpActions.addHundredThing('${char.id}')" class="w-10 h-10 rounded-full flex items-center justify-center text-rose-400 hover:bg-rose-50 active:scale-90 transition-all shrink-0"><i data-lucide="plus" class="w-6 h-6"></i></button>
                 </div>
 
@@ -1853,7 +1978,7 @@ export function renderCoupleApp(store) {
                 <div class="cp-story-user-msg w-full bg-white/60 backdrop-blur-md border border-gray-100/50 rounded-[14px] p-5 relative flex flex-col shadow-[0_2px_15px_rgba(0,0,0,0.02)]">
                     <div class="mb-3 text-[12px] font-black tracking-widest text-gray-400">${nameStr}</div>
                     <div class="text-[15px] text-gray-800 leading-relaxed font-serif text-justify pb-6">${formattedLines}</div>
-                    <div class="absolute bottom-3 right-4 flex items-center space-x-3.5 opacity-20 hover:opacity-100 transition-opacity">
+                    <div class="absolute bottom-3 right-4 flex items-center space-x-3.5 opacity-80 transition-opacity">
                         ${!msg.isMe ? `<i data-lucide="refresh-cw" class="w-4 h-4 cursor-pointer active:scale-90 text-gray-500" onclick="window.cpActions.rerollHundredMsg('${char.id}', ${msg.id})" title="重摇"></i>` : ''}
                         <i data-lucide="edit-3" class="w-4 h-4 cursor-pointer active:scale-90 text-gray-500" onclick="window.cpActions.openEditHundredMsg('${char.id}', ${msg.id})" title="编辑"></i>
                         <i data-lucide="trash-2" class="w-4 h-4 cursor-pointer active:scale-90 text-red-400" onclick="window.cpActions.deleteHundredMsg('${char.id}', ${msg.id})" title="删除"></i>
@@ -1868,7 +1993,7 @@ export function renderCoupleApp(store) {
             
             ${bgUrl ? `<div class="absolute inset-0 bg-white/50 backdrop-blur-[3px] z-0 pointer-events-none"></div>` : ''}
             
-            <div class="cp-story-topbar bg-white/80 backdrop-blur-md pt-14 pb-4 px-4 flex items-center justify-between z-10 sticky top-0 border-b border-gray-100 shadow-sm">
+            <div class="cp-story-topbar bg-white/80 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between z-10 sticky top-0 border-b border-gray-100 shadow-sm">
                  <div class="flex items-center cursor-pointer text-gray-800 active:opacity-50" onclick="window.cpActions.attemptExitHundredStory('${char.id}')"><i data-lucide="chevron-down" class="w-8 h-8"></i></div>
                  <span class="cp-story-title flex-1 text-center font-bold text-[16px] tracking-widest text-gray-800 truncate px-4">${target.isTyping ? '正在构思...' : target.title}</span>
                  <div class="flex justify-end cursor-pointer active:scale-90 text-gray-800" onclick="window.cpActions.openHundredSettings()"><i data-lucide="settings" class="w-6 h-6"></i></div>
@@ -1892,7 +2017,7 @@ export function renderCoupleApp(store) {
             
             ${cpState.showHundredExitModal ? `
             <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in" onclick="window.cpActions.confirmExitHundredStory('${char.id}', 'leave')">
-                <div class="bg-[#fcfcfc] w-full max-w-sm rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+                <div style="background: #fcfcfc !important;" class="w-full max-w-sm rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
                     <div class="p-8 flex flex-col items-center text-center">
                         <div class="w-16 h-16 rounded-full bg-rose-50 text-rose-400 flex items-center justify-center mb-5 shadow-inner"><i data-lucide="heart" class="w-8 h-8 fill-rose-300"></i></div>
                         <span class="text-[18px] font-black text-gray-800 mb-2 tracking-wide">这件小事做完了吗？</span>
@@ -1908,7 +2033,7 @@ export function renderCoupleApp(store) {
 
             ${cpState.showHundredEditModal ? `
             <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in" onclick="window.cpActions.closeEditHundredMsg()">
-                 <div class="bg-[#fcfcfc] w-full max-w-sm rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+                 <div style="background: #fcfcfc !important;" class="w-full max-w-sm rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
                      <div class="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-white"><span class="font-bold text-gray-800 text-[16px]">编辑剧情内容</span></div>
                      <div class="p-6 flex flex-col space-y-2">
                          <textarea id="hundred-edit-textarea" class="w-full h-48 bg-white border border-gray-200 rounded-[16px] p-5 outline-none text-[15px] text-gray-800 shadow-sm resize-none hide-scrollbar leading-relaxed font-serif">${target.messages.find(m => m.id === cpState.editingHundredMsgId)?.text || ''}</textarea>
@@ -1956,6 +2081,153 @@ export function renderCoupleApp(store) {
         </div>
         `;
   }
+
+  //界面 8：真心话大冒险
+  if (cpState.view === 'tod') {
+        const char = store.contacts.find(c => c.id === cpState.activeCharId);
+        const chatRoom = store.chats.find(c => c.charId === char.id);
+        const boundPersona = store.personas.find(p => String(p.id) === String(chatRoom?.boundPersonaId)) || store.personas[0];
+        const spaceData = store.coupleSpacesData[char.id] || {};
+        const bgUrl = spaceData.hundredBg || store.bgImage || '';
+        
+        const tod = spaceData.currentToD;
+        const chat = spaceData.todChat || [];
+
+        let topAreaHtml = '';
+        if (spaceData.todLoading) {
+            topAreaHtml = `<div class="flex-1 flex flex-col items-center justify-center py-10 opacity-70"><i data-lucide="loader-2" class="w-8 h-8 animate-spin text-pink-400 mb-3"></i><span class="text-[14px] font-bold text-pink-500">正在疯狂发牌...</span></div>`;
+        } else if (!tod) {
+            topAreaHtml = `<div class="flex-1 flex flex-col items-center justify-center py-10 opacity-70 cursor-pointer group" onclick="window.cpActions.nextToDRound('${char.id}')"><i data-lucide="dice-5" class="w-10 h-10 text-pink-300 mb-3 group-active:scale-95 transition-transform"></i><span class="text-[14px] font-bold text-gray-400">点击右上角骰子开启冒险</span></div>`;
+        } else {
+            topAreaHtml = `
+            <div class="flex flex-col items-center pt-2 pb-4 w-full px-6 animate-in fade-in">
+                <div class="text-[11px] font-black ${tod.loser === 'ai' ? 'text-blue-500 bg-blue-50' : 'text-rose-500 bg-rose-50'} px-3 py-1 rounded-full mb-4 shadow-inner border ${tod.loser === 'ai' ? 'border-blue-100' : 'border-rose-100'}">${tod.loser === 'ai' ? `${char.name} 输了！` : '你输了！'}</div>
+                <div class="bg-gradient-to-br from-pink-50 to-rose-100 p-6 rounded-[24px] shadow-lg border border-pink-100 flex flex-col items-center relative w-full mb-2">
+                    <span class="text-[10px] font-black text-rose-300 absolute -top-2 left-6 bg-white px-2">${tod.type === 'truth' ? '真心话' : '大冒险'}</span>
+                    <div class="text-[17px] font-extrabold text-gray-800 text-center leading-relaxed font-serif">${tod.content}</div>
+                </div>
+                ${tod.type === 'dare' && tod.messages && tod.messages.length > 0 ? `<div class="flex justify-center mt-3"><div class="px-4 py-1.5 rounded-full bg-rose-50 text-rose-500 text-[11px] font-bold">副本进行中...</div></div>` : ''}
+            </div>`;
+        }
+
+        return `
+        <div class="w-full h-full flex flex-col bg-[#fcfcfc] relative animate-in fade-in slide-in-from-right-4 duration-300" style="background: ${bgUrl ? `url('${bgUrl}') center/cover no-repeat` : '#fcfcfc'} !important;">
+            ${bgUrl ? `<div class="absolute inset-0 bg-white/50 backdrop-blur-[3px] z-0 pointer-events-none"></div>` : ''}
+            
+            <div class="w-full shrink-0 flex flex-col shadow-sm z-20 rounded-b-[32px] relative bg-white">
+                <div class="pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-100 sticky top-0 transition-colors bg-white/90 backdrop-blur-md">
+                    <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.openDashboard('${char.id}')"><i data-lucide="chevron-left" class="w-7 h-7 text-gray-800"></i></div>
+                    <span class="text-[16px] font-extrabold text-gray-800 tracking-wider">真心话大冒险</span>
+                    <div class="cursor-pointer active:scale-90 p-1 -mr-1" title="下一轮" onclick="window.cpActions.nextToDRound('${char.id}')"><i data-lucide="dice-5" class="w-6 h-6 text-pink-400"></i></div>
+                </div>
+                <div class="pb-6 pt-2 transition-all duration-300">
+                    ${topAreaHtml}
+                </div>
+            </div>
+
+            <div id="cp-tod-scroll" class="flex-1 overflow-y-auto p-5 pb-6 hide-scrollbar relative z-10 scroll-smooth">
+                <div class="text-center text-xs text-gray-400 italic mb-6 mt-2 tracking-widest pointer-events-none z-10 relative">—— 冒险讨论 ——</div>
+                <div class="flex flex-col relative z-10">
+                    ${chat.map(m => {
+                        let nameStr = m.sender === 'me' ? boundPersona.name : char.name;
+                        if (m.sender === 'me') {
+                            return `
+                            <div class="flex flex-col items-end my-2 pl-4 w-full">
+                                <span class="text-[11px] font-bold text-gray-400 mb-1.5 pr-1">${nameStr}</span>
+                                <div class="bg-rose-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tr-sm shadow-sm break-words">${m.text}</div>
+                            </div>`;
+                        } else {
+                            return `
+                            <div class="flex flex-col items-start my-2 pr-4 w-full">
+                                <span class="text-[11px] font-bold text-gray-400 mb-1.5 pl-1">${nameStr}</span>
+                                <div class="bg-blue-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tl-sm shadow-sm break-words">${m.text}</div>
+                            </div>`;
+                        }
+                    }).join('')}
+                    
+                    ${tod && tod.type === 'dare' ? `
+                        <div class="flex justify-center w-full mt-10 mb-2">
+                            <div onclick="window.cpActions.openDareStory('${char.id}')" class="px-6 py-3 bg-rose-400 text-white font-black rounded-full flex items-center space-x-2 shadow-lg active:scale-95 transition-all cursor-pointer">
+                                <i data-lucide="flame" class="w-5 h-5"></i><span class="text-[14px] tracking-wide">去完成大冒险副本</span>
+                            </div>
+                        </div>
+                    ` : ''}
+                </div>
+            </div>
+
+            <div class="flex p-4 bg-white/80 backdrop-blur-md border-t border-gray-100/50 shrink-0">
+                <div class="flex-1 bg-white rounded-[20px] flex items-center border border-gray-200/60 px-2 py-0.5">
+                    <input id="tod-chat-input" placeholder="输了要接受惩罚哦..." class="flex-1 h-[38px] py-1.5 px-2 outline-none text-[15px] bg-transparent text-gray-800 placeholder-gray-400" ${!tod || spaceData.todLoading ? 'disabled' : ''}>
+                </div>
+                <button onclick="window.cpActions.sendToDMsg('${char.id}')" class="w-[60px] h-[40px] flex items-center justify-center bg-transperant rounded-full text-gray-500 active:scale-90 transition-transform flex-shrink-0 ${(spaceData.todLoading || !tod) ? 'opacity-30' : ''}" ${(spaceData.todLoading || !tod) ? 'disabled' : ''}>
+                    <i data-lucide="sparkles" class="w-7 h-7 ml-1"></i>
+                </button>
+            </div>
+        </div>
+        `;
+
+    } else if (cpState.view === 'dareStory') {
+        const char = store.contacts.find(c => c.id === cpState.activeCharId);
+        const chatRoom = store.chats.find(c => c.charId === char.id);
+        const boundPersona = store.personas.find(p => String(p.id) === String(chatRoom?.boundPersonaId)) || store.personas[0];
+        const spaceData = store.coupleSpacesData[char.id] || {};
+        const tod = spaceData.currentToD;
+        const bgUrl = spaceData.hundredBg || store.bgImage || ''; // 继承角色专属背景
+
+        let storyHtml = tod.messages.map(msg => {
+            let nameStr = msg.sender === 'me' ? boundPersona.name : char.name;
+            let lines = msg.text.replace(/(“[^”]*”|"[^"]*")/g, '\\n$1\\n').replace(/[（(]([^）)]*)[）)]/g, '\\n（$1）\\n');
+            let formattedLines = lines.split('\\n').filter(l=>l.trim()).map(l => {
+                let line = l.trim();
+                if ((line.startsWith('“') && line.endsWith('”')) || (line.startsWith('"') && line.endsWith('"'))) return `<p class="cp-story-dialogue my-1.5 leading-relaxed text-[#d4b856]">${line}</p>`; 
+                else if (line.startsWith('（') && line.endsWith('）')) return `<p class="cp-story-thought my-1.5 leading-relaxed text-[#9ca3af]">${line.slice(1, -1)}</p>`; 
+                else return `<p class="cp-story-desc my-1.5 leading-relaxed text-gray-800">${line}</p>`; 
+            }).join('');
+
+            return `
+            <div class="flex justify-center my-4 w-full relative group">
+                <div class="cp-story-user-msg w-full bg-white/60 backdrop-blur-md border border-gray-100/50 rounded-[14px] p-5 relative flex flex-col shadow-[0_2px_15px_rgba(0,0,0,0.02)]">
+                    <div class="mb-3 text-[12px] font-black tracking-widest text-gray-400">${nameStr}</div>
+                    <div class="text-[15px] text-gray-800 leading-relaxed font-serif text-justify pb-6">${formattedLines}</div>
+                    <div class="absolute bottom-3 right-4 flex items-center space-x-3.5 opacity-80 transition-opacity">
+                        ${msg.sender === 'ai' ? `<i data-lucide="refresh-cw" class="w-4 h-4 cursor-pointer active:scale-90 text-gray-500" title="重摇"></i>` : ''}
+                        <i data-lucide="trash-2" class="w-4 h-4 cursor-pointer active:scale-90 text-red-400" title="删除"></i>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        return `
+        <div class="cp-story-container w-full h-full flex flex-col relative font-serif z-[60] animate-in slide-in-from-bottom-4 duration-300" style="background: ${bgUrl ? `url('${bgUrl}') center/cover no-repeat` : '#fcfcfc'} !important;">
+            ${bgUrl ? `<div class="absolute inset-0 bg-white/50 backdrop-blur-[3px] z-0 pointer-events-none"></div>` : ''}
+            
+            <div class="cp-story-topbar bg-white/80 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between z-10 sticky top-0 border-b border-gray-100 shadow-sm">
+                 <div class="flex items-center cursor-pointer text-gray-800 active:opacity-50" onclick="window.cpActions.openToD('${char.id}')"><i data-lucide="chevron-down" class="w-7 h-7"></i></div>
+                 <span class="cp-story-title flex-1 text-center font-bold text-[16px] tracking-widest text-gray-800 truncate px-4">${tod.isTyping ? '构思剧情...' : '大冒险副本'}</span>
+                 <div class="w-8"></div>
+            </div>
+            
+            <div id="cp-dare-scroll" class="cp-story-scroll flex-1 p-5 overflow-y-auto hide-scrollbar flex flex-col pb-6 z-10 relative scroll-smooth">
+                <div class="text-center text-xs text-gray-400 italic mb-8 mt-4 tracking-widest pointer-events-none">—— 大冒险 · 惩罚开始 ——</div>
+                <div class="bg-gradient-to-br from-pink-50 to-rose-100 p-6 rounded-[20px] shadow-lg border border-pink-100 flex flex-col items-center w-full mb-8 relative z-20">
+                    <span class="text-[10px] font-black text-rose-300 absolute -top-2 left-6 bg-white px-2">惩罚任务</span>
+                    <div class="text-[16px] font-black text-rose-900 text-center leading-relaxed font-serif">${tod.content}</div>
+                </div>
+                ${storyHtml}
+            </div>
+            
+            <div class="cp-story-bottombar bg-white/80 backdrop-blur-md px-4 py-3 pb-8 border-t border-gray-100 flex flex-col shadow-2xl z-20 relative">
+                <div class="relative w-full bg-white/80 border border-gray-200 focus-within:bg-white rounded-[16px] p-1 flex items-end transition-all shadow-inner">
+                    <textarea id="dare-chat-input" placeholder="描写你的动作或对话..." class="flex-1 min-h-[80px] max-h-[150px] bg-transparent text-gray-800 placeholder-gray-400 p-3 outline-none text-[15px] resize-none font-serif leading-relaxed hide-scrollbar" ${tod.isTyping ? 'disabled' : ''}></textarea>
+                    <div class="flex flex-col items-center justify-end pb-2 pr-2 space-y-3 shrink-0">
+                        <button onclick="window.cpActions.continueDareStory('${char.id}')" class="w-9 h-9 flex items-center justify-center text-gray-400 hover:text-gray-700 active:scale-90 transition-all ${tod.isTyping ? 'opacity-30' : ''}" ${tod.isTyping ? 'disabled' : ''} title="让AI接着往下写"><i data-lucide="feather" class="w-5 h-5"></i></button>
+                        <button onclick="window.cpActions.sendDareMsg('${char.id}')" class="w-9 h-9 flex items-center justify-center text-gray-800 active:scale-90 transition-all ${tod.isTyping ? 'opacity-30' : ''}" ${tod.isTyping ? 'disabled' : ''}><i data-lucide="send" class="w-5 h-5 -ml-0.5"></i></button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        `;
+  }
 }
 
 // ==========================================
@@ -1986,7 +2258,9 @@ if (!window.cpBootScanStarted) {
             if (spaceData.enableAiQuestions !== true) continue;
             
             const targetFreq = spaceData.aiQuestionFreq || 1;
-            const todayCount = spaceData.questions.filter(q => q.asker === 'ai' && new Date(q.timestamp).toLocaleDateString('zh-CN') === new Date().toLocaleDateString('zh-CN')).length;
+            // 严谨对比时间
+            const logicalToday = (typeof getLogicalDateStr === 'function') ? getLogicalDateStr() : new Date().toLocaleDateString('zh-CN');
+            const todayCount = spaceData.questions.filter(q => q.asker === 'ai' && ((typeof getLogicalDateStr === 'function') ? getLogicalDateStr(new Date(q.timestamp)) : new Date(q.timestamp).toLocaleDateString('zh-CN')) === logicalToday).length;
             
             if (todayCount < targetFreq) {
                 const hasUnanswered = spaceData.questions.some(q => q.asker === 'ai' && !q.answer);
@@ -1994,15 +2268,16 @@ if (!window.cpBootScanStarted) {
                 
                 try {
                     const ctx = getBgContext(charId);
-                    const msgs = ctx.chat.messages.filter(m => m.msgType === 'text' && !m.isHidden).slice(-60);
+                    // 🌟 致命Bug修复：加了 ? 防止从未聊过天时的空指针崩溃！
+                    const msgs = (ctx.chat?.messages || []).filter(m => m.msgType === 'text' && !m.isHidden).slice(-60);
                     const last30 = msgs.map(m => `${m.isMe ? ctx.boundP.name : ctx.char.name}: ${m.text}`).join('\n');
                     const historyPrompt = last30 ? `\n【最近30回合聊天记录】\n${last30}` : '';
                     
-                    const prompt = `${ctx.promptStr}${historyPrompt}\n\n【系统任务】你现在在情侣提问箱。请向用户发起1个提问。你可以针对最近的聊天记录提问，也可以针对记忆中的事件提问，或者问一些哲学、生活习惯问题。\n❗要求：语言极度精简自然，字数严格在30字以内！直接输出问题正文，绝不要带任何前缀！`;
+                    const prompt = `${ctx.promptStr}${historyPrompt}\n\n【系统任务】你现在在情侣提问箱。请向用户发起1个提问，必须是你想问但平时不敢或不好意思开口问的，有一定深度的问题。你可以针对最近的聊天记录提问，也可以针对记忆中的事件提问，或者问一些哲学、生活习惯问题。\n❗要求：语言极度精简自然，字数严格在30字以内！直接输出问题正文，绝不要带任何前缀！`;
                     
                     const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                        body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+                        body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.9 })
                     });
                     const data = await res.json();
                     const questionText = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
@@ -2010,10 +2285,16 @@ if (!window.cpBootScanStarted) {
                     spaceData.questions.unshift({ id: 'Q_' + Date.now(), asker: 'ai', text: questionText, answer: null, timestamp: Date.now() });
                     if (typeof window.render === 'function') window.render();
                     console.log(`[CoupleApp] 🎯提问箱静默扫描成功：${ctx.char.name} 提出了一个新问题！`);
-                } catch(e) {}
+                } catch(e) {
+                    console.error('[CoupleApp] 提问箱静默出题失败:', e);
+                }
             }
         }
     };
+    
+    // 🌟 将其暴露给外部动作调用
+    if (!window.cpActions) window.cpActions = {};
+    window.cpActions.doQuestionScan = doQuestionScan;
 
     // 🌟 日记本巡逻员
     const doDiaryScan = async () => {
@@ -2052,14 +2333,16 @@ if (!window.cpBootScanStarted) {
 
     // 🌟 心脏起搏器 (永远在后台跳动)
     const bootPulse = () => {
-        // 等待 store 从硬盘加载出来
         if (store && store.contacts && store.contacts.length > 0) {
             console.log('[CoupleApp] ⚡ 数据库就绪，双引擎巡逻大脑已启动！');
-            doQuestionScan(); // 开机扫一次提问箱
-            doDiaryScan();    // 开机检查一遍日记
+            doQuestionScan(); 
+            doDiaryScan();    
             
-            // 每分钟心跳跳动一次
-            setInterval(doDiaryScan, 60000);
+            // 🌟 致命Bug修复：把提问箱也扔进每分钟的循环里！
+            setInterval(() => {
+                doDiaryScan();
+                doQuestionScan();
+            }, 60000);
         } else {
             setTimeout(bootPulse, 1000);
         }
