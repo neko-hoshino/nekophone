@@ -933,7 +933,25 @@ window.wxActions = {
                // 👇 🌟 新增：完美解析表情包和转账！
                else if (/^\[(?:表情包|发送表情)\][:：]?\s*(.*)$/.test(newText)) {
                    msg.msgType = 'emoji';
-                   msg.imageUrl = newText.match(/^\[(?:表情包|发送表情)\][:：]?\s*(.*)$/)[1] || '';
+                   let emojiContent = newText.match(/^\[(?:表情包|发送表情)\][:：]?\s*(.*)$/)[1] || '';
+                   
+                   // 如果直接贴了网址
+                   if (emojiContent.startsWith('http') || emojiContent.startsWith('data:')) {
+                       msg.imageUrl = emojiContent.trim();
+                   } else {
+                       // 如果填的是名字（如：开心），去图库里查字典！
+                       let foundUrl = '';
+                       for (let lib of (store.emojiLibs || [])) {
+                           const ep = lib.emojis.find(e => (typeof e === 'object' ? e.name : '') === emojiContent.trim());
+                           if (ep) { foundUrl = ep.url; break; }
+                       }
+                       if (foundUrl) {
+                           msg.imageUrl = foundUrl;
+                       } else {
+                           // 查无此图，降级回普通文本，防止出问号
+                           msg.msgType = 'text'; 
+                       }
+                   }
                    msg.text = newText;
                } else if (/^\[(?:发起转账|转账)\]/.test(newText)) {
                    msg.msgType = 'transfer';
@@ -3399,13 +3417,13 @@ export function renderWeChatApp(store) {
 
                  // 🌟 修复：正则预处理，强制让带引号和括号的句子单独成段落
                  let preProcessedText = msg.text
-                     .replace(/(“[^”]*”|"[^"]*")/g, '\n$1\n')
+                     .replace(/(『[^』]*』)/g, '\\n$1\\n')
                      .replace(/(「[^」]*」)/g, '\n$1\n')
                      .replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
                  
                  const formattedLines = preProcessedText.split('\n').filter(l=>l.trim()).map(l => {
                      let line = l.trim();
-                     if ((line.startsWith('“') && line.endsWith('”')) || (line.startsWith('"') && line.endsWith('"')) || (line.startsWith('「') && line.endsWith('」'))) {
+                     if (line.startsWith('『') && line.endsWith('』')) {
                          return `<p class="mc-offline-dialogue my-2.5 leading-relaxed">${line}</p>`;
                      } else if (line.startsWith('（') && line.endsWith('）')) {
                          // 🌟 极致美学：用 slice(1, -1) 物理切除前后的括号，只把纯净的心声文字渲染出来！
@@ -3879,10 +3897,13 @@ export function renderWeChatApp(store) {
             bubbleClass = 'bg-transparent shadow-none p-0 m-0 border-0'; 
             bubbleStyle = ''; 
             contentHtml = `
-            <div class="w-[180px] bg-rose-50 rounded-[18px] border border-gray-100 p-4 shadow-sm select-none flex flex-col items-center justify-center">
-                <div class="flex items-center space-x-2.5 text-rose-500/90 py-1">
+            <div class="w-[200px] bg-rose-50 rounded-[18px] border border-rose-100 p-4 shadow-sm select-none flex flex-col items-center justify-center">
+                <div class="flex items-center space-x-2 text-[#881337] mb-2.5 mt-1">
                     <i data-lucide="mail-check" class="w-6 h-6 shrink-0"></i>
-                    <span class="text-[15px] font-black tracking-wide">已接受邀请</span>
+                    <span class="text-[14px] font-black tracking-wide leading-snug text-center">已接受邀请</span>
+                </div>
+                <div class="flex items-center space-x-1.5 text-rose-400 mb-1">
+                    <span class="text-[10px] font-bold">快去看看吧！</span>
                 </div>
             </div>
             `;
@@ -4016,7 +4037,7 @@ export function renderWeChatApp(store) {
     ].filter(item => !(isGroup && item.hideInGroup)).map(item => `
       <div class="mc-tool-item flex flex-col items-center justify-center space-y-1.5 cursor-pointer active:scale-95 transition-transform" onclick="${item.action}" ontouchend="event.preventDefault(); ${item.action}">
         <div class="${item.id} w-14 h-14 flex items-center justify-center">
-          <i data-lucide="${item.icon}" class="text-gray-800" style="width: 28px; height: 28px;"></i>
+          <i data-lucide="${item.icon}" class="text-gray-600" style="width: 28px; height: 28px;"></i>
         </div>
         <span class="text-[11px] font-bold text-gray-500">${item.label}</span>
       </div>
@@ -5835,6 +5856,14 @@ if (cleanedBeforeText.trim()) {
         let baseTime = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now(); 
 
         msgsToPush.forEach((m) => {
+          // 👇 🌟 HTML 卡片终极安检门：不管之前被错误识别成什么类型，只要含有占位符，强行恢复成网页卡片！
+            if (m.text && typeof m.text === 'string') {
+                let blockMatch = m.text.match(/__CODE_BLOCK_(\d+)__/);
+                if (blockMatch && typeof codeBlocks !== 'undefined' && codeBlocks[parseInt(blockMatch[1])]) {
+                    m.msgType = 'html_card';
+                    m.text = codeBlocks[parseInt(blockMatch[1])];
+                }
+            }
           // 👇 🌟 真正执行“时间倒流”的撤回动作
             if (m.msgType === 'recall_action') {
                 let targetMsg = null;
@@ -5862,16 +5891,18 @@ if (cleanedBeforeText.trim()) {
             // 👇 🌟 真正执行打电话动作
             if (m.msgType === 'call_action') {
                 finalMsgs.push({
-                    id: baseTime + msgOffset++, sender: m.sender || char.name, text: `[发起${m.callType === 'video' ? '视频' : '语音'}通话] ${m.text}`,
-                    isMe: false, source: 'wechat', isOffline: isOffline, isCallMsg: isCall, msgType: 'text', time: cloudTime, timestamp: baseTime + msgOffset, isIntercepted: char.isBlocked
+                    id: baseTime + msgOffset++, 
+                    sender: 'system', 
+                    text: `${displayName}发起了${m.callType === 'video' ? '视频' : '语音'}通话`,
+                    isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'system', time: cloudTime, timestamp: baseTime + msgOffset, isIntercepted: char.isBlocked
                 });
                 if (isActive && typeof wxState !== 'undefined') {
-                    wxState.pendingCallMsg = m.text;
+                    wxState.pendingCallMsg = m.text || '';
                     wxState.view = 'incomingCall'; wxState.callType = m.callType;
                     try { wxState.ringtone.src = store.appearance?.callSound || 'https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3'; wxState.ringtone.play(); } catch(e){}
                 }
-                return;
-            }  
+                return; // 这个动作本身转化为系统气泡，不用再推入普通文字
+            }
           finalMsgs.push({
                 id: baseTime + msgOffset,
                 sender: m.sender || char.name, // 🌟 必须传 ID，防止头像读取崩溃
@@ -5960,11 +5991,14 @@ if (newMsg.sender && typeof newMsg.sender === 'string') {
 }
 
             if (!isCall && newMsg.msgType !== 'system' && newMsg.msgType !== 'recall_system') {
-                try { new Audio(store.appearance?.newMsgSound || 'https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3').play().catch(()=>{}); } catch(e) {}
+                try { new Audio(store.appearance?.newMsgSound || ' ').play().catch(()=>{}); } catch(e) {}
                 
                 if (!isActive) {
                     chat.unreadCount = (chat.unreadCount || 0) + 1;
-                    if (typeof window.render === 'function') window.render(); // 刷新红点
+                    // 👇 🌟 智能重绘拦截：如果在看别人聊天，绝不重绘！只有在“主界面(消息列表)”时才为了画红点而刷新！
+                    if (typeof wxState !== 'undefined' && wxState.view === 'main' && typeof window.render === 'function') {
+                        window.render(); 
+                    }
                 }
             }
 

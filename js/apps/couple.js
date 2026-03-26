@@ -49,6 +49,82 @@ if (!store.diaries) store.diaries = [];
 
 if (!window.cpActions) {
   window.cpActions = {
+    // 🌟 终极 Prompt 组装流水线 (与 llm.js 底层 1:1 对齐)
+  buildMasterPrompt: (charId, options = {}) => {
+      const { char, chat, boundP } = window.cpActions.getQContext(charId);
+      
+      const { 
+          history = '',       
+          task = '',          
+          recentText = '',    // 用于触发记忆和世界书扫描
+          scenario = 'chat',  // 'diary' | 'tod' | 'dareStory' | 'tacit' | 'hundredStory'
+      } = options;
+
+      // ==========================================
+      // 1. 基础人设、核心记忆与用户设定 (对齐 llm.js)
+      // ==========================================
+      const globalP = store.globalPrompt ? `\n【通用用户人设】\n${store.globalPrompt}` : '';
+      const boundPrompt = boundP.prompt ? `\n【当前绑定身份】\n${boundP.prompt}` : '';
+      
+      const basePrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n\n【用户】\n当前化名：${boundP.name}${globalP}${boundPrompt}`;
+
+      const coreMem = (store.memories || []).filter(m => m.charId === charId && m.type === 'core').map(m=>m.content).join('；');
+      const coreMemStr = coreMem ? `\n\n【核心记忆】\n${coreMem}` : '';
+
+      // ==========================================
+      // 2. 动态碎片记忆扫描 (对齐 llm.js)
+      // ==========================================
+      let fragMemStr = '';
+      if (recentText) {
+          const frags = (store.memories || []).filter(m => m.charId === charId && m.type === 'fragment').filter(m => {
+              const kws = (m.keywords || '').split(',').map(k=>k.trim()).filter(k=>k);
+              return kws.some(k => recentText.includes(k));
+          }).map(m=>m.content).join('；');
+          if (frags) fragMemStr = `\n\n【触发的回忆片段】\n${frags}`;
+      }
+
+      // ==========================================
+      // 3. 世界书挂载引擎 (严格区分线上/线下场景)
+      // ==========================================
+      let frontWb = [], middleWb = [], backWb = [];
+      (store.worldbooks || []).forEach(wbItem => {
+          if (!wbItem.enabled) return;
+          
+          let shouldInject = false;
+          // 全局生效
+          if (wbItem.type === 'global') shouldInject = true;
+          // 🌟 核心分流：局部挂载 (Local)
+          else if (wbItem.type === 'local') {
+              // a. 基础线上挂载 (所有场景都生效，比如基础补充设定)
+              if (char.mountedWorldbooks && char.mountedWorldbooks.includes(wbItem.id)) shouldInject = true;
+              
+              // b. 线下/副本专属挂载 (仅日记、大小冒险副本生效)
+              const isOfflineScenario = ['diary', 'dareStory', 'hundredStory'].includes(scenario);
+              if (isOfflineScenario) {
+                  // 读取微信主程序的线下场景世界书
+                  if (char.offlineWorldbooks && char.offlineWorldbooks.includes(wbItem.id)) shouldInject = true;
+              }
+          }
+
+          if (shouldInject) {
+              const entryStr = `【${wbItem.title}】：${wbItem.content}`;
+              if (wbItem.position === 'front') frontWb.push(entryStr);
+              else if (wbItem.position === 'back') backWb.push(entryStr);
+              else middleWb.push(entryStr);
+          }
+      });
+
+      const frontStr = frontWb.length > 0 ? `\n\n[前置世界观设定]\n${frontWb.join('\n')}` : '';
+      const middleStr = middleWb.length > 0 ? `\n\n[当前环境/场景设定]\n${middleWb.join('\n')}` : '';
+      const backStr = backWb.length > 0 ? `\n\n[最新/最高优先级世界书指令]\n${backWb.join('\n')}` : '';
+
+      // ==========================================
+      // 5. 组装终极 Prompt (利用近因效应锁定任务)
+      // ==========================================
+      const historyStr = history ? `\n\n【当前历史记录】\n${history}` : '';
+      
+      return `${basePrompt}${coreMemStr}${frontStr}\n${middleStr}${fragMemStr}${backStr}${historyStr}\n\n【系统任务】\n${task}`;
+  },
     // 🌟 创建情侣空间引擎 (替换为发邀请函)
     toggleCreateSpaceModal: () => { cpState.showCreateSpaceModal = !cpState.showCreateSpaceModal; window.render(); },
     createSpace: (charId) => {
@@ -88,7 +164,7 @@ if (!window.cpActions) {
         if (typeof window.render === 'function') {
             window.render();
         } else if (window.cpActions && window.cpActions.cpRender) {
-            window.cpActions.cpRender();
+            window.render();
         }
     },
   // 🌟 提问箱导航与设置
@@ -112,18 +188,17 @@ if (!window.cpActions) {
       }
   },
 
-  // 🧠 核心：完美对齐 llm.js 的全息记忆提取引擎
   getQContext: (charId, text='') => {
       const char = store.contacts.find(c => c.id === charId);
       const chat = store.chats.find(c => c.charId === charId);
-      const boundPId = chat?.boundPersonaId || store.personas[0].id;
+      // 🌟 彻底修复：精准读取当前聊天室绑定的马甲ID，没有才退回默认
+      const boundPId = (chat?.isGroup ? chat.boundPersonaId : char?.boundPersonaId) || store.personas[0].id;
       const boundP = store.personas.find(p => String(p.id) === String(boundPId)) || store.personas[0];
       const globalP = store.personas[0];
+      // 🌟 彻底修复：精准读取专属头像
+      const myAvatar = chat?.myAvatar || boundP.avatar;
 
-      // 提取核心记忆
       let coreMem = (store.memories || []).filter(m => m.charId === charId && m.type === 'core').map(m=>m.content).join('；');
-      
-      // 提取触发的碎片记忆
       let fragMem = '';
       if (text) {
           fragMem = (store.memories || []).filter(m => m.charId === charId && m.type === 'fragment').filter(m => {
@@ -139,7 +214,7 @@ if (!window.cpActions) {
 
       const promptStr = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${coreMemStr}${fragMemStr}\n\n【用户】\n当前化名：${boundP.name}${globalPromptStr}${boundPromptStr}`;
       
-      return { char, chat, boundP, promptStr };
+      return { char, chat, boundP, myAvatar, promptStr };
   },
 
   // 🌟 删除提问卡片与回答
@@ -179,8 +254,12 @@ if (!window.cpActions) {
   fetchQAnswer: async (charId, qId, text) => {
       const ctx = window.cpActions.getQContext(charId, text);
       try {
-          const prompt = `${ctx.promptStr}\n\n【系统任务】用户 ${ctx.boundP.name} 在情侣提问箱向你提问：“${text}”。\n请结合上述人设和记忆，真实、自然地回答。❗要求极度精简，字数严格控制在30字以内！直接输出回答正文，绝不要带任何前缀！`;
-          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+        const taskMsg = `【系统任务】用户 ${ctx.boundP.name} 在情侣提问箱向你提问：“${text}”。\n请结合上述人设和记忆，真实、自然地回答。❗要求极度精简，字数严格控制在30字以内！直接输出回答正文，绝不要带任何前缀！`;
+        const prompt = window.cpActions.buildMasterPrompt(charId, {
+              task: taskMsg,
+              scenario: 'questions'
+          });  
+        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
           });
@@ -221,9 +300,11 @@ if (!window.cpActions) {
 
       // 2. 呼唤大模型对你的答案做出反应
       try {
-          const ctx = window.cpActions.getQContext(charId);
-          const prompt = `${ctx.promptStr}\n\n【系统任务】你之前在提问箱向用户提问：“${targetQ.text}”。\n用户刚才回答了你：“${text}”。\n请对用户的回答做出简短、自然的反应/评价。❗要求极度精简，字数严格控制在30字以内！直接输出反应正文，绝不要带任何前缀！`;
-          
+          const taskMsg = `【系统任务】你之前在提问箱向用户提问：“${targetQ.text}”。\n用户刚才回答了你：“${text}”。\n请对用户的回答做出简短、自然的反应/评价。❗要求极度精简，字数严格控制在30字以内！直接输出反应正文，绝不要带任何前缀！`;
+          const prompt = window.cpActions.buildMasterPrompt(charId, {
+              task: taskMsg,
+              scenario: 'questions'
+          });
           const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
@@ -243,8 +324,11 @@ if (!window.cpActions) {
       targetQ.reaction = null;
       window.render();
       try {
-          const ctx = window.cpActions.getQContext(charId);
-          const prompt = `${ctx.promptStr}\n\n【系统任务】你之前在提问箱向用户提问：“${targetQ.text}”。\n用户刚才回答了你：“${targetQ.answer}”。\n请以伴侣的身份，对用户的回答做出简短、自然的反应/评价。❗要求极度精简，字数严格控制在30字以内！直接输出反应正文，绝不要带任何前缀！`;
+          const taskMsg = `【系统任务】你之前在提问箱向用户提问：“${targetQ.text}”。\n用户刚才回答了你：“${targetQ.answer}”。\n请对用户的回答做出简短、自然的反应/评价。❗要求极度精简，字数严格控制在30字以内！直接输出反应正文，绝不要带任何前缀！`;
+          const prompt = window.cpActions.buildMasterPrompt(charId, {
+              task: taskMsg,
+              scenario: 'questions'
+          });
           const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
@@ -257,18 +341,6 @@ if (!window.cpActions) {
           window.render();
       }
   },
-    // 🌟 日记重写与销毁引擎
-    deleteDiary: (dateStr) => {
-        if(!confirm('确定要彻底销毁这篇日记吗？（不可恢复）')) return;
-        store.diaries = store.diaries.filter(d => !(d.charId === cpState.activeCharId && d.date === dateStr));
-        window.render();
-    },
-    rerollDiary: async (dateStr) => {
-        if(!confirm('确定要让他重新写这一天的日记吗？原来的记忆将被抹除！')) return;
-        store.diaries = store.diaries.filter(d => !(d.charId === cpState.activeCharId && d.date === dateStr));
-        window.render(); 
-        await window.cpActions.callToWriteDiary();
-    },
     closeApp: () => { window.actions.setCurrentApp(null); },
     openDashboard: (id) => { cpState.activeCharId = id; cpState.view = 'dashboard'; window.render(); },
     goBack: () => { cpState.view = 'select'; cpState.activeCharId = null; window.render(); },
@@ -296,13 +368,7 @@ if (!window.cpActions) {
     deleteDiary: (dateStr) => {
         if(!confirm('确定要彻底销毁这篇日记吗？（不可恢复）')) return;
         store.diaries = store.diaries.filter(d => !(d.charId === cpState.activeCharId && d.date === dateStr));
-        window.cpActions.cpRender();
-    },
-    rerollDiary: async (dateStr) => {
-        if(!confirm('确定要让他重新写这一天的日记吗？原来的记忆将被抹除！')) return;
-        store.diaries = store.diaries.filter(d => !(d.charId === cpState.activeCharId && d.date === dateStr));
-        window.cpActions.cpRender(); // 先渲染一次，画面变成“正在生成”
-        await window.cpActions.generateDiary(dateStr);
+        window.render();
     },
     // 日记本
     openDiary: () => { cpState.diaryDate = getLogicalDateStr(); cpState.view = 'diary'; window.render(); },
@@ -353,8 +419,11 @@ if (!window.cpActions) {
         if (d && d.comments) { d.comments.splice(idx, 1); window.render(); }
     },
     rerollComment: async (idx) => {
-        const char = store.contacts.find(c => c.id === cpState.activeCharId);
-        const d = store.diaries.find(d => d.charId === cpState.activeCharId && d.date === cpState.diaryDate);
+        const lockedCharId = cpState.activeCharId;
+        const lockedDateStr = cpState.diaryDate; // 🌟 新增：进门先把日期死死锁住
+        const char = store.contacts.find(c => c.id === lockedCharId);
+        // 🌟 修复：用锁死的变量去找日记
+        const d = store.diaries.find(d => d.charId === lockedCharId && d.date === lockedDateStr);
         if (!store.apiConfig?.apiKey || !d || !d.comments[idx]) return;
         
         // 提取重 Roll 的上下文
@@ -366,13 +435,19 @@ if (!window.cpActions) {
         cpState.isDiaryTyping = true; window.render();
         
         try {
-            const historyStr = getTodayChatHistory(char.id, cpState.diaryDate);
+            // 🌟 修复：这里也用锁住的日期
+            const historyStr = getTodayChatHistory(lockedCharId, lockedDateStr);
             const diaryContent = d.content ? `\n\n【今日日记正文】\n${d.content}` : '';
             const commentsStr = previousComments.map(c => `${c.sender === 'me' ? '用户' : char.name}的共写: ${c.text}`).join('\n');
             const userContext = commentsStr ? `\n\n【之前的共写记录】\n${commentsStr}` : '';
             
-            const promptStr = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n\n【今日聊天回忆】\n${historyStr}${diaryContent}${userContext}\n\n【用户的最新共写】\n${lastUserComment}\n\n【任务】用户对你刚才的续写不满意（要求重写）。请你以伴侣的身份，换一个更深情、更细腻的角度重新回复。\n❗要求：字数 150-300字，支持 ~~阴暗面~~ 和 **高光** 语法。直接输出正文！`;
-            
+            const taskMsg = `${diaryContent}${userContext}\n\n【用户的最新共写】\n${lastUserComment}\n\n【任务】用户对你刚才的续写不满意（要求重写）。请你以伴侣的身份，换一个更深情、更细腻的角度重新回复。\n❗要求：字数 150-300字，支持 ~~阴暗面~~ 和 **高光** 语法。直接输出正文！`;
+            const promptStr = window.cpActions.buildMasterPrompt(lockedCharId, {
+              history: historyStr,
+              task: taskMsg,
+              recentText: historyStr,
+              scenario: 'diary'
+          });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) }) });
             const data = await res.json();
             d.comments[idx].text = data.choices[0].message.content.trim();
@@ -402,41 +477,68 @@ if (!window.cpActions) {
         if (d && newText) d.content = newText;
         cpState.showDiaryEdit = false; window.render();
     },
-    callToWriteDiary: async () => {
-        const char = store.contacts.find(c => c.id === cpState.activeCharId);
-        if (!store.apiConfig?.apiKey) return window.actions.showToast('请先配置 API Key');
-        
-        // 🌟 开启加载动画
-        cpState.isGeneratingDiary = true; window.render();
-        window.actions.showToast('正在召唤 TA 写日记，请稍候...');
-        try {
-            const historyStr = getTodayChatHistory(char.id, cpState.diaryDate);
-            const promptStr = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n\n【今日聊天记录回忆】\n${historyStr}\n\n【任务】请你以日记的格式，写一篇今天的日记。必须结合【今日聊天记录回忆】里的互动来写（这是你们今天真实发生的事），如果没有记录，就写对ta的思念。\n❗强制要求：\n1. 字数必须在 300 字以上！情感要饱满，内容要具体，长篇大论！\n2. 可以使用 ~~包裹文字~~ 来表达你的阴暗面、吃醋、占有欲或不敢直说的话。\n3. 可以使用 **包裹文字** 来表达你的高光情感或最深的爱意。\n4. 直接输出日记的正文，绝不要输出“日记正文：”等任何多余的标题或日期！`;
-            
-            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
-            });
-            const data = await res.json();
-            const content = data.choices[0].message.content.trim();
-            
-            let d = store.diaries.find(d => d.charId === cpState.activeCharId && d.date === cpState.diaryDate);
-            if (d) { d.content = content; }
-            else { store.diaries.push({ id: Date.now(), charId: cpState.activeCharId, date: cpState.diaryDate, content: content, comments: [] }); }
-            window.render();
-        } catch (e) {
-            window.actions.showToast('写日记失败：' + (e.message || '网络错误'));
-        } finally {
-            // 🌟 关闭加载动画
-            cpState.isGeneratingDiary = false; window.render();
-        }
-    },
-    
-    submitComment: async () => {
-        const input = document.getElementById('diary-comment-input');
-        const text = input.value.trim(); if (!text) return;
-        
-        let d = store.diaries.find(d => d.charId === cpState.activeCharId && d.date === cpState.diaryDate);
+    // 🌟 整合与修复：重摇日记（传入具体的 charId 和 dateStr）
+  rerollDiary: async (charId, dateStr) => {
+      if (!confirm('确定要让 TA 重新写这一天的日记吗？')) return;
+      store.diaries = (store.diaries || []).filter(d => !(d.charId === charId && d.date === dateStr));
+      if (window.actions?.saveStore) window.actions.saveStore();
+      window.render();
+      
+      await window.cpActions.callToWriteDiary(charId, dateStr);
+  },
+
+  // 🌟 整合与修复：统一的写日记核心（绝对禁止在 await 后使用 cpState.activeCharId）
+  callToWriteDiary: async (targetCharId, targetDateStr) => {
+      const char = store.contacts.find(c => c.id === targetCharId);
+      if (!store.apiConfig?.apiKey) return window.actions.showToast('请先配置 API Key');
+      
+      cpState.isGeneratingDiary = true; window.render();
+      if (window.actions?.showToast) window.actions.showToast('正在召唤 TA 写日记...');
+      
+      try {
+          // 替换掉原来的 promptStr 组装
+          const historyStr = getTodayChatHistory(targetCharId, targetDateStr);
+          const taskMsg = `【系统任务】今天即将结束，请你结合今天的聊天记录、人设和记忆，写一篇今天的私密日记。\n要求：\n1. 第一人称口吻，真实自然的情感表达。\n2. 总结今天的互动，或者表达对用户的思念/感受。\n3. 直接输出日记正文，严禁带有任何多余的系统标签、标题或格式！`;
+          
+          const promptStr = window.cpActions.buildMasterPrompt(targetCharId, {
+              history: historyStr,
+              task: taskMsg,
+              recentText: historyStr,
+              scenario: 'diary'
+          });
+          
+          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+          });
+          const data = await res.json();
+          const content = data.choices[0].message.content.trim();
+          
+          // ❗闭包死锁：严格使用传入的 targetCharId，无论此时用户切到了哪个界面！
+          store.diaries = store.diaries || [];
+          let d = store.diaries.find(d => d.charId === targetCharId && d.date === targetDateStr);
+          if (d) { d.content = content; } else { store.diaries.push({ id: Date.now(), charId: targetCharId, date: targetDateStr, content: content, comments: [] }); }
+      } catch (e) {
+          console.error("写日记失败", e);
+      } finally {
+          cpState.isGeneratingDiary = false;
+          if (window.actions?.saveStore) window.actions.saveStore();
+          // 只有当用户还在看这个角色的日记时，才刷新画面
+          if (cpState.view === 'diary' && cpState.activeCharId === targetCharId) window.render();
+      }
+  },
+
+  // 🌟 修复：共写串台闭包死锁
+  submitComment: async () => {
+      const input = document.getElementById('diary-comment-input');
+      const text = input.value.trim(); if (!text) return;
+      
+      // ❗立刻锁定当前状态，绝不允许带入 await 之后
+      const lockedCharId = cpState.activeCharId;
+      const lockedDateStr = cpState.diaryDate;
+      const char = store.contacts.find(c => c.id === lockedCharId);
+      
+      let d = store.diaries.find(d => d.charId === lockedCharId && d.date === lockedDateStr);
         if (!d) {
             // 如果连日记都没有，直接创建一个空底子来承载共写
             d = { id: Date.now(), charId: cpState.activeCharId, date: cpState.diaryDate, content: '', comments: [] };
@@ -448,15 +550,18 @@ if (!window.cpActions) {
         
         // 渲染你的共写，并开启等待动画
         cpState.isDiaryTyping = true; window.render();
-
-        const char = store.contacts.find(c => c.id === cpState.activeCharId);
         if (!store.apiConfig?.apiKey) { cpState.isDiaryTyping = false; return window.render(); }
 
         try {
-            const historyStr = getTodayChatHistory(char.id, cpState.diaryDate);
+            const historyStr = getTodayChatHistory(char.id, lockedDateStr);
             const diaryContent = d.content ? `\n\n【今日日记正文】\n${d.content}` : '';
-            const promptStr = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n\n【今日聊天记录回忆】\n${historyStr}${diaryContent}\n\n【用户的共写/批注】\n${text}\n\n【任务】用户刚才在日记本里写下了这段话。请你以伴侣的身份，接着ta的话继续“共写”，或者回复一段你的内心独白。\n❗强制要求：\n1. 字数在 150-300字 之间，必须深情、真挚，也可以带点小情绪或占有欲。\n2. 支持使用 ~~包裹文字~~ 和 **包裹文字** 语法。\n3. 直接输出你续写的正文，绝不要带标题或日期！`;
-            
+            const taskMsg = `${diaryContent}\n\n【用户的共写/批注】\n${text}\n\n【任务】用户刚才在日记本里写下了这段话。请你以伴侣的身份，接着ta的话继续“共写”，或者回复一段你的内心独白。\n❗强制要求：\n1. 字数在 150-300字 之间，必须深情、真挚，也可以带点小情绪或占有欲。\n2. 支持使用 ~~包裹文字~~ 和 **包裹文字** 语法。\n3. 直接输出你续写的正文，绝不要带标题或日期！`;
+            const promptStr = window.cpActions.buildMasterPrompt(lockedCharId, {
+              history: historyStr,
+              task: taskMsg,
+              recentText: historyStr,
+              scenario: 'diary'
+          });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
@@ -468,9 +573,10 @@ if (!window.cpActions) {
         } catch (e) {
             console.error('共写回复失败', e);
         } finally {
-            cpState.isDiaryTyping = false; window.render();
-        }
-    },
+          cpState.isDiaryTyping = false; 
+          if (cpState.view === 'diary' && cpState.activeCharId === lockedCharId) window.render();
+      }
+  },
 
     // 🌟 永久记忆舱：点开定位时，读取这个角色的专属定位数据，绝不丢失！
     openLocation: () => { 
@@ -491,13 +597,14 @@ if (!window.cpActions) {
 
         try {
             const historyStr = getTodayChatHistory(char.id, getLogicalDateStr());
-            let memoryStr = '';
-            const memories = (store.memories || []).filter(m => m.charId === char.id);
-            if (memories.length > 0) {
-                memoryStr = '\n【你的记忆】\n' + memories.map(m => `- ${m.content}`).join('\n');
-            }
 
-            const promptStr = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}${memoryStr}\n\n【今日聊天记录回忆】\n${historyStr}\n\n【任务】请结合上述信息、你的人设属性以及当前时间（${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'})}），脑洞大开，推测并生成TA今天极其符合人设的行踪与健康数据。\n必须返回合法的 JSON 格式数据，结构如下：\n{\n  "distance": 距离用户的公里数(浮点数，比如2.5，如果是异地恋可以设得很大),\n  "steps": 今日运动步数(整数),\n  "places": [\n    {"time": "08:30", "name": "温馨小窝 (出门)"}\n  ], // 按时间顺序排列今天去过的地方，至少1个最多5个\n  "sleepHours": [6.5, 7.0, 5.5], // 前天、昨天、今天凌晨的睡眠时长(3个浮点数)\n  "sleepEval": "以手机系统自带【健康管家】的口吻，客观评价用户的睡眠质量（30字以内，如：昨晚深度睡眠不足，建议今晚放下手机早点休息。）",\n  "phone": {\n    "total": "6.5h",\n    "apps": [\n      {"name": "微信", "time": "2.5h"},\n      {"name": "网易云音乐", "time": "1.8h"}\n    ] // 🌟 随机生成 3 到 5 个最符合TA当前人设和行踪的 App\n  }\n}\n❗警告：只能输出 JSON 格式文本，绝不要带有 \`\`\`json 等任何 Markdown 包裹，也不要有多余解释！`;
+            const taskMsg = `【任务】请结合聊天记录、你的人设以及当前时间（${new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'})}），脑洞大开，推测并生成你今天极其符合人设的行踪与健康数据。\n必须返回合法的 JSON 格式数据，结构如下：\n{\n  "distance": 距离用户的公里数(浮点数，比如2.5，如果是异地恋可以设得很大),\n  "steps": 今日运动步数(整数),\n  "places": [\n    {"time": "08:30", "name": "温馨小窝 (出门)"}\n  ], // 按时间顺序排列今天去过的地方，至少1个最多5个\n  "sleepHours": [6.5, 7.0, 5.5], // 前天、昨天、今天凌晨的睡眠时长(3个浮点数)\n  "sleepEval": "以手机系统自带【健康管家】的口吻，客观评价用户的睡眠质量（30字以内，如：昨晚深度睡眠不足，建议今晚放下手机早点休息。）",\n  "phone": {\n    "total": "6.5h",\n    "apps": [\n      {"name": "微信", "time": "2.5h"},\n      {"name": "网易云音乐", "time": "1.8h"}\n    ] // 🌟 随机生成 3 到 5 个最符合TA当前人设和行踪的 App\n  }\n}\n❗警告：只能输出 JSON 格式文本，绝不要带有 \`\`\`json 等任何 Markdown 包裹，也不要有多余解释！`;
+            const promptStr = window.cpActions.buildMasterPrompt(char.id, {
+              history: historyStr,
+              task: taskMsg,
+              recentText: historyStr,
+              scenario: 'location'
+          });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
@@ -512,7 +619,8 @@ if (!window.cpActions) {
             console.error('获取行踪失败', e);
             window.actions.showToast('信号干扰，获取行踪失败');
         } finally {
-            cpState.isLocRefreshing = false; window.render();
+            cpState.isLocRefreshing = false; 
+            if (cpState.view === 'location') window.render(); // 🌟 修复：如果我还在定位页面，才刷新画面
         }
     },
     // ==========================================
@@ -537,13 +645,28 @@ if (!window.cpActions) {
 
       try {
           const ctx = window.cpActions.getQContext(charId);
-          // 🌟 注入“求生欲测试”与“灵魂拷问”的题库范式，并强制发散思维！
-          const prompt = `${ctx.promptStr}\n\n【系统任务】你现在是“情侣灵魂拷问/求生欲测试”的毒舌裁判。请以绝对中立的上帝视角，提出一道刁钻、有趣、测试你们默契度的题目。\n\n❗【出题方向指导】（严禁出诸如“生日、最爱吃什么”这种死板的记忆背诵题！）\n1. 假设性情景（例：“如果${ctx.boundP.name}中了一千万，第一件事会干嘛？”、“世界末日只能带一样东西，你会带啥？”）\n2. 深度观察/习惯拷问（例：“${ctx.char.name}最让${ctx.boundP.name}抓狂的小毛病是什么？”、“你们吵架时，${ctx.boundP.name}最吃哪一套？”）\n3. 感情回顾（例：“你们第一次冷战是因为什么微不足道的事？”）\n4. 情绪价值（例：“在极其疲惫的一天后，${ctx.boundP.name}最想听到的一句话是什么？”）\n\n❗你必须充分发散思维，结合上下文，每次提出截然不同的新题！严禁照搬上述例子！\n同时你需要作为 ${ctx.char.name} 给出你的真实答案。\n❗绝对红线：\n1. 问题必须是第三人称中立视角！\n2. 你的答案必须极度精简，严格在 10 个字内！\n3. 必须输出严格 JSON：{"question": "问题内容", "answer": "你的答案"}`;
+          // 🌟 提取历史默契问答记录
+          // 🌟 容量控制器：物理限制 100 条
+          spaceData.tacitHistory = spaceData.tacitHistory || [];
+          if (spaceData.tacitHistory.length > 100) {
+              spaceData.tacitHistory = spaceData.tacitHistory.slice(-100);
+          }
           
-          const temp = store.apiConfig?.temperature !== undefined ? Number(store.apiConfig.temperature) : 0.85; // 🌟 挂载用户设置的全局温度
+          // 🌟 Token保护：只提取最近 100 条题目喂给防重 prompt
+          const askedHistory = spaceData.tacitHistory.slice(-100).join('、');
+          const avoidPrompt = askedHistory ? `\n❗【绝对禁止重复】：你之前已经出过以下问题，绝不允许再出类似或相关的问题：${askedHistory}` : '';
+
+          const taskMsg = `【系统任务】你现在是“情侣默契问答”的出题系统。请以绝对中立的上帝视角，提出一道刁钻、有趣、测试情侣默契度的题目。${avoidPrompt}\n同时，你需要作为 ${ctx.char.name} 给出你的真实答案。\n\n❗【出题方向指导】（严禁出诸如“生日、最爱吃什么”这种死板的记忆背诵题！）\n1. 假设性情景（例：“如果${ctx.boundP.name}中了一千万，第一件事会干嘛？”、“世界末日只能带一样东西，你会带啥？”）\n2. 深度观察/习惯拷问（例：“${ctx.char.name}最让${ctx.boundP.name}抓狂的小毛病是什么？”、“你们吵架时，${ctx.boundP.name}最吃哪一套？”）\n3. 感情回顾（例：“你们第一次冷战是因为什么微不足道的事？”）\n4. 情绪价值（例：“在极其疲惫的一天后，${ctx.boundP.name}最想听到的一句话是什么？”）\n\n❗你必须充分发散思维，结合上下文，每次提出截然不同的新题！严禁照搬上述例子！\n\n❗绝对红线：\n1. 问题必须是第三人称中立视角，绝不能带入角色口吻！\n2. 你的答案必须极度精简，严格控制在 10 个字以内！\n3. 必须输出严格的 JSON 格式：{"question": "问题内容", "answer": "你的答案"}`;
+
+          const prompt = window.cpActions.buildMasterPrompt(charId, {
+              task: taskMsg,
+              scenario: 'tacit'
+          });
+          
+          const temp = store.apiConfig?.temperature !== undefined ? Number(store.apiConfig.temperature) : 0.85; 
           const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: temp })
           });
           const data = await res.json();
           let jsonStr = data.choices[0].message.content.trim();
@@ -551,6 +674,7 @@ if (!window.cpActions) {
           if (!match) throw new Error("JSON 解析失败");
           
           const qData = JSON.parse(match[0]);
+          spaceData.tacitHistory.push(qData.question); // 存入历史库
           spaceData.currentTacit = { question: qData.question, aiAns: qData.answer, userAns: '' };
           spaceData.tacitStatus = 'answering';
           window.render();
@@ -608,14 +732,19 @@ if (!window.cpActions) {
       try {
           const ctx = window.cpActions.getQContext(charId);
           const tacitContext = `【当前默契问答】\n问题：${spaceData.currentTacit.question}\n我的答案：${spaceData.currentTacit.userAns}\n你的答案：${spaceData.currentTacit.aiAns}`;
-          const chatHistory = spaceData.tacitChat.filter(m => m.msgType === 'text').slice(-15).map(m => `${m.isMe ? '用户' : '你'}: ${m.text}`).join('\n');
+          const chatHistory = spaceData.tacitChat.filter(m => m.msgType === 'text').slice(-20).map(m => `${m.isMe ? '用户' : '你'}: ${m.text}`).join('\n');
           
-          const prompt = `${ctx.promptStr}\n\n${tacitContext}\n\n【讨论区记录】\n${chatHistory}\n\n【系统任务】结合对答案情况，以伴侣身份回复用户的聊天。❗要求：极度精简，像微信聊天，严格在30字内！直接输出正文！`;
-          
+          const taskMsg = `${tacitContext}\n\n【系统任务】结合对答案情况，以伴侣身份回复用户的聊天。❗要求：极度精简，像微信聊天，严格在30字内！直接输出正文！`;
+          const prompt = window.cpActions.buildMasterPrompt(charId, {
+            history: chatHistory,  
+            task: taskMsg,
+            recentText: chatHistory,
+            scenario: 'tacit'
+          });
           const temp = store.apiConfig?.temperature !== undefined ? Number(store.apiConfig.temperature) : 0.85;
           const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: temp })
           });
           const data = await res.json();
           
@@ -830,13 +959,22 @@ if (!window.cpActions) {
       target.isTyping = true; window.render();
 
       try {
-          const ctx = window.cpActions.getQContext(charId);
-          const history = target.messages.slice(-10).map(m => `${m.isMe ? '用户指令/动作' : ctx.char.name}: ${m.text}`).join('\n');
-          let prompt = `${ctx.promptStr}\n\n【系统任务】你和用户正在体验恋爱100件小事之：【${target.title}】。这是一个独立于主线微信聊天的线下番外副本。\n`;
-          if (isOpening) prompt += `请结合人设，写出这段剧情的**沉浸式开场白**。交代环境、氛围以及你们正在做的事。\n`;
-          else prompt += `【当前剧情进展】\n${history}\n请顺着用户的动作往下推进剧情，若用户未发动作则继续叙述。\n`;
-          prompt += `❗绝对红线：\n1. 必须采用【轻小说体裁】！\n2. 严禁使用“名字: 台词”的剧本格式！\n3. 人物对话对话用『』包裹，内心想法用全角括号（）包裹。`;
+        // 替换掉原来的 prompt 组装
+        const ctx = window.cpActions.getQContext(charId);
+          const history = target.messages.slice(-20).map(m => `${m.isMe ? '用户指令/动作' : ctx.char.name}: ${m.text}`).join('\n');
+    
+          let taskMsg = `【系统任务】你和用户正在体验恋爱100件小事之：【${target.title}】。这是一个独立于主线微信聊天的线下番外副本。\n`;
+          if (isOpening) taskMsg += `这是约会的刚开始。请你直接描写当前的场景氛围，交代环境、氛围以及你们将要做的事。\n❗警告：绝对不要在开头写出“好的”、“开场白”、“开始”等出戏的系统词汇！\n`;
+          else taskMsg += `【当前剧情进展】\n请顺着用户的动作往下推进剧情，若用户未发动作则继续叙述。\n`;
+          taskMsg += `❗绝对红线：\n1. 必须采用【轻小说体裁】！\n2. 严禁使用“名字: 台词”的剧本格式！\n3. 人物对话用『』包裹，内心想法用全角括号（）包裹。直接输出正文！`;
 
+          const prompt = window.cpActions.buildMasterPrompt(charId, {
+              history: history,
+              task: taskMsg,
+              recentText: history,
+              scenario: 'hundredStory'
+          });  
+        
           const temp = store.apiConfig?.temperature !== undefined ? Number(store.apiConfig.temperature) : 0.85;
           const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
@@ -891,8 +1029,23 @@ if (!window.cpActions) {
 
       try {
           const ctx = window.cpActions.getQContext(charId);
-          // 🌟 注入超刁钻的情侣专属题库范式
-          const prompt = `${ctx.promptStr}\n\n【系统任务】你现在是情侣游戏“真心话大冒险”的中立裁判。请你立刻开启新一轮游戏。\n\n❗❗你的任务链：\n1. 【摇骰子】随机生成本轮的[输家]。必须是“用户”或“${ctx.char.name}”中的一个。\n2. 【二选一】随机生成惩罚类型。必须是“真心话”或“大冒险”中的一个。\n3. 【定惩罚】结合你们的人设、记忆和最近聊天氛围，制定一个极具情侣暧昧感、吐槽点或测试求生欲的惩罚内容。\n   - 真心话例子：“世界末日只能带一样东西，TA会带啥？”、“第一次见我时，心里的真实想法是什么？”\n   - 大冒险例子：“立刻用语音对我说一句土味情话”、“给我发一张你现在窗外的风景照，我也发给你。”\n4. 【演反应】扮演 ${ctx.char.name}，对这个抽卡结果（不论输赢）说一句极其简短、符合傲娇/腹黑人设的单行反应（15字内）。\n\n❗红线：必须输出严格 JSON：{"loser": "user/ai", "type": "truth/dare", "content": "惩罚内容", "reaction": "角色的简短反应"}`;
+          
+          // 🌟 1. 容量控制器：超过 100 条，物理切除最老的数据！
+          spaceData.todHistory = spaceData.todHistory || [];
+          if (spaceData.todHistory.length > 100) {
+              spaceData.todHistory = spaceData.todHistory.slice(-100);
+          }
+          
+          // 🌟 2. Token 保护锁：只喂给 AI 最近的 100 条防重复
+          const askedHistory = spaceData.todHistory.slice(-100).join('、');
+          const avoidPrompt = askedHistory ? `\n❗【防重复红线】：以下是你最近出过的惩罚，绝对禁止重复或高度相似：\n${askedHistory}` : '';
+
+          const taskMsg = `【系统任务】你现在是情侣游戏“真心话大冒险”的中立裁判。请你立刻开启新一轮游戏。${avoidPrompt} \n\n❗❗你的任务链：\n1. 【摇骰子】随机生成本轮的[输家]。必须是“用户”或“${ctx.char.name}”中的一个。\n2. 【二选一】随机生成惩罚类型。必须是“真心话”或“大冒险”中的一个。\n3. 【定惩罚】结合你们的人设、记忆和最近聊天氛围，制定一个色情、直接、暧昧、氛围感的惩罚内容。\n   - 真心话例子：“内心有过最大尺度的性幻想是什么？”、“最近一次自慰是什么时候？”\n   - 大冒险例子：“亲吻对方喉结五分钟”、“用牙齿解开对方的衬衫扣子”\n4. 【演反应】扮演 ${ctx.char.name}，对这个抽卡结果（不论输赢）说一句极其简短、符合人设的反应（15字内）。\n\n❗红线：必须输出严格 JSON：{"loser": "user/ai", "type": "truth/dare", "content": "惩罚内容", "reaction": "角色的简短反应"}`;
+
+          const prompt = window.cpActions.buildMasterPrompt(charId, {
+              task: taskMsg,
+              scenario: 'chat' // 这是线上场景
+          });
 
           const temp = Number(store.apiConfig?.temperature ?? 0.85);
           const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -907,6 +1060,9 @@ if (!window.cpActions) {
           const result = JSON.parse(match[0]);
           spaceData.currentToD = { id: 'TOD_'+Date.now(), ...result };
           
+          // 🌟 3. 新题目生成后，只把“内容”存入历史防重库
+          spaceData.todHistory.push(result.content);
+          
           // 将角色的反应塞进下方的讨论区
           spaceData.todChat.push({ id: Date.now(), sender: 'ai', text: result.reaction });
           
@@ -919,7 +1075,7 @@ if (!window.cpActions) {
       }
   },
 
-  // 💬 真心话：用户在讨论区回答或吐槽
+  // 💬 真心话：用户仅仅发送文字上屏 (不呼叫AI)
   sendToDMsg: (charId) => {
       const input = document.getElementById('tod-chat-input');
       const text = input.value.trim(); if (!text) return;
@@ -928,6 +1084,50 @@ if (!window.cpActions) {
       input.value = '';
       if(window.actions?.saveStore) window.actions.saveStore(); window.render();
       setTimeout(() => { const el = document.getElementById('cp-tod-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+  },
+
+  // 🧠 真心话：主动点击按钮呼唤 AI 回复 (复刻默契问答)
+  requestToDReply: async (charId) => {
+      const spaceData = store.coupleSpacesData[charId];
+      const tod = spaceData.currentToD;
+      if (!tod) return;
+      
+      spaceData.todChat = spaceData.todChat || [];
+      const loadingId = Date.now();
+      spaceData.todChat.push({ id: loadingId, sender: 'ai', msgType: 'loading' });
+      window.render();
+      setTimeout(() => { const el = document.getElementById('cp-tod-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+
+      try {
+          const ctx = window.cpActions.getQContext(charId);
+          const chatHistory = spaceData.todChat.filter(m => !m.msgType).slice(-20).map(m => `${m.sender === 'me' ? '用户' : '你'}: ${m.text}`).join('\n');
+          
+          // 🌟 精准识别本轮的输家和任务类型
+          const loserRole = tod.loser === 'ai' ? '你' : '用户';
+          const todTypeStr = tod.type === 'truth' ? '真心话' : '大冒险';
+          
+          const taskMsg = `【当前回合状态】\n类型：${todTypeStr}\n内容：${tod.content}\n本轮输家：${loserRole}\n\n【讨论区记录】\n${chatHistory}\n\n【系统任务】你和用户正在进行真心话大冒险，现在处于讨论区环节。\n❗你的核心任务（根据输赢选择）：\n1. 如果输家是你（${ctx.char.name}）：请你愿赌服输，直接在回复中执行真心话惩罚。\n2. 如果输家是用户：请你根据用户的最新回复，评价TA的惩罚完成度，或者根据人设催促TA快点执行惩罚。\n❗严格要求：极度精简，像微信聊天，控制在50字内！直接输出正文！`;
+          const prompt = window.cpActions.buildMasterPrompt(charId, {
+            history: chatHistory,  
+            task: taskMsg,
+            recentText: chatHistory,
+            scenario: 'chat'
+          });
+          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+          });
+          const data = await res.json();
+          const targetIdx = spaceData.todChat.findIndex(m => m.id === loadingId);
+          if (targetIdx !== -1) {
+              spaceData.todChat[targetIdx] = { id: Date.now(), sender: 'ai', text: data.choices[0].message.content.trim() };
+          }
+      } catch(e) {
+          spaceData.todChat = spaceData.todChat.filter(m => m.id !== loadingId);
+      } finally {
+          window.render();
+          setTimeout(() => { const el = document.getElementById('cp-tod-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+      }
   },
 
   // 🌟 大冒险：进入专属副本剧情模式 (WeChat style + AutoOpener)
@@ -951,14 +1151,23 @@ if (!window.cpActions) {
       const spaceData = store.coupleSpacesData[charId];
       const tod = spaceData.currentToD; // 因为一次只存在一个当前 ToD
       tod.isTyping = true; window.render();
-
       try {
+          // 替换掉原来的 prompt 组装
           const ctx = window.cpActions.getQContext(charId);
-          const history = tod.messages.slice(-8).map(m => `${m.isMe ? '用户指令/动作' : ctx.char.name}: ${m.text}`).join('\n');
-          let prompt = `${ctx.promptStr}\n\n【系统任务】你和用户正在体验真心话大冒险之大冒险项目：【${tod.content}】。\n`;
-          if (isOpening) prompt += `请结合人设，写出这段剧情的**沉浸式开场白**，交代环境、氛围以及你们正在做的事。\n`;
-          else prompt += `【剧情进展】\n${history}\n请顺着用户的动作往下写剧情。❗严禁剧本格式！用双引号“”包裹对话，全角括号（）包裹心声。描写动作和神态！`;
+          const history = tod.messages.slice(-20).map(m => `${m.isMe ? '用户指令/动作' : ctx.char.name}: ${m.text}`).join('\n');
+          const loserRole = tod.loser === 'ai' ? ctx.char.name : ctx.boundP.name;
+          
+          let taskMsg = `你们正在进行线下的大冒险惩罚副本。\n【当前惩罚内容】：${tod.content}\n【受罚者（输家）】：${loserRole}\n`;
+          if (isOpening) taskMsg += `这是惩罚的刚开始，请你直接描写当前的场景氛围，交代环境、氛围以及你们正在做的事。\n你的核心任务（根据输赢选择）：\n1. 如果输家是你（${ctx.char.name}）：请你愿赌服输，执行大冒险惩罚。\n2. 如果输家是用户：请你根据用户的最新回复，评价TA的惩罚完成度，或者根据人设催促TA快点执行惩罚。\n❗警告：绝对不要在开头写出“好的”、“开场白”、“开始”等出戏的系统词汇！\n`;
+          else taskMsg += `请顺着剧情和用户的动作往下自然推进。\n`;
+          taskMsg += `❗绝对红线：\n1. 必须采用【轻小说体裁】！\n2. 严禁使用“名字: 台词”的剧本格式！\n3. 人物对话用『』包裹，内心想法用全角括号（）包裹。直接输出正文！`;
 
+          const prompt = window.cpActions.buildMasterPrompt(charId, {
+              history: history,
+              task: taskMsg,
+              recentText: tod.content + '\n' + history,
+              scenario: 'dareStory'
+          });
           const temp = Number(store.apiConfig?.temperature ?? 0.85);
           const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
@@ -985,6 +1194,39 @@ if (!window.cpActions) {
   },
   continueDareStory: async (charId) => {
       await window.cpActions.fetchDareStoryReply(charId, store.coupleSpacesData[charId].currentToD.id, false);
+  },
+  // 🌟 大冒险副本：专属增删改查重摇引擎
+  deleteDareMsg: (charId, msgId) => {
+      if(!confirm("确定要删除这条消息吗？")) return;
+      const tod = store.coupleSpacesData[charId].currentToD;
+      tod.messages = tod.messages.filter(m => m.id !== msgId);
+      if(window.actions?.saveStore) window.actions.saveStore();
+      window.render();
+  },
+  openEditDareMsg: (charId, msgId) => {
+      cpState.editingDareMsgId = msgId; cpState.showDareEditModal = true; window.render();
+  },
+  closeEditDareMsg: () => {
+      cpState.showDareEditModal = false; cpState.editingDareMsgId = null; window.render();
+  },
+  saveEditDareMsg: (charId) => {
+      const text = document.getElementById('dare-edit-textarea').value.trim();
+      const tod = store.coupleSpacesData[charId].currentToD;
+      const msg = tod.messages.find(m => m.id === cpState.editingDareMsgId);
+      if (msg && text) msg.text = text;
+      cpState.showDareEditModal = false;
+      if(window.actions?.saveStore) window.actions.saveStore();
+      window.render();
+  },
+  rerollDareMsg: async (charId, msgId) => {
+      if(!confirm("确定让TA重新生成这段剧情吗？")) return;
+      const tod = store.coupleSpacesData[charId].currentToD;
+      const msgIdx = tod.messages.findIndex(m => m.id === msgId);
+      if (msgIdx === -1) return;
+      tod.messages = tod.messages.slice(0, msgIdx); // 截断这条以后的对话
+      if(window.actions?.saveStore) window.actions.saveStore();
+      window.render();
+      await window.cpActions.fetchDareStoryReply(charId, tod.id, tod.messages.length === 0);
   },
 
     notBuilt: (name) => { window.actions.showToast(name + ' 功能正在快马加鞭施工中！'); }
@@ -1239,7 +1481,7 @@ export function renderCoupleApp(store) {
                      </div>
                      <div>
                          <span class="text-[12px] font-bold text-gray-500 mb-1.5 block">日期</span>
-                         <input id="anni-date" type="date" class="w-full bg-gray-50 border border-gray-100 rounded-[16px] px-4 py-3 outline-none text-[15px] font-bold text-gray-800 focus:bg-rose-50/50 focus:border-rose-200 transition-all">
+                         <input id="anni-date" type="date" class="w-80% bg-gray-50 border border-gray-100 rounded-[16px] px-4 py-3 outline-none text-[15px] font-bold text-gray-800 focus:bg-rose-50/50 focus:border-rose-200 transition-all">
                      </div>
                      <div>
                          <span class="text-[12px] font-bold text-gray-500 mb-1.5 block">想说的话 (选填)</span>
@@ -1511,7 +1753,7 @@ export function renderCoupleApp(store) {
          <div class="px-5 pb-8 pt-2 relative z-20 flex flex-col items-center" onclick="event.stopPropagation()">
             
             ${(!cpState.isGeneratingDiary && (!diary || (!diary.content && (!diary.comments || diary.comments.length === 0))) && cpState.diaryDate === logicalToday) ? `
-               <button onclick="window.cpActions.callToWriteDiary()" class="mb-4 px-7 py-3 bg-gray-900/90 backdrop-blur-md text-white font-extrabold rounded-full active:scale-95 transition-transform text-[13px] tracking-widest shadow-xl border border-gray-700 flex items-center">
+               <button onclick="window.cpActions.callToWriteDiary('${char.id}', '${cpState.diaryDate}')" class="mb-4 px-7 py-3 bg-gray-900/90 backdrop-blur-md text-white font-extrabold rounded-full active:scale-95 transition-transform text-[13px] tracking-widest shadow-xl border border-gray-700 flex items-center">
                   <i data-lucide="pen-tool" class="w-4 h-4 mr-2"></i> 喊 ${char.name} 提笔写日记
                </button>
             ` : ''}
@@ -1887,7 +2129,7 @@ export function renderCoupleApp(store) {
                     ${chatHtml}
                 </div>
                 
-                <div class="flex p-4 bg-white/80 backdrop-blur-md border-t border-gray-100/50 shrink-0">
+                <div class="flex p-4 bg-gray-50 backdrop-blur-md border-t border-gray-100/50 shrink-0">
                     <div class="flex-1 bg-white rounded-[20px] flex items-center border border-gray-200/60 px-2 py-0.5">
                         <input id="tacit-chat-input" type="text" class="flex-1 h-[38px] py-1.5 px-2 outline-none text-[15px] bg-transparent text-gray-800 placeholder-gray-400" onkeydown="if(event.key==='Enter'){event.preventDefault();window.cpActions.sendTacitMsg('${char.id}')}" placeholder="吐槽点什么..." ${tStatus !== 'revealed' ? 'disabled' : ''}>
                     </div>
@@ -1965,12 +2207,13 @@ export function renderCoupleApp(store) {
 
         let storyHtml = target.messages.map(msg => {
             let nameStr = msg.isMe ? boundPersona.name : char.name;
-            let lines = msg.text.replace(/(“[^”]*”|"[^"]*")/g, '\\n$1\\n').replace(/(「[^」]*」)/g, '\\n$1\\n').replace(/[（(]([^）)]*)[）)]/g, '\\n（$1）\\n');
+            // 🌟 替换为『』解析
+            let lines = msg.text.replace(/(『[^』]*』)/g, '\\n$1\\n').replace(/(「[^」]*」)/g, '\\n$1\\n').replace(/[（(]([^）)]*)[）)]/g, '\\n（$1）\\n');
             let formattedLines = lines.split('\\n').filter(l=>l.trim()).map(l => {
                 let line = l.trim();
-                if ((line.startsWith('“') && line.endsWith('”')) || (line.startsWith('"') && line.endsWith('"'))) return `<p class="cp-story-dialogue my-1.5 leading-relaxed">${line}</p>`; 
-                else if (line.startsWith('（') && line.endsWith('）')) return `<p class="cp-story-thought my-1.5 leading-relaxed">${line.slice(1, -1)}</p>`; 
-                else return `<p class="cp-story-desc my-1.5 leading-relaxed">${line}</p>`; 
+                if (line.startsWith('『') && line.endsWith('』')) return `<p class="cp-story-dialogue my-1.5 leading-relaxed text-[#d4b856]">${line}</p>`; 
+                else if (line.startsWith('（') && line.endsWith('）')) return `<p class="cp-story-thought my-1.5 leading-relaxed text-[#9ca3af]">${line.slice(1, -1)}</p>`; 
+                else return `<p class="cp-story-desc my-1.5 leading-relaxed text-gray-800">${line}</p>`; 
             }).join('');
 
             return `
@@ -2085,81 +2328,67 @@ export function renderCoupleApp(store) {
   //界面 8：真心话大冒险
   if (cpState.view === 'tod') {
         const char = store.contacts.find(c => c.id === cpState.activeCharId);
-        const chatRoom = store.chats.find(c => c.charId === char.id);
-        const boundPersona = store.personas.find(p => String(p.id) === String(chatRoom?.boundPersonaId)) || store.personas[0];
         const spaceData = store.coupleSpacesData[char.id] || {};
-        const bgUrl = spaceData.hundredBg || store.bgImage || '';
-        
         const tod = spaceData.currentToD;
         const chat = spaceData.todChat || [];
+        // 🌟 读取专属头像和马甲
+        const ctx = window.cpActions.getQContext(char.id);
+        const myAvatar = ctx.myAvatar;
+        const myName = ctx.boundP.name;
 
         let topAreaHtml = '';
-        if (spaceData.todLoading) {
-            topAreaHtml = `<div class="flex-1 flex flex-col items-center justify-center py-10 opacity-70"><i data-lucide="loader-2" class="w-8 h-8 animate-spin text-pink-400 mb-3"></i><span class="text-[14px] font-bold text-pink-500">正在疯狂发牌...</span></div>`;
-        } else if (!tod) {
-            topAreaHtml = `<div class="flex-1 flex flex-col items-center justify-center py-10 opacity-70 cursor-pointer group" onclick="window.cpActions.nextToDRound('${char.id}')"><i data-lucide="dice-5" class="w-10 h-10 text-pink-300 mb-3 group-active:scale-95 transition-transform"></i><span class="text-[14px] font-bold text-gray-400">点击右上角骰子开启冒险</span></div>`;
-        } else {
+        if (spaceData.todLoading) topAreaHtml = `<div class="flex-1 flex flex-col items-center justify-center py-10 opacity-70"><i data-lucide="loader-2" class="w-8 h-8 animate-spin text-pink-400 mb-3"></i><span class="text-[14px] font-bold text-pink-500">正在疯狂发牌...</span></div>`;
+        else if (!tod) topAreaHtml = `<div class="flex-1 flex flex-col items-center justify-center py-10 opacity-70 cursor-pointer group" onclick="window.cpActions.nextToDRound('${char.id}')"><i data-lucide="dice-5" class="w-10 h-10 text-pink-300 mb-3 group-active:scale-95 transition-transform"></i><span class="text-[14px] font-bold text-gray-400">点击右上角骰子开启冒险</span></div>`;
+        else {
+            const isTruth = tod.type === 'truth';
+            const cardBg = isTruth ? 'from-blue-50 to-cyan-50 border-blue-100' : 'from-pink-50 to-rose-100 border-pink-100';
+            const textColor = isTruth ? 'text-blue-500' : 'text-rose-500';
+            const titleStr = isTruth ? '真心话' : '大冒险';
+
             topAreaHtml = `
             <div class="flex flex-col items-center pt-2 pb-4 w-full px-6 animate-in fade-in">
-                <div class="text-[11px] font-black ${tod.loser === 'ai' ? 'text-blue-500 bg-blue-50' : 'text-rose-500 bg-rose-50'} px-3 py-1 rounded-full mb-4 shadow-inner border ${tod.loser === 'ai' ? 'border-blue-100' : 'border-rose-100'}">${tod.loser === 'ai' ? `${char.name} 输了！` : '你输了！'}</div>
-                <div class="bg-gradient-to-br from-pink-50 to-rose-100 p-6 rounded-[24px] shadow-lg border border-pink-100 flex flex-col items-center relative w-full mb-2">
-                    <span class="text-[10px] font-black text-rose-300 absolute -top-2 left-6 bg-white px-2">${tod.type === 'truth' ? '真心话' : '大冒险'}</span>
-                    <div class="text-[17px] font-extrabold text-gray-800 text-center leading-relaxed font-serif">${tod.content}</div>
+                <div class="text-[11px] font-black ${tod.loser === 'ai' ? 'text-blue-500 bg-blue-50' : 'text-rose-500 bg-rose-50'} px-3 py-1 rounded-full mb-4 shadow-inner border border-rose-100">${tod.loser === 'ai' ? `${char.name} 输了！` : '你输了！'}</div>
+                <div class="bg-gradient-to-br ${cardBg} p-5 rounded-[24px] shadow-lg border flex flex-col items-left w-full mb-2">
+                    <span class="text-[16px] font-black ${textColor} tracking-widest">${titleStr}</span>
+                    <div class="w-4/5 h-px bg-gray-300 my-3 rounded-full opacity-30"></div>
+                    <div class="text-[16px] font-extrabold text-gray-800 text-center leading-relaxed font-serif">${tod.content}</div>
                 </div>
-                ${tod.type === 'dare' && tod.messages && tod.messages.length > 0 ? `<div class="flex justify-center mt-3"><div class="px-4 py-1.5 rounded-full bg-rose-50 text-rose-500 text-[11px] font-bold">副本进行中...</div></div>` : ''}
             </div>`;
         }
 
+        // 🌟 1:1 复刻默契问答聊天区（带 Loading 和 专属头像）
+        let chatHtml = chat.map((m) => {
+            if (m.msgType === 'loading') {
+                return `<div class="flex justify-start my-3 pr-12 w-full"><div class="bg-blue-100/60 text-blue-500 px-4 py-2.5 rounded-[18px] rounded-tl-sm shadow-sm flex items-center space-x-1.5"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span class="text-[12px] font-bold">TA 正在输入...</span></div></div>`;
+            } else if (m.sender === 'me') {
+                return `<div class="flex justify-end my-3 pl-12 w-full"><div class="bg-rose-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tr-sm shadow-sm break-words relative"><img src="${myAvatar}" class="w-6 h-6 rounded-full absolute -right-8 top-0 border border-rose-200">${m.text}</div></div>`;
+            } else {
+                return `<div class="flex justify-start my-3 pr-12 w-full"><div class="bg-blue-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tl-sm shadow-sm break-words relative"><img src="${char.avatar}" class="w-6 h-6 rounded-full absolute -left-8 top-0 border border-blue-200">${m.text}</div></div>`;
+            }
+        }).join('');
+
         return `
-        <div class="w-full h-full flex flex-col bg-[#fcfcfc] relative animate-in fade-in slide-in-from-right-4 duration-300" style="background: ${bgUrl ? `url('${bgUrl}') center/cover no-repeat` : '#fcfcfc'} !important;">
-            ${bgUrl ? `<div class="absolute inset-0 bg-white/50 backdrop-blur-[3px] z-0 pointer-events-none"></div>` : ''}
-            
-            <div class="w-full shrink-0 flex flex-col shadow-sm z-20 rounded-b-[32px] relative bg-white">
-                <div class="pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-100 sticky top-0 transition-colors bg-white/90 backdrop-blur-md">
+        <div class="w-full h-full flex flex-col bg-[#fcfcfc] relative animate-in fade-in slide-in-from-right-4 duration-300">
+            <div class="w-full shrink-0 flex flex-col shadow-sm z-20 rounded-b-[32px] relative" style="background: #ffffff !important;">
+                <div class="pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-100 sticky top-0">
                     <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.openDashboard('${char.id}')"><i data-lucide="chevron-left" class="w-7 h-7 text-gray-800"></i></div>
                     <span class="text-[16px] font-extrabold text-gray-800 tracking-wider">真心话大冒险</span>
-                    <div class="cursor-pointer active:scale-90 p-1 -mr-1" title="下一轮" onclick="window.cpActions.nextToDRound('${char.id}')"><i data-lucide="dice-5" class="w-6 h-6 text-pink-400"></i></div>
+                    <div class="cursor-pointer active:scale-90 p-1 -mr-1" onclick="window.cpActions.nextToDRound('${char.id}')"><i data-lucide="dice-5" class="w-6 h-6 text-pink-400"></i></div>
                 </div>
-                <div class="pb-6 pt-2 transition-all duration-300">
-                    ${topAreaHtml}
-                </div>
+                <div class="pb-6 pt-2">${topAreaHtml}</div>
             </div>
 
-            <div id="cp-tod-scroll" class="flex-1 overflow-y-auto p-5 pb-6 hide-scrollbar relative z-10 scroll-smooth">
-                <div class="text-center text-xs text-gray-400 italic mb-6 mt-2 tracking-widest pointer-events-none z-10 relative">—— 冒险讨论 ——</div>
-                <div class="flex flex-col relative z-10">
-                    ${chat.map(m => {
-                        let nameStr = m.sender === 'me' ? boundPersona.name : char.name;
-                        if (m.sender === 'me') {
-                            return `
-                            <div class="flex flex-col items-end my-2 pl-4 w-full">
-                                <span class="text-[11px] font-bold text-gray-400 mb-1.5 pr-1">${nameStr}</span>
-                                <div class="bg-rose-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tr-sm shadow-sm break-words">${m.text}</div>
-                            </div>`;
-                        } else {
-                            return `
-                            <div class="flex flex-col items-start my-2 pr-4 w-full">
-                                <span class="text-[11px] font-bold text-gray-400 mb-1.5 pl-1">${nameStr}</span>
-                                <div class="bg-blue-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tl-sm shadow-sm break-words">${m.text}</div>
-                            </div>`;
-                        }
-                    }).join('')}
-                    
-                    ${tod && tod.type === 'dare' ? `
-                        <div class="flex justify-center w-full mt-10 mb-2">
-                            <div onclick="window.cpActions.openDareStory('${char.id}')" class="px-6 py-3 bg-rose-400 text-white font-black rounded-full flex items-center space-x-2 shadow-lg active:scale-95 transition-all cursor-pointer">
-                                <i data-lucide="flame" class="w-5 h-5"></i><span class="text-[14px] tracking-wide">去完成大冒险副本</span>
-                            </div>
-                        </div>
-                    ` : ''}
-                </div>
+            <div id="cp-tod-scroll" class="flex-1 overflow-y-auto p-5 pb-24 hide-scrollbar relative z-10 scroll-smooth">
+                <div class="text-center text-xs text-gray-400 italic mb-8 mt-4 tracking-widest pointer-events-none">—— 真心话讨论区 ——</div>
+                <div class="space-y-4 px-6">${chatHtml}</div>
+                ${tod && tod.type === 'dare' ? `<div class="flex justify-center my-6"><div onclick="window.cpActions.openDareStory('${char.id}')" class="px-6 py-3 bg-rose-400 text-white font-black rounded-full flex items-center space-x-2 shadow-lg active:scale-95 transition-all cursor-pointer"><i data-lucide="flame" class="w-4 h-4"></i><span class="text-[13px]">去完成大冒险副本</span></div></div>` : ''}
             </div>
 
-            <div class="flex p-4 bg-white/80 backdrop-blur-md border-t border-gray-100/50 shrink-0">
+            <div class="flex p-4 bg-gray-50 backdrop-blur-md border-t border-gray-100/50 shrink-0 absolute bottom-0 left-0 right-0 z-20">
                 <div class="flex-1 bg-white rounded-[20px] flex items-center border border-gray-200/60 px-2 py-0.5">
-                    <input id="tod-chat-input" placeholder="输了要接受惩罚哦..." class="flex-1 h-[38px] py-1.5 px-2 outline-none text-[15px] bg-transparent text-gray-800 placeholder-gray-400" ${!tod || spaceData.todLoading ? 'disabled' : ''}>
+                    <input id="tod-chat-input" type="text" class="flex-1 h-[38px] py-1.5 px-2 outline-none text-[15px] bg-transparent text-gray-800 placeholder-gray-400" onkeydown="if(event.key==='Enter'){event.preventDefault();window.cpActions.sendToDMsg('${char.id}')}" placeholder="吐槽点什么..." ${!tod || spaceData.todLoading ? 'disabled' : ''}>
                 </div>
-                <button onclick="window.cpActions.sendToDMsg('${char.id}')" class="w-[60px] h-[40px] flex items-center justify-center bg-transperant rounded-full text-gray-500 active:scale-90 transition-transform flex-shrink-0 ${(spaceData.todLoading || !tod) ? 'opacity-30' : ''}" ${(spaceData.todLoading || !tod) ? 'disabled' : ''}>
+                <button onclick="window.cpActions.requestToDReply('${char.id}')" class="w-[60px] h-[40px] flex items-center justify-center bg-transparent rounded-full text-gray-500 active:scale-90 transition-transform flex-shrink-0 ${(!tod || spaceData.todLoading) ? 'opacity-50' : ''}" ${(!tod || spaceData.todLoading) ? 'disabled' : ''} title="获取 TA 的回复">
                     <i data-lucide="sparkles" class="w-7 h-7 ml-1"></i>
                 </button>
             </div>
@@ -2168,18 +2397,18 @@ export function renderCoupleApp(store) {
 
     } else if (cpState.view === 'dareStory') {
         const char = store.contacts.find(c => c.id === cpState.activeCharId);
-        const chatRoom = store.chats.find(c => c.charId === char.id);
-        const boundPersona = store.personas.find(p => String(p.id) === String(chatRoom?.boundPersonaId)) || store.personas[0];
         const spaceData = store.coupleSpacesData[char.id] || {};
         const tod = spaceData.currentToD;
-        const bgUrl = spaceData.hundredBg || store.bgImage || ''; // 继承角色专属背景
+        const bgUrl = spaceData.hundredBg || ''; 
+        const ctx = window.cpActions.getQContext(char.id);
 
+        // 🌟 正则替换：严格解析『』包裹的对话
         let storyHtml = tod.messages.map(msg => {
-            let nameStr = msg.sender === 'me' ? boundPersona.name : char.name;
-            let lines = msg.text.replace(/(“[^”]*”|"[^"]*")/g, '\\n$1\\n').replace(/[（(]([^）)]*)[）)]/g, '\\n（$1）\\n');
+            let nameStr = msg.sender === 'me' ? ctx.boundP.name : char.name;
+            let lines = msg.text.replace(/(『[^』]*』)/g, '\\n$1\\n').replace(/(「[^」]*」)/g, '\\n$1\\n').replace(/[（(]([^）)]*)[）)]/g, '\\n（$1）\\n');
             let formattedLines = lines.split('\\n').filter(l=>l.trim()).map(l => {
                 let line = l.trim();
-                if ((line.startsWith('“') && line.endsWith('”')) || (line.startsWith('"') && line.endsWith('"'))) return `<p class="cp-story-dialogue my-1.5 leading-relaxed text-[#d4b856]">${line}</p>`; 
+                if (line.startsWith('『') && line.endsWith('』')) return `<p class="cp-story-dialogue my-1.5 leading-relaxed text-[#d4b856]">${line}</p>`; 
                 else if (line.startsWith('（') && line.endsWith('）')) return `<p class="cp-story-thought my-1.5 leading-relaxed text-[#9ca3af]">${line.slice(1, -1)}</p>`; 
                 else return `<p class="cp-story-desc my-1.5 leading-relaxed text-gray-800">${line}</p>`; 
             }).join('');
@@ -2190,8 +2419,9 @@ export function renderCoupleApp(store) {
                     <div class="mb-3 text-[12px] font-black tracking-widest text-gray-400">${nameStr}</div>
                     <div class="text-[15px] text-gray-800 leading-relaxed font-serif text-justify pb-6">${formattedLines}</div>
                     <div class="absolute bottom-3 right-4 flex items-center space-x-3.5 opacity-80 transition-opacity">
-                        ${msg.sender === 'ai' ? `<i data-lucide="refresh-cw" class="w-4 h-4 cursor-pointer active:scale-90 text-gray-500" title="重摇"></i>` : ''}
-                        <i data-lucide="trash-2" class="w-4 h-4 cursor-pointer active:scale-90 text-red-400" title="删除"></i>
+                        ${!msg.isMe ? `<i data-lucide="refresh-cw" class="w-4 h-4 cursor-pointer active:scale-90 text-gray-500" onclick="window.cpActions.rerollDareMsg('${char.id}', ${msg.id})" title="重摇"></i>` : ''}
+                        <i data-lucide="edit-3" class="w-4 h-4 cursor-pointer active:scale-90 text-gray-500" onclick="window.cpActions.openEditDareMsg('${char.id}', ${msg.id})" title="编辑"></i>
+                        <i data-lucide="trash-2" class="w-4 h-4 cursor-pointer active:scale-90 text-red-400" onclick="window.cpActions.deleteDareMsg('${char.id}', ${msg.id})" title="删除"></i>
                     </div>
                 </div>
             </div>`;
@@ -2200,15 +2430,14 @@ export function renderCoupleApp(store) {
         return `
         <div class="cp-story-container w-full h-full flex flex-col relative font-serif z-[60] animate-in slide-in-from-bottom-4 duration-300" style="background: ${bgUrl ? `url('${bgUrl}') center/cover no-repeat` : '#fcfcfc'} !important;">
             ${bgUrl ? `<div class="absolute inset-0 bg-white/50 backdrop-blur-[3px] z-0 pointer-events-none"></div>` : ''}
-            
             <div class="cp-story-topbar bg-white/80 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between z-10 sticky top-0 border-b border-gray-100 shadow-sm">
                  <div class="flex items-center cursor-pointer text-gray-800 active:opacity-50" onclick="window.cpActions.openToD('${char.id}')"><i data-lucide="chevron-down" class="w-7 h-7"></i></div>
                  <span class="cp-story-title flex-1 text-center font-bold text-[16px] tracking-widest text-gray-800 truncate px-4">${tod.isTyping ? '构思剧情...' : '大冒险副本'}</span>
-                 <div class="w-8"></div>
+                 <div class="flex justify-end cursor-pointer active:scale-90 text-gray-800" onclick="window.cpActions.openHundredSettings()"><i data-lucide="settings" class="w-6 h-6"></i></div>
             </div>
             
             <div id="cp-dare-scroll" class="cp-story-scroll flex-1 p-5 overflow-y-auto hide-scrollbar flex flex-col pb-6 z-10 relative scroll-smooth">
-                <div class="text-center text-xs text-gray-400 italic mb-8 mt-4 tracking-widest pointer-events-none">—— 大冒险 · 惩罚开始 ——</div>
+                <div class="text-center text-xs text-gray-400 italic mb-8 mt-4 tracking-widest pointer-events-none">—— 惩罚开始 ——</div>
                 <div class="bg-gradient-to-br from-pink-50 to-rose-100 p-6 rounded-[20px] shadow-lg border border-pink-100 flex flex-col items-center w-full mb-8 relative z-20">
                     <span class="text-[10px] font-black text-rose-300 absolute -top-2 left-6 bg-white px-2">惩罚任务</span>
                     <div class="text-[16px] font-black text-rose-900 text-center leading-relaxed font-serif">${tod.content}</div>
@@ -2218,13 +2447,25 @@ export function renderCoupleApp(store) {
             
             <div class="cp-story-bottombar bg-white/80 backdrop-blur-md px-4 py-3 pb-8 border-t border-gray-100 flex flex-col shadow-2xl z-20 relative">
                 <div class="relative w-full bg-white/80 border border-gray-200 focus-within:bg-white rounded-[16px] p-1 flex items-end transition-all shadow-inner">
-                    <textarea id="dare-chat-input" placeholder="描写你的动作或对话..." class="flex-1 min-h-[80px] max-h-[150px] bg-transparent text-gray-800 placeholder-gray-400 p-3 outline-none text-[15px] resize-none font-serif leading-relaxed hide-scrollbar" ${tod.isTyping ? 'disabled' : ''}></textarea>
+                    <textarea id="dare-chat-input" placeholder="描写动作..." class="flex-1 min-h-[80px] max-h-[150px] bg-transparent text-gray-800 p-3 outline-none text-[15px] resize-none font-serif hide-scrollbar" ${tod.isTyping ? 'disabled' : ''}></textarea>
                     <div class="flex flex-col items-center justify-end pb-2 pr-2 space-y-3 shrink-0">
                         <button onclick="window.cpActions.continueDareStory('${char.id}')" class="w-9 h-9 flex items-center justify-center text-gray-400 hover:text-gray-700 active:scale-90 transition-all ${tod.isTyping ? 'opacity-30' : ''}" ${tod.isTyping ? 'disabled' : ''} title="让AI接着往下写"><i data-lucide="feather" class="w-5 h-5"></i></button>
-                        <button onclick="window.cpActions.sendDareMsg('${char.id}')" class="w-9 h-9 flex items-center justify-center text-gray-800 active:scale-90 transition-all ${tod.isTyping ? 'opacity-30' : ''}" ${tod.isTyping ? 'disabled' : ''}><i data-lucide="send" class="w-5 h-5 -ml-0.5"></i></button>
+                        <button onclick="window.cpActions.sendDareMsg('${char.id}')" class="w-9 h-9 flex items-center justify-center text-gray-800 active:scale-90 transition-all ${tod.isTyping ? 'opacity-30' : ''}" ${tod.isTyping ? 'disabled' : ''} title="发送"><i data-lucide="send" class="w-5 h-5 -ml-0.5"></i></button>
                     </div>
                 </div>
             </div>
+
+            ${cpState.showDareEditModal ? `
+            <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in" onclick="window.cpActions.closeEditDareMsg()">
+                 <div style="background: #fcfcfc !important;" class="w-full max-w-sm rounded-[28px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+                     <div class="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-white"><span class="font-bold text-gray-800 text-[16px]">编辑剧情内容</span></div>
+                     <div class="p-6 flex flex-col space-y-2">
+                         <textarea id="dare-edit-textarea" class="w-full h-48 bg-white border border-gray-200 rounded-[16px] p-5 outline-none text-[15px] text-gray-800 shadow-sm resize-none hide-scrollbar leading-relaxed font-serif">${tod.messages.find(m => m.id === cpState.editingDareMsgId)?.text || ''}</textarea>
+                         <button onclick="window.cpActions.saveEditDareMsg('${char.id}')" class="w-full py-4 bg-gray-900 text-white font-extrabold rounded-[16px] active:scale-95 transition-transform mt-2 tracking-widest text-[14px]">确认修改</button>
+                     </div>
+                 </div>
+             </div>
+            ` : ''}
         </div>
         `;
   }
@@ -2266,15 +2507,27 @@ if (!window.cpBootScanStarted) {
                 const hasUnanswered = spaceData.questions.some(q => q.asker === 'ai' && !q.answer);
                 if (hasUnanswered) continue;
                 
+                // 🌟 防连发并发锁：如果正在请求中，直接跳过！
+                if (spaceData.isFetchingAIQ) continue;
+                spaceData.isFetchingAIQ = true;
+                
                 try {
                     const ctx = getBgContext(charId);
-                    // 🌟 致命Bug修复：加了 ? 防止从未聊过天时的空指针崩溃！
-                    const msgs = (ctx.chat?.messages || []).filter(m => m.msgType === 'text' && !m.isHidden).slice(-60);
+                    const msgs = (ctx.chat?.messages || []).filter(m => m.msgType === 'text' && !m.isHidden).slice(-100);
                     const last30 = msgs.map(m => `${m.isMe ? ctx.boundP.name : ctx.char.name}: ${m.text}`).join('\n');
                     const historyPrompt = last30 ? `\n【最近30回合聊天记录】\n${last30}` : '';
                     
-                    const prompt = `${ctx.promptStr}${historyPrompt}\n\n【系统任务】你现在在情侣提问箱。请向用户发起1个提问，必须是你想问但平时不敢或不好意思开口问的，有一定深度的问题。你可以针对最近的聊天记录提问，也可以针对记忆中的事件提问，或者问一些哲学、生活习惯问题。\n❗要求：语言极度精简自然，字数严格在30字以内！直接输出问题正文，绝不要带任何前缀！`;
+                    // 🌟 防重复机制：提取历史问过的问题
+                    const askedHistory = spaceData.questions.filter(q => q.asker === 'ai').map(q => q.text).slice(-100).join('、');
+                    const avoidPrompt = askedHistory ? `\n❗【绝对禁止重复】：你之前已经问过以下问题，绝不允许再问类似的问题：${askedHistory}` : '';
                     
+                    const taskMsg = `【系统任务】你现在在情侣提问箱。请向用户提出1个想问但平时不敢或不好意思提出的，有一定深度的问题。${avoidPrompt}\n你可以针对最近的聊天记录提问，也可以针对记忆中的事件提问，或者问一些哲学、生活习惯问题。\n❗要求：语言极度精简自然，字数严格在30字以内！直接输出问题正文，绝不要带任何前缀！`;
+            const prompt = window.cpActions.buildMasterPrompt(charId, {
+                history: historyPrompt,
+                task: taskMsg,
+                recentText: historyPrompt,
+                scenario: 'questions'
+            });
                     const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                         body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.9 })
@@ -2284,9 +2537,10 @@ if (!window.cpBootScanStarted) {
                     
                     spaceData.questions.unshift({ id: 'Q_' + Date.now(), asker: 'ai', text: questionText, answer: null, timestamp: Date.now() });
                     if (typeof window.render === 'function') window.render();
-                    console.log(`[CoupleApp] 🎯提问箱静默扫描成功：${ctx.char.name} 提出了一个新问题！`);
                 } catch(e) {
                     console.error('[CoupleApp] 提问箱静默出题失败:', e);
+                } finally {
+                    spaceData.isFetchingAIQ = false; // 🌟 请求结束，解锁
                 }
             }
         }
@@ -2296,38 +2550,50 @@ if (!window.cpBootScanStarted) {
     if (!window.cpActions) window.cpActions = {};
     window.cpActions.doQuestionScan = doQuestionScan;
 
-    // 🌟 日记本巡逻员
+    // 🌟 日记本巡逻员 (带终极并发死锁)
     const doDiaryScan = async () => {
         if (!store.coupleSpaces || !store.apiConfig?.apiKey || !store.diaryConfig?.enabled) return;
+        
         const now = new Date();
         const currentStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
         if (currentStr < store.diaryConfig.time) return; // 还没到写日记的点
 
-        const logicalToday = getLogicalDateStr();
-        for (const charId of store.coupleSpaces) {
-            store.diaries = store.diaries || [];
-            const hasDiary = store.diaries.find(d => d.charId === charId && d.date === logicalToday);
-            if (hasDiary) continue; // 今天写过了
+        // 🌟 死锁开启：防止一分钟内重复触发
+        if (store.isFetchingDiaryScan) return;
+        store.isFetchingDiaryScan = true;
 
-            try {
-                console.log(`[CoupleApp] 🌙到点了！触发 ${charId} 的自动日记撰写...`);
-                const ctx = getBgContext(charId);
-                const history = getTodayChatHistory(charId, logicalToday); // 这两个方法都在当前文件顶部，能直接用到！
-                
-                const prompt = `${ctx.promptStr}\n\n【今日聊天记录】\n${history}\n\n【系统任务】今天即将结束，请你结合今天的聊天记录、人设和记忆，写一篇今天的私密日记。\n要求：\n1. 第一人称口吻，真实自然的情感表达。\n2. 总结今天的互动，或者表达对用户的思念/感受。\n3. 直接输出日记正文，严禁带有任何多余的系统标签、标题或格式！`;
-                
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
-                });
-                const data = await res.json();
-                const content = data.choices[0].message.content.trim();
-                
-                store.diaries.push({ id: Date.now(), charId: charId, date: logicalToday, content: content, comments: [] });
-                if (typeof window.actions !== 'undefined' && window.actions.saveStore) window.actions.saveStore();
-                if (typeof window.render === 'function') window.render();
-                console.log(`[CoupleApp] 📖 ${ctx.char.name} 的日记已静默生成！`);
-            } catch(e) { console.error('静默写日记失败', e); }
+        try {
+            const logicalToday = getLogicalDateStr();
+            for (const charId of store.coupleSpaces) {
+                store.diaries = store.diaries || [];
+                const hasDiary = store.diaries.find(d => d.charId === charId && d.date === logicalToday);
+                if (hasDiary) continue; // 今天写过了
+
+                try {
+                    // 替换掉原来的 promptStr 组装
+          const historyStr = getTodayChatHistory(charId, logicalToday);
+          const taskMsg = `【系统任务】今天即将结束，请你结合今天的聊天记录、人设和记忆，写一篇今天的私密日记。\n要求：\n1. 第一人称口吻，真实自然的情感表达。\n2. 总结今天的互动，或者表达对用户的思念/感受。\n3. 直接输出日记正文，严禁带有任何多余的系统标签、标题或格式！`;
+          
+          const prompt = window.cpActions.buildMasterPrompt(charId, {
+              history: historyStr,
+              task: taskMsg,
+              recentText: historyStr,
+              scenario: 'diary'
+          });
+                    const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                        body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+                    });
+                    const data = await res.json();
+                    
+                    store.diaries.push({ id: Date.now(), charId: charId, date: logicalToday, content: data.choices[0].message.content.trim(), comments: [] });
+                    if (typeof window.actions !== 'undefined' && window.actions.saveStore) window.actions.saveStore();
+                    if (typeof window.render === 'function') window.render();
+                } catch(e) { console.error('静默写日记单角色失败', e); }
+            }
+        } finally {
+            // 🌟 死锁释放：无论成功还是报错，最后必定释放锁！
+            store.isFetchingDiaryScan = false;
         }
     };
 
