@@ -1895,7 +1895,7 @@ export function renderCoupleApp(store) {
   if (cpState.view === 'questions') {
         const char = store.contacts.find(c => c.id === cpState.activeCharId);
         const chat = store.chats.find(c => c.charId === char.id);
-        const myAvatar = chat?.myAvatar || (store.personas.find(p => String(p.id) === String(chat?.boundPersonaId)) || store.personas[0]).avatar;
+        const myAvatar = chat?.myAvatar || (store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas[0]).avatar;
 
         store.coupleSpacesData = store.coupleSpacesData || {};
         const spaceData = store.coupleSpacesData[char.id] || {};
@@ -2041,7 +2041,7 @@ export function renderCoupleApp(store) {
   if (cpState.view === 'tacit') {
         const char = store.contacts.find(c => c.id === cpState.activeCharId);
         const chat = store.chats.find(c => c.charId === char.id);
-        const myAvatar = chat?.myAvatar || (store.personas.find(p => String(p.id) === String(chat?.boundPersonaId)) || store.personas[0]).avatar;
+        const myAvatar = chat?.myAvatar || (store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas[0]).avatar;
 
         store.coupleSpacesData = store.coupleSpacesData || {};
         const spaceData = store.coupleSpacesData[char.id] || {};

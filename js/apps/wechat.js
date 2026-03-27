@@ -5601,15 +5601,22 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
 
         // 🌟 3. 提取 HTML 保护罩
         let codeBlocks = [];
+        
+        // 剪刀一：对标准 markdown 格式 ```html ... ``` 的绞杀
         remainingText = remainingText.replace(/```[a-z]*\n?([\s\S]*?)```/gi, (match, code) => {
             let id = `__CODE_BLOCK_${codeBlocks.length}__`;
-            codeBlocks.push(`<div style="white-space: normal !important; line-height: 1.5;">${code.trim()}</div>`); 
-            return `\n${id}\n`;
+            // 🚨 核心手术：把代码块内部的所有换行符 \n \r 全部替换成空格！
+            let flatCode = code.replace(/\r\n|\r|\n/g, ' ').trim();
+            codeBlocks.push(`<div style="white-space: normal !important; line-height: 1.5;">${flatCode}</div>`); 
+            return `\n${id}\n`; // 这里故意留换行是为了让它能独占一个气泡
         });
-        // 🌟 扩大防弹罩：只要是以这些块级标签包裹的，全都被视为完整的 HTML 卡片保护起来！
+        
+        // 剪刀二：对未正确闭合的、或者只写了裸标签的 HTML 的绞杀
         remainingText = remainingText.replace(/(<(div|html|body|main|section|article|form|table)[\s\S]*?<\/\2>)/gi, (match) => {
             let id = `__CODE_BLOCK_${codeBlocks.length}__`;
-            codeBlocks.push(`<div style="white-space: normal !important; line-height: 1.5;">${match.trim()}</div>`); 
+            // 🚨 同样把内部换行抹平
+            let flatCode = match.replace(/\r\n|\r|\n/g, ' ').trim();
+            codeBlocks.push(`<div style="white-space: normal !important; line-height: 1.5;">${flatCode}</div>`); 
             return `\n${id}\n`;
         });
 
