@@ -315,8 +315,52 @@ function render() {
     </div>
   `;
 
-  // 3. 将状态栏永远盖在 App 界面最上方！
-  container.innerHTML = statusBarHtml + appHtml;
+  // 🌟 1. 全局来电横幅渲染（加入终极防弹衣屏蔽全局毛玻璃）
+  let globalCallHtml = '';
+  if (store.globalCallAlert) {
+      const alert = store.globalCallAlert;
+      let avatarHtml = '';
+      if (alert.avatar && (alert.avatar.includes('http') || alert.avatar.startsWith('data:'))) {
+          avatarHtml = `<img src="${alert.avatar}" class="w-full h-full object-cover" />`;
+      } else {
+          avatarHtml = `<div class="w-full h-full flex items-center justify-center text-2xl">${alert.avatar || ''}</div>`;
+      }
+
+      globalCallHtml = `
+        <div class="absolute top-4 left-4 right-4 z-[99999] rounded-[16px] p-4 flex items-center shadow-2xl animate-in slide-in-from-top-4 duration-300 border border-gray-700/50 cursor-pointer" onclick="window.wxActions.answerGlobalCall('${alert.charId}')" style="background-color: #2c2c2c !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background-image: none !important;">
+           <div class="w-12 h-12 rounded-full overflow-hidden mr-4 border border-gray-600 shrink-0 bg-gray-800">${avatarHtml}</div>
+           <div class="flex-1 flex flex-col overflow-hidden">
+              <span class="text-white font-bold text-[16px] truncate" style="color: white !important;">${alert.name}</span>
+              <span class="text-[13px] mt-0.5 truncate" style="color: #9ca3af !important;">邀请你进行${alert.callType === 'video' ? '视频' : '语音'}通话...</span>
+           </div>
+           <div class="flex space-x-3 ml-2 shrink-0">
+              <div class="w-10 h-10 bg-red-500 rounded-full flex items-center justify-center text-white active:scale-90 transition-transform shadow-md" onclick="event.stopPropagation(); window.wxActions.declineGlobalCall('${alert.charId}')"><i data-lucide="phone-off" style="width:18px;"></i></div>
+              <div class="w-10 h-10 bg-green-500 rounded-full flex items-center justify-center text-white active:scale-90 transition-transform shadow-md animate-bounce" onclick="event.stopPropagation(); window.wxActions.answerGlobalCall('${alert.charId}')"><i data-lucide="${alert.callType === 'video' ? 'video' : 'phone'}" style="width:18px;"></i></div>
+           </div>
+        </div>
+      `;
+  }
+
+  // 🌟 2. 全局通话悬浮窗渲染（固定颜色 + 右下角定位 + 防弹衣）
+  let floatCallHtml = '';
+  if (store.activeCall && (store.currentApp !== 'wechat' || window.wxState?.view !== 'call')) {
+      const isVideo = store.activeCall.type === 'video';
+      const duration = store.activeCall.duration || 0;
+      const m = String(Math.floor(duration / 60)).padStart(2, '0');
+      const s = String(duration % 60).padStart(2, '0');
+
+      floatCallHtml = `
+        <div id="mc-float-call" class="absolute bottom-40 right-4 z-[99990] opacity-100 rounded-[18px] p-3 flex flex-col items-center shadow-2xl cursor-pointer active:scale-95 transition-transform animate-in fade-in-up zoom-in border border-white/20" onclick="window.wxActions.resumeCall()" style="background-color: #07c160 !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; background-image: none !important;">
+           <i data-lucide="${isVideo ? 'video' : 'phone'}" class="w-5 h-5 mb-1 animate-pulse" style="color: white !important;"></i>
+           <span id="floating-call-time" class="text-[11px] font-mono font-bold tracking-wider opacity-100" style="color: white !important;">
+               ${m}:${s}
+           </span>
+        </div>
+      `;
+  }
+
+  // 3. 将状态栏、APP界面、来电横幅、悬浮球 一起渲染！
+  container.innerHTML = statusBarHtml + appHtml + globalCallHtml + floatCallHtml;
   
   if (window.lucide) window.lucide.createIcons();
   

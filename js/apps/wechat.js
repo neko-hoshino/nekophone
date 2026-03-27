@@ -246,9 +246,33 @@ const wxState = {
   newGroupData: { members: [], name: '', personaId: null },
 };
 wxState.ringtone.loop = true;
+window.wxState = wxState; // 🌟 把微信内部状态暴露给全局，方便外部读取
 
 window.wxActions = {
-// 更加无敌的“计次型”双击判定器
+// 🌟 全局来电横幅：接听与挂断动作
+  answerGlobalCall: (charId) => {
+      // 🌟 记录接听来电时的界面
+      store.callReturnPath = { 
+          app: store.currentApp, 
+          view: typeof wxState !== 'undefined' ? wxState.view : 'main' 
+      };
+
+      store.globalCallAlert = null; 
+      store.currentApp = 'wechat';  
+      wxState.activeChatId = charId;
+      wxState.view = 'incomingCall';  
+      window.render();
+  },
+  declineGlobalCall: (charId) => {
+      store.globalCallAlert = null; // 🌟 改为 store
+      try { wxState.ringtone.pause(); wxState.ringtone.currentTime = 0; } catch(e){}
+      const chat = store.chats.find(c => c.charId === charId);
+      if (chat) {
+          chat.messages.push({ id: Date.now(), sender: 'system', text: `已拒绝通话`, isMe: true, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
+      }
+      window.render();
+  },
+  // 更加无敌的“计次型”双击判定器
   avatarClickCount: 0,
   avatarClickTimer: null,
   handleAvatarClick: (charId) => {
@@ -398,6 +422,12 @@ window.wxActions = {
       
       const chat = store.chats.find(c => c.charId === charId);
       if (chat) chat.unreadCount = 0;
+
+      // 🌟 在 openChat 动作里，也改为验证 store.globalCallAlert
+      if (store.globalCallAlert && store.globalCallAlert.charId === charId) {
+          store.globalCallAlert = null; 
+          wxState.view = 'incomingCall';  
+      }
       
       wxState.noAnimate = false; // 🌟 刚进门，允许播放进场动画！
       window.render(); 
@@ -2129,52 +2159,85 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
   startCall: (type) => { 
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     chat.messages.push({ id: Date.now(), sender: 'system', text: `你发起了${type === 'video' ? '视频' : '语音'}通话`, isMe: true, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
-    wxState.view = 'call'; wxState.callType = type; wxState.callStartTime = Date.now(); wxState.showPlusMenu = false; 
+    
+    wxState.view = 'call'; 
+    wxState.callType = type; 
+    wxState.callStartTime = Date.now(); 
+    wxState.showPlusMenu = false;
+    // 🌟 主动拨打电话，记忆路径设为当前聊天室
+    store.callReturnPath = { app: 'wechat', view: 'chatRoom' }; 
+
+    // 🌟 1. 将这通电话的状态推入全局，建立联系！
+    store.activeCall = {
+        charId: wxState.activeChatId,
+        type: type,
+        duration: 0,
+        startTime: Date.now()
+    };
 
     // 🌟 核心防御：趁着你点拨打的瞬间，给全局播放器喂一口静音，抢占浏览器白名单！
     if (!window.wxCallPlayer) window.wxCallPlayer = new Audio();
     window.wxCallPlayer.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
     window.wxCallPlayer.play().catch(()=>{});
 
-    wxState.callDurationSeconds = 0;
     if(wxState.callTimerId) clearInterval(wxState.callTimerId);
     wxState.callTimerId = setInterval(() => {
-      wxState.callDurationSeconds++;
+      // 🌟 2. 全局状态累加秒数
+      if (store.activeCall) store.activeCall.duration++;
+      const duration = store.activeCall ? store.activeCall.duration : 0;
+      const m = String(Math.floor(duration / 60)).padStart(2, '0');
+      const s = String(duration % 60).padStart(2, '0');
+      
+      // 🌟 3. 更新大屏 UI
       const el = document.getElementById('call-duration-display');
-      if(el) {
-        const m = String(Math.floor(wxState.callDurationSeconds / 60)).padStart(2, '0');
-        const s = String(wxState.callDurationSeconds % 60).padStart(2, '0');
-        el.innerText = `${m}:${s}`;
-      }
+      if(el) el.innerText = `${m}:${s}`;
+      
+      // 🌟 4. 同步更新悬浮窗 UI
+      const floatEl = document.getElementById('floating-call-time');
+      if(floatEl) floatEl.innerText = `${m}:${s}`;
     }, 1000);
-    window.render(); window.wxActions.scrollToBottom();
+    
+    window.render(); 
+    window.wxActions.scrollToBottom();
   },
   
   acceptCall: () => {
     try { wxState.ringtone.pause(); wxState.ringtone.currentTime = 0; } catch(e){} 
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     chat.messages.push({ id: Date.now(), sender: 'system', text: `已接通${wxState.callType === 'video' ? '视频' : '语音'}通话`, isMe: false, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
-    wxState.view = 'call'; wxState.callStartTime = Date.now(); 
     
-    // 🌟 核心防御：趁着接听的瞬间，抢占白名单！
+    wxState.view = 'call'; 
+    wxState.callStartTime = Date.now(); 
+    
+    // 🌟 将这通电话的进行状态全局化！
+    store.activeCall = {
+        charId: wxState.activeChatId,
+        type: wxState.callType,
+        duration: 0,
+        startTime: Date.now()
+    };
+
     if (!window.wxCallPlayer) window.wxCallPlayer = new Audio();
     window.wxCallPlayer.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
     window.wxCallPlayer.play().catch(()=>{});
 
-    wxState.callDurationSeconds = 0;
     if(wxState.callTimerId) clearInterval(wxState.callTimerId);
     wxState.callTimerId = setInterval(() => {
-      wxState.callDurationSeconds++;
+      // 全局状态累加
+      if (store.activeCall) store.activeCall.duration++;
+      const m = String(Math.floor((store.activeCall?.duration || 0) / 60)).padStart(2, '0');
+      const s = String((store.activeCall?.duration || 0) % 60).padStart(2, '0');
+      
+      // 更新大屏 UI
       const el = document.getElementById('call-duration-display');
-      if(el) el.innerText = `${String(Math.floor(wxState.callDurationSeconds / 60)).padStart(2, '0')}:${String(wxState.callDurationSeconds % 60).padStart(2, '0')}`;
+      if(el) el.innerText = `${m}:${s}`;
+      
+      // 更新悬浮窗 UI
+      const floatEl = document.getElementById('floating-call-time');
+      if(floatEl) floatEl.innerText = `${m}:${s}`;
     }, 1000);
+    
     window.render();
-    if (wxState.pendingCallMsg) {
-      setTimeout(() => {
-        chat.messages.push({ id: Date.now() + 1, sender: store.contacts.find(c=>c.id===wxState.activeChatId).name, text: wxState.pendingCallMsg, isMe: false, source: 'wechat', isOffline: false, isCallMsg: true, msgType: 'text', time: getNowTime() });
-        wxState.pendingCallMsg = ''; window.render(); window.wxActions.scrollToBottom();
-      }, 600); 
-    }
   },
   declineCall: () => {
     try { wxState.ringtone.pause(); wxState.ringtone.currentTime = 0; } catch(e){}
@@ -2186,10 +2249,39 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
   endCall: () => {
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     chat.messages.push({ id: Date.now(), sender: 'system', text: `通话已挂断`, isMe: true, source: 'wechat', isOffline: false, msgType: 'system', time: getNowTime() });
-    // 🌟 挂断时释放播放器
     if (window.wxCallPlayer) { window.wxCallPlayer.pause(); window.wxCallPlayer.src = ''; }
     if(wxState.callTimerId) { clearInterval(wxState.callTimerId); wxState.callTimerId = null; }
+    
+    // 🌟 清空全局状态
+    store.activeCall = null;
+    
     wxState.view = 'chatRoom'; wxState.callType = null; wxState.callStartTime = null; window.render(); window.wxActions.scrollToBottom();
+  },
+  minimizeCall: () => {
+      if (store.callReturnPath) {
+          // 🌟 原路返回刚刚记录的界面
+          store.currentApp = store.callReturnPath.app;
+          wxState.view = store.callReturnPath.view;
+      } else {
+          // 兜底方案：如果没有记录，就默认回聊天室
+          wxState.view = 'chatRoom'; 
+      }
+      window.render();
+  },
+  resumeCall: () => {
+      if (store.activeCall) {
+          // 🌟 核心：记录点击悬浮球之前的界面（哪个App、哪个内部页面）
+          store.callReturnPath = { 
+              app: store.currentApp, 
+              view: typeof wxState !== 'undefined' ? wxState.view : 'main' 
+          };
+
+          store.currentApp = 'wechat'; 
+          wxState.activeChatId = store.activeCall.charId;
+          wxState.view = 'call';
+          wxState.callType = store.activeCall.type;
+          window.render();
+      }
   },
   
   enterOffline: () => { 
@@ -3635,10 +3727,13 @@ export function renderWeChatApp(store) {
                 <input type="text" id="wx-input" onkeydown="if(event.key==='Enter') window.wxActions.sendMessage()" class="flex-1 bg-transparent text-white placeholder-white/50 px-4 py-2 outline-none text-[15px]" placeholder="正在通话中说话..." />
                 <button onclick="window.wxActions.sendMessage()" class="w-10 h-10 flex items-center justify-center text-white active:scale-90 transition-transform"><i data-lucide="send" style="width:24px; margin-left:2px;"></i></button>
               </div>
-              <div class="flex justify-center relative w-full">
-                 <button onclick="window.wxActions.rerollReply()" class="absolute left-0 w-14 h-14 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center text-white active:bg-white/20 transition-colors shadow-lg border border-white/10" title="重roll回复"><i data-lucide="refresh-cw" style="width:24px;"></i></button>
-                 <button onclick="window.wxActions.endCall()" class="w-14 h-14 bg-red-500 rounded-full flex items-center justify-center text-white shadow-2xl active:bg-red-600 transition-colors"><i data-lucide="phone-off" style="width:24px;"></i></button>
-              </div>
+              <div class="flex justify-center relative w-full mt-4">
+    <button onclick="window.wxActions.rerollReply()" class="absolute left-6 w-14 h-14 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center text-white active:bg-white/20 transition-colors shadow-lg border border-white/10" title="重roll回复"><i data-lucide="refresh-cw" style="width:24px;"></i></button>
+    <button onclick="window.wxActions.endCall()" class=" w-14 h-14 bg-red-500 rounded-full flex items-center justify-center text-white shadow-2xl active:bg-red-600 transition-colors"><i data-lucide="phone-off" style="width:24px;"></i></button>
+    <button onclick="window.wxActions.minimizeCall()" class="absolute right-6 w-14 h-14 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center text-white active:bg-white/20 transition-colors shadow-lg border border-white/10" title="缩小悬浮窗">
+        <i data-lucide="minimize-2" style="width:24px;"></i>
+    </button>
+  </div>
             </div>
           </div>
         ` : `
@@ -3668,10 +3763,13 @@ export function renderWeChatApp(store) {
                 <input type="text" id="wx-input" onkeydown="if(event.key==='Enter') window.wxActions.sendMessage()" class="flex-1 bg-transparent text-white placeholder-white/50 px-4 py-2 outline-none text-[15px]" placeholder="正在通话中说话..." />
                 <button onclick="window.wxActions.sendMessage()" class="w-10 h-10 flex items-center justify-center text-white active:scale-90 transition-transform"><i data-lucide="send" style="width:24px; margin-left:2px;"></i></button>
               </div>
-              <div class="flex justify-center relative w-full">
-                 <button onclick="window.wxActions.rerollReply()" class="absolute left-0 w-14 h-14 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center text-white active:bg-white/20 transition-colors shadow-lg border border-white/10" title="重roll回复"><i data-lucide="refresh-cw" style="width:24px;"></i></button>
-                 <button onclick="window.wxActions.endCall()" class="w-14 h-14 bg-red-500 rounded-full flex items-center justify-center text-white shadow-2xl active:bg-red-600 transition-colors"><i data-lucide="phone-off" style="width:24px;"></i></button>
-              </div>
+              <div class="flex justify-center relative w-full mt-4">
+    <button onclick="window.wxActions.rerollReply()" class="absolute left-6 w-14 h-14 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center text-white active:bg-white/20 transition-colors shadow-lg border border-white/10" title="重roll回复"><i data-lucide="refresh-cw" style="width:24px;"></i></button>
+    <button onclick="window.wxActions.endCall()" class=" w-14 h-14 bg-red-500 rounded-full flex items-center justify-center text-white shadow-2xl active:bg-red-600 transition-colors"><i data-lucide="phone-off" style="width:24px;"></i></button>
+    <button onclick="window.wxActions.minimizeCall()" class="absolute right-6 w-14 h-14 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center text-white active:bg-white/20 transition-colors shadow-lg border border-white/10" title="缩小悬浮窗">
+        <i data-lucide="minimize-2" style="width:24px;"></i>
+    </button>
+  </div>
             </div>
           </div>
         `}
@@ -5889,20 +5987,33 @@ if (cleanedBeforeText.trim()) {
             }
 
             // 👇 🌟 真正执行打电话动作
-            if (m.msgType === 'call_action') {
-                finalMsgs.push({
-                    id: baseTime + msgOffset++, 
-                    sender: 'system', 
-                    text: `${displayName}发起了${m.callType === 'video' ? '视频' : '语音'}通话`,
-                    isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'system', time: cloudTime, timestamp: baseTime + msgOffset, isIntercepted: char.isBlocked
-                });
-                if (isActive && typeof wxState !== 'undefined') {
-                    wxState.pendingCallMsg = m.text || '';
-                    wxState.view = 'incomingCall'; wxState.callType = m.callType;
-                    try { wxState.ringtone.src = store.appearance?.callSound || 'https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3'; wxState.ringtone.play(); } catch(e){}
+        if (m.msgType === 'call_action') {
+            finalMsgs.push({
+                id: baseTime + msgOffset++, 
+                sender: 'system', 
+                text: `${displayName}发起了${m.callType === 'video' ? '视频' : '语音'}通话`,
+                isMe: false, source: 'wechat', isOffline: isOffline, msgType: 'system', time: cloudTime, timestamp: baseTime + msgOffset, isIntercepted: char.isBlocked
+            });
+            if (typeof wxState !== 'undefined') {
+                wxState.pendingCallMsg = m.text || '';
+                wxState.callType = m.callType;
+                if (isActive) {
+                    // 1. 如果你正好在这个聊天室，直接全屏弹出来电！
+                    wxState.view = 'incomingCall'; 
+                } else {
+                    // 2. 如果你在别的界面，触发全局横幅通知！(🌟 修改为 store)
+                    store.globalCallAlert = {
+                        charId: char.id,
+                        name: displayName,
+                        avatar: char.avatar,
+                        callType: m.callType
+                    };
                 }
-                return; // 这个动作本身转化为系统气泡，不用再推入普通文字
+                // 3. 无论你在哪，都让手机响起微信铃声！
+                try { wxState.ringtone.src = store.appearance?.callSound || 'https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3'; wxState.ringtone.play(); } catch(e){}
             }
+            return; 
+        }
           finalMsgs.push({
                 id: baseTime + msgOffset,
                 sender: m.sender || char.name, // 🌟 必须传 ID，防止头像读取崩溃
