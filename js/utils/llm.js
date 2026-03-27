@@ -183,16 +183,29 @@ ${emojiRule}
   // 🌟 3. 装填聊天记录
   recentHistory.forEach(m => {
     let msgContent;
-    if (m.msgType === 'recall_system') msgContent = `(系统提示：对方撤回了一条消息)`;
+    if (m.msgType === 'recall_system') msgContent = `(系统事件：对方撤回了一条消息)`;
+    else if (m.msgType === 'system') {
+        // 🌟 核心视角转换引擎：将 UI 里的“我/你”替换为第三人称，防止 AI 看不懂是谁戳了谁！
+        let sysText = m.text || '';
+        if (sysText.includes('了我')) sysText = sysText.replace('了我', `了用户 ${myName} `);
+        else if (sysText.startsWith('我')) sysText = sysText.replace(/^我/, `用户 ${myName} `);
+        else if (sysText.includes('将你的')) sysText = sysText.replace('将你的', `将用户 ${myName} 的`);
+        else if (sysText.includes('你已被')) sysText = sysText.replace('你已被', `用户 ${myName} 已被`);
+        else if (sysText.includes('你已同意')) sysText = sysText.replace('你已同意', `用户 ${myName} 已同意`);
+        
+        msgContent = `[${m.time || '刚刚'}] (系统事件：${sysText})`;
+    }
     else if (m.msgType === 'real_image' && m.imageUrl) msgContent = [{ type: "text", text: m.text }, { type: "image_url", image_url: { url: m.imageUrl } }];
     else {
       if (m.isMe) { msgContent = `[${m.time || '刚刚'}] [用户 ${myName} 说]：${m.text}`; }
       else if (groupInfo && m.sender !== charName) { msgContent = `[${m.time || '刚刚'}] [群成员 ${m.sender} 说]：${m.text}`; } 
       else { msgContent = `[${m.time || '刚刚'}] ${m.text}`; }
-      if (m.isIntercepted) msgContent += `\n[系统提示：该消息发送失败，已被用户拒收！]`;
+      if (m.isIntercepted) msgContent += `\n(系统事件：该消息发送失败，已被用户拒收！)`;
     }
+    
     let role = 'user';
-    if (!m.isMe && (m.sender === char.name || m.sender === charName)) role = 'assistant';
+    // 🌟 系统消息必须保持在 user 角色位，才能作为“环境背景”存在
+    if (!m.isMe && (m.sender === char.name || m.sender === charName) && m.msgType !== 'system') role = 'assistant';
     messages.push({ role: role, content: msgContent });
   });
 

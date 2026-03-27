@@ -2472,12 +2472,12 @@ if (!chat.isGroup) {
           // 🌟 终极净化：完美还原多媒体标签，且必须保留原消息的对象结构！
           const tempHistory = chat.messages.map(m => {
               let content = m.text || '';
-              if (m.msgType === 'voice') content = `[语音]: ${content}`;
-              else if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.virtualImageText || content || '一张照片'}`;
-              else if (m.msgType === 'location') content = `[发送定位]: ${content || '未知位置'}`;
+              if (m.msgType === 'voice') content = `[语音]: ${content.replace(/^\[语音\][:：]?\s*/, '')}`;
+              else if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.virtualImageText || content.replace(/^\[虚拟照片\][:：]?\s*/, '') || '一张照片'}`;
+              else if (m.msgType === 'location') content = `[发送定位]: ${content.replace(/^\[(?:发送)?定位\][:：]?\s*/, '') || '未知位置'}`;
               else if (m.msgType === 'transfer') content = `[发起转账] 金额：${m.transferData?.amount || '未知'}，备注：${m.transferData?.note || '无'}`;
               else if (m.msgType === 'real_image') content = `[真实照片]`;
-              else if (m.msgType === 'emoji') content = `[表情包]: ${content}`;
+              else if (m.msgType === 'emoji') content = `[表情包]: ${content.replace(/^\[表情包\][:：]?\s*/, '')}`;
               
               // ⚠️ 绝杀：必须返回克隆的新对象，并替换掉 text！绝不允许返回成纯字符串！
               return { ...m, text: content };
@@ -5178,12 +5178,12 @@ window.scheduleCloudTask = async (charId) => {
             // 🌟 终极净化：剔除了导致崩溃的 senderName，并保留 baseHistory 变量名！
             let baseHistory = chat.messages.map(msg => {
                 let content = msg.text || '';
-                if (msg.msgType === 'voice') content = `[语音]: ${content}`;
-                else if (msg.msgType === 'virtual_image') content = `[虚拟照片]: ${msg.virtualImageText || content || '一张照片'}`;
-                else if (msg.msgType === 'location') content = `[发送定位]: ${content || '未知位置'}`;
+                if (msg.msgType === 'voice') content = `[语音]: ${content.replace(/^\[语音\][:：]?\s*/, '')}`;
+                else if (msg.msgType === 'virtual_image') content = `[虚拟照片]: ${msg.virtualImageText || content.replace(/^\[虚拟照片\][:：]?\s*/, '') || '一张照片'}`;
+                else if (msg.msgType === 'location') content = `[发送定位]: ${content.replace(/^\[(?:发送)?定位\][:：]?\s*/, '') || '未知位置'}`;
                 else if (msg.msgType === 'transfer') content = `[发起转账] 金额：${msg.transferData?.amount || '未知'}，备注：${msg.transferData?.note || '无'}`;
                 else if (msg.msgType === 'real_image') content = `[真实照片]`;
-                else if (msg.msgType === 'emoji') content = `[表情包]: ${content}`;
+                else if (msg.msgType === 'emoji') content = `[表情包]: ${content.replace(/^\[表情包\][:：]?\s*/, '')}`;
                 
                 return { ...msg, text: content };
             });
@@ -5434,12 +5434,12 @@ if (chat.isGroup) {
         // 🌟 终极净化：完美还原多媒体标签，且必须保留原消息的对象结构！
         let tempHistory = chat.messages.map(m => {
             let content = m.text || '';
-            if (m.msgType === 'voice') content = `[语音]: ${content}`;
-            else if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.virtualImageText || content || '一张照片'}`;
-            else if (m.msgType === 'location') content = `[发送定位]: ${content || '未知位置'}`;
-            else if (m.msgType === 'transfer') content = `[发起转账] 金额：${m.transferData?.amount || '未知'}，备注：${m.transferData?.note || '无'}`;
-            else if (m.msgType === 'real_image') content = `[真实照片]`;
-            else if (m.msgType === 'emoji') content = `[表情包]: ${content}`;
+            if (m.msgType === 'voice') content = `[语音]: ${content.replace(/^\[语音\][:：]?\s*/, '')}`;
+              else if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.virtualImageText || content.replace(/^\[虚拟照片\][:：]?\s*/, '') || '一张照片'}`;
+              else if (m.msgType === 'location') content = `[发送定位]: ${content.replace(/^\[(?:发送)?定位\][:：]?\s*/, '') || '未知位置'}`;
+              else if (m.msgType === 'transfer') content = `[发起转账] 金额：${m.transferData?.amount || '未知'}，备注：${m.transferData?.note || '无'}`;
+              else if (m.msgType === 'real_image') content = `[真实照片]`;
+              else if (m.msgType === 'emoji') content = `[表情包]: ${content.replace(/^\[表情包\][:：]?\s*/, '')}`;
             
             // ⚠️ 绝杀：必须返回克隆的新对象，并替换掉 text！绝不允许返回成纯字符串！
             return { ...m, text: content };
