@@ -3523,8 +3523,6 @@ export function renderWeChatApp(store) {
           .mc-offline-desc { color: inherit; font-family: inherit; }
           ${targetObj?.offlineCSS || ''}
         </style>
-        
-        ${wxState.activeMenuMsgId ? `<div class="absolute inset-0 z-[90]" onclick="window.wxActions.closeContextMenu()" ontouchstart="window.wxActions.closeContextMenu()"></div>` : ''}
 
         <div class="mc-offline-topbar bg-white/90 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 z-10 sticky top-0 shadow-sm transition-all ${wxState.isMultiSelecting ? 'bg-[#fcfcfc]' : ''}">
           ${wxState.isMultiSelecting ? `
@@ -3623,7 +3621,7 @@ export function renderWeChatApp(store) {
                      `;
                  } else {
                      html += `
-                     <div class="mc-offline-msg bg-white/30 backdrop-blur-md rounded-2xl relative flex p-5 items-start animate-in fade-in duration-300 mb-8 ${wxState.isMultiSelecting ? 'cursor-pointer' : ''}" 
+                     <div class="mc-offline-msg bg-white/15 p-5 rounded-2xl relative flex items-start animate-in fade-in duration-300 mb-8 ${wxState.isMultiSelecting ? 'cursor-pointer' : ''}" 
                           ${wxState.isMultiSelecting ? `onclick="window.wxActions.toggleSelectMsg(${msg.id})"` : ''}>
                        ${checkboxHtml}
                        <div class="mc-offline-bubble flex-1 text-[16px] text-gray-800 flex flex-col leading-loose pointer-events-${wxState.isMultiSelecting ? 'none' : 'auto'}"
