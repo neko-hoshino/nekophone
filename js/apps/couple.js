@@ -1021,30 +1021,64 @@ if (!window.cpActions) {
       spaceData.todChat = spaceData.todChat || [];
       window.render();
   },
+  resetToD: (charId) => {
+      if (!confirm('确定要清空当前讨论区和大冒险副本的记录，重新开始新的一局吗？')) return;
+      const spaceData = store.coupleSpacesData[charId];
+      if (!spaceData) return;
+      
+      spaceData.currentToD = null;
+      spaceData.todChat = [];
+      spaceData.loserHistory = [];
+      
+      if(window.actions?.saveStore) window.actions.saveStore();
+      window.render();
+  },
 
   // 🧠 核心：呼唤 AI 开启新一轮冒险 (强制输出 JSON)
   nextToDRound: async (charId) => {
       const spaceData = store.coupleSpacesData[charId];
-      spaceData.todLoading = true; spaceData.currentToD = null; window.render();
+      
+      // 🌟 核心修复 1：在一切开始之前，立刻把旧的剧情记录备份到内存里！
+      let oldDareMessages = [];
+      if (spaceData.currentToD && spaceData.currentToD.messages) {
+          oldDareMessages = spaceData.currentToD.messages;
+      }
+
+      // 🌟 核心修复 2：去掉了 spaceData.currentToD = null; 
+      // 这样在 AI 思考的几秒钟里，旧卡片还会显示在画面上，不会变成一闪而过的白板，体验极度丝滑！
+      spaceData.todLoading = true; 
+      window.render();
 
       try {
           const ctx = window.cpActions.getQContext(charId);
           
-          // 🌟 1. 容量控制器：超过 100 条，物理切除最老的数据！
           spaceData.todHistory = spaceData.todHistory || [];
           if (spaceData.todHistory.length > 100) {
               spaceData.todHistory = spaceData.todHistory.slice(-100);
           }
           
-          // 🌟 2. Token 保护锁：只喂给 AI 最近的 100 条防重复
           const askedHistory = spaceData.todHistory.slice(-100).join('、');
           const avoidPrompt = askedHistory ? `\n❗【防重复红线】：以下是你最近出过的惩罚，绝对禁止重复或高度相似：\n${askedHistory}` : '';
 
-          const taskMsg = `【系统任务】你现在是情侣游戏“真心话大冒险”的中立裁判。请你立刻开启新一轮游戏。${avoidPrompt} \n\n❗❗你的任务链：\n1. 【摇骰子】随机生成本轮的[输家]。必须是“用户”或“${ctx.char.name}”中的一个。\n2. 【二选一】随机生成惩罚类型。必须是“真心话”或“大冒险”中的一个。\n3. 【定惩罚】结合你们的人设、记忆和最近聊天氛围，制定一个色情、直接、暧昧、氛围感的惩罚内容。\n   - 真心话例子：“内心有过最大尺度的性幻想是什么？”、“最近一次自慰是什么时候？”\n   - 大冒险例子：“亲吻对方喉结五分钟”、“用牙齿解开对方的衬衫扣子”\n4. 【演反应】扮演 ${ctx.char.name}，对这个抽卡结果（不论输赢）说一句极其简短、符合人设的反应（15字内）。\n\n❗红线：必须输出严格 JSON：{"loser": "user/ai", "type": "truth/dare", "content": "惩罚内容", "reaction": "角色的简短反应"}`;
+          spaceData.loserHistory = spaceData.loserHistory || [];
+          let nextLoser = Math.random() < 0.5 ? 'user' : 'ai'; 
+          
+          if (spaceData.loserHistory.length >= 2) {
+              const len = spaceData.loserHistory.length;
+              if (spaceData.loserHistory[len - 1] === spaceData.loserHistory[len - 2]) {
+                  nextLoser = spaceData.loserHistory[len - 1] === 'user' ? 'ai' : 'user';
+              }
+          }
+          spaceData.loserHistory.push(nextLoser);
+          if (spaceData.loserHistory.length > 10) spaceData.loserHistory.shift();
+          
+          const loserName = nextLoser === 'ai' ? ctx.char.name : '用户';
+
+          const taskMsg = `【系统任务】真心话大冒险。本轮的输家已经由系统判定为：【${loserName}】！${avoidPrompt} \n\n❗❗你的任务链：\n1. 随机选择惩罚类型（truth或dare）。\n2. 给输家【${loserName}】制定一个色情、暧昧、直接的惩罚内容。\n   👉 如果输家是【用户】，请你向用户发号施令（例如：“描述你最敏感的地方”、“给我发一张锁骨的照片”）。\n   👉 如果输家是【${ctx.char.name}】（也就是你自己），请你写出你要对用户做的事，或者你自己的坦白（例如：“我会在你耳边喘息一分钟”、“我现在最想亲吻你的脖子”）。\n3. 扮演 ${ctx.char.name} 说一句15字内的反应（比如你输了可以假装不甘心，赢了可以得意）。\n\n❗警告：你只需输出严格 JSON，不要输出输家是谁，也绝对不要带多余的字符：\n{"type": "truth/dare", "content": "惩罚内容", "reaction": "你的反应"}`;
 
           const prompt = window.cpActions.buildMasterPrompt(charId, {
               task: taskMsg,
-              scenario: 'chat' // 这是线上场景
+              scenario: 'chat' 
           });
 
           const temp = Number(store.apiConfig?.temperature ?? 0.85);
@@ -1058,12 +1092,11 @@ if (!window.cpActions) {
           if (!match) throw new Error("JSON Parsing Failed");
           
           const result = JSON.parse(match[0]);
-          spaceData.currentToD = { id: 'TOD_'+Date.now(), ...result };
+          result.loser = nextLoser;
           
-          // 🌟 3. 新题目生成后，只把“内容”存入历史防重库
+          // 🌟 核心修复 3：生成新卡片时，把备份在兜里的旧剧情原封不动地还给它！
+          spaceData.currentToD = { id: 'TOD_'+Date.now(), ...result, messages: oldDareMessages };
           spaceData.todHistory.push(result.content);
-          
-          // 将角色的反应塞进下方的讨论区
           spaceData.todChat.push({ id: Date.now(), sender: 'ai', text: result.reaction });
           
           if(window.actions?.saveStore) window.actions.saveStore();
@@ -2208,8 +2241,8 @@ export function renderCoupleApp(store) {
         let storyHtml = target.messages.map(msg => {
             let nameStr = msg.isMe ? boundPersona.name : char.name;
             // 🌟 替换为『』解析
-            let lines = msg.text.replace(/(『[^』]*』)/g, '\\n$1\\n').replace(/(「[^」]*」)/g, '\\n$1\\n').replace(/[（(]([^）)]*)[）)]/g, '\\n（$1）\\n');
-            let formattedLines = lines.split('\\n').filter(l=>l.trim()).map(l => {
+            let lines = msg.text.replace(/(『[^』]*』)/g, '\n$1\n').replace(/(「[^」]*」)/g, '\n$1\n').replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
+            let formattedLines = lines.split('\n').filter(l=>l.trim()).map(l => {
                 let line = l.trim();
                 if (line.startsWith('『') && line.endsWith('』')) return `<p class="cp-story-dialogue my-1.5 leading-relaxed text-[#d4b856]">${line}</p>`; 
                 else if (line.startsWith('（') && line.endsWith('）')) return `<p class="cp-story-thought my-1.5 leading-relaxed text-[#9ca3af]">${line.slice(1, -1)}</p>`; 
@@ -2373,7 +2406,14 @@ export function renderCoupleApp(store) {
                 <div class="pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-100 sticky top-0">
                     <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.openDashboard('${char.id}')"><i data-lucide="chevron-left" class="w-7 h-7 text-gray-800"></i></div>
                     <span class="text-[16px] font-extrabold text-gray-800 tracking-wider">真心话大冒险</span>
-                    <div class="cursor-pointer active:scale-90 p-1 -mr-1" onclick="window.cpActions.nextToDRound('${char.id}')"><i data-lucide="dice-5" class="w-6 h-6 text-pink-400"></i></div>
+                    <div class="flex items-center space-x-3 -mr-1">
+                        <div class="cursor-pointer active:scale-90 p-1" onclick="window.cpActions.resetToD('${char.id}')" title="重置/洗牌记录">
+                            <i data-lucide="rotate-ccw" class="w-5 h-5 text-gray-400 hover:text-gray-600 transition-colors"></i>
+                        </div>
+                        <div class="cursor-pointer active:scale-90 p-1" onclick="window.cpActions.nextToDRound('${char.id}')" title="掷骰子开启下一轮">
+                            <i data-lucide="dice-5" class="w-6 h-6 text-pink-400 hover:text-pink-500 transition-colors"></i>
+                        </div>
+                    </div>
                 </div>
                 <div class="pb-6 pt-2">${topAreaHtml}</div>
             </div>
@@ -2405,8 +2445,8 @@ export function renderCoupleApp(store) {
         // 🌟 正则替换：严格解析『』包裹的对话
         let storyHtml = tod.messages.map(msg => {
             let nameStr = msg.sender === 'me' ? ctx.boundP.name : char.name;
-            let lines = msg.text.replace(/(『[^』]*』)/g, '\\n$1\\n').replace(/(「[^」]*」)/g, '\\n$1\\n').replace(/[（(]([^）)]*)[）)]/g, '\\n（$1）\\n');
-            let formattedLines = lines.split('\\n').filter(l=>l.trim()).map(l => {
+            let lines = msg.text.replace(/(『[^』]*』)/g, '\n$1\n').replace(/(「[^」]*」)/g, '\n$1\n').replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
+            let formattedLines = lines.split('\n').filter(l=>l.trim()).map(l => {
                 let line = l.trim();
                 if (line.startsWith('『') && line.endsWith('』')) return `<p class="cp-story-dialogue my-1.5 leading-relaxed text-[#d4b856]">${line}</p>`; 
                 else if (line.startsWith('（') && line.endsWith('）')) return `<p class="cp-story-thought my-1.5 leading-relaxed text-[#9ca3af]">${line.slice(1, -1)}</p>`; 

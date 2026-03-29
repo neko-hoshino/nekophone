@@ -47,9 +47,9 @@ ${groupNoticeStr}
 ❗体裁与格式红线（非常重要）：
 1. 必须采用【轻小说体裁】进行生动、连贯的长段落描写，描绘众人的动作、神态和互动！
 2. 绝对禁止像线上聊天那样使用“角色名：台词”的剧本格式！必须自然地合并段落！
-3. 人物的对话必须用双引号“”包裹，内心的想法用全角括号（）包裹。
+3. 人物的对话用『』包裹，内心的想法用全角括号（）包裹。
 4. 旁白与动作描写直接作为正文输出，不要用任何星号或其他符号包裹。
-5. 绝不可在回复中输出时间标签！
+5. 绝不可在回复中输出时间标签！绝对禁止使用任何带方括号[]的超能力指令！
 6. 绝对禁止代替用户（${myName}）说话或做决定！
 `;
   } else if (groupInfo) {
@@ -87,7 +87,8 @@ ${emojiRule}
 当前状态：你与用户正在“线下”见面或处于某个剧情场景中。
 ❗体裁与格式红线：
 1. 必须采用【轻小说体裁】进行长段落描写。绝对禁止频繁换行！
-2. 对话用双引号『』包裹，内心想法用全角括号（）包裹。
+2. 对话用『』包裹，内心想法用全角括号（）包裹。
+3. 绝对禁止使用任何带方括号[]的超能力指令！
 `;
   } else {
       systemRules = `
@@ -183,28 +184,63 @@ ${emojiRule}
   // 🌟 3. 装填聊天记录
   recentHistory.forEach(m => {
     let msgContent;
-    if (m.msgType === 'recall_system') msgContent = `(系统事件：对方撤回了一条消息)`;
-    else if (m.msgType === 'system') {
-        // 🌟 核心视角转换引擎：将 UI 里的“我/你”替换为第三人称，防止 AI 看不懂是谁戳了谁！
-        let sysText = m.text || '';
-        if (sysText.includes('了我')) sysText = sysText.replace('了我', `了用户 ${myName} `);
-        else if (sysText.startsWith('我')) sysText = sysText.replace(/^我/, `用户 ${myName} `);
-        else if (sysText.includes('将你的')) sysText = sysText.replace('将你的', `将用户 ${myName} 的`);
-        else if (sysText.includes('你已被')) sysText = sysText.replace('你已被', `用户 ${myName} 已被`);
-        else if (sysText.includes('你已同意')) sysText = sysText.replace('你已同意', `用户 ${myName} 已同意`);
-        
-        msgContent = `[${m.time || '刚刚'}] (系统事件：${sysText})`;
+    
+    // 💡 处理撤回消息的系统提示
+    if (m.msgType === 'recall_system') {
+        msgContent = `[系统/事件记录：用户 ${myName} 刚刚撤回了一条自己发送的消息]`;
     }
-    else if (m.msgType === 'real_image' && m.imageUrl) msgContent = [{ type: "text", text: m.text }, { type: "image_url", image_url: { url: m.imageUrl } }];
+    // 💡 处理普通系统提示（包括拍一拍、戳一戳、修改后缀等）
+    else if (m.msgType === 'system') {
+        let sysText = m.text || '';
+        let charRegex = new RegExp(charName, 'g'); // 匹配角色的名字
+        
+        // 场景 1：以“我”开头（表示用户发起的操作，比如“我拍了拍Aric”、“我修改了...”）
+        if (sysText.startsWith('我')) {
+            sysText = sysText.replace(/^我/, `用户 ${myName} `).replace(charRegex, `你(${charName})`);
+            msgContent = `[系统/动作记录：${sysText}]`;
+        } 
+        // 场景 2：包含了“了我”、“我的”或“我”（表示作用在用户身上，比如“Aric拍了拍我”）
+        else if (sysText.includes('了我') || sysText.includes('我的') || sysText.includes('我')) {
+            sysText = sysText.replace(charRegex, `你(${charName})`)
+                             .replace(/了我/g, `了用户 ${myName} `)
+                             .replace(/我的/g, `用户 ${myName} 的`)
+                             .replace(/我/g, `用户 ${myName}`);
+            
+            // 🚨 防御塔：极度明确地告诉AI，这是它自己干的动作！
+            if (sysText.includes(`你(${charName})`)) {
+                msgContent = `[系统/动作记录：${sysText}。 (注：这是你刚刚主动对用户执行的动作，千万不要误以为是用户戳了你！)]`;
+            } else {
+                msgContent = `[系统/动作记录：${sysText}]`;
+            }
+        } 
+        // 场景 3：第三人称描述（比如“Aric修改了拍一拍后缀”、“你已添加了Aric”）
+        else {
+            sysText = sysText.replace(charRegex, `你(${charName})`)
+                             .replace(/你已/g, `用户 ${myName} 已`)
+                             .replace(/你撤回/g, `用户 ${myName} 撤回`);
+                             
+            // 🚨 如果是AI修改了后缀，给它一个明确的强化提示
+            if (sysText.includes('修改了') && sysText.includes(`你(${charName})`)) {
+                msgContent = `[系统/事件记录：${sysText}。 (注：这是你的设定更新，你自己刚刚修改了动作)]`;
+            } else {
+                msgContent = `[系统/事件记录：${sysText}]`;
+            }
+        }
+    }
+    // 💡 处理照片
+    else if (m.msgType === 'real_image' && m.imageUrl) {
+        msgContent = [{ type: "text", text: m.text }, { type: "image_url", image_url: { url: m.imageUrl } }];
+    }
+    // 💡 处理普通文本
     else {
       if (m.isMe) { msgContent = `[${m.time || '刚刚'}] [用户 ${myName} 说]：${m.text}`; }
       else if (groupInfo && m.sender !== charName) { msgContent = `[${m.time || '刚刚'}] [群成员 ${m.sender} 说]：${m.text}`; } 
       else { msgContent = `[${m.time || '刚刚'}] ${m.text}`; }
-      if (m.isIntercepted) msgContent += `\n(系统事件：该消息发送失败，已被用户拒收！)`;
+      
+      if (m.isIntercepted) msgContent += `\n[系统/事件记录：该消息发送失败，已被用户拒收！]`;
     }
     
     let role = 'user';
-    // 🌟 系统消息必须保持在 user 角色位，才能作为“环境背景”存在
     if (!m.isMe && (m.sender === char.name || m.sender === charName) && m.msgType !== 'system') role = 'assistant';
     messages.push({ role: role, content: msgContent });
   });

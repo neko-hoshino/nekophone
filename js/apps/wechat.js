@@ -317,30 +317,88 @@ window.wxActions = {
       newEl.scrollTop = newEl.scrollHeight - oldScrollHeight + oldScrollTop;
     }
   },
-  // ================= 🎵 终极语音播放引擎 =================
+  // ================= 🎵 终极语音引擎 (完美交互版) =================
   playVoiceMsg: (msgId) => {
-      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+      // 1. 找聊天室
+      const chat = store.chats.find(c => c.id === wxState.activeChatId || c.charId === wxState.activeChatId);
       if (!chat) return;
-      const msg = chat.messages.find(m => m.id === msgId);
+
+      // 2. 强行匹配找消息
+      const msg = chat.messages.find(m => String(m.id) === String(msgId) || String(m.timestamp) === String(msgId));
       if (!msg) return;
 
-      if (msg.audioUrl) {
-          if (wxState.playingAudio) {
+      // 🌟 3. 翻转文字的显示状态
+      msg.showText = !msg.showText;
+
+      // 🛑 4. 核心拦截：如果是为了“收起”而点击，立刻退出！绝不播放！
+      if (!msg.showText) {
+          // 顺手把正在放的声音给掐了（如果点的是同一条）
+          if (wxState.playingAudio && wxState.playingMsgId === String(msgId) && !wxState.playingAudio.paused) {
               wxState.playingAudio.pause();
-              if (wxState.playingMsgId === msgId) { 
-                  wxState.playingMsgId = null; wxState.playingAudio = null; window.render(); return; 
-              }
+              wxState.playingMsgId = null;
           }
-          // 因为现在是 Base64，所以即使不用强制交互，浏览器也大概率会乖乖出声
-          const audio = new Audio(msg.audioUrl);
-          wxState.playingAudio = audio; 
-          wxState.playingMsgId = msgId; 
+          window.render(); // 刷新 UI，让文字立刻消失
+          return; // 👉 提前结束战斗，后面的代码全都不执行！
+      }
+
+      // ================= 下面都是“展开”时的播放逻辑 =================
+      
+      // 霸占音频通道
+      if (!wxState.playingAudio) {
+          wxState.playingAudio = new Audio();
+      }
+
+      // 【情况 A】已经有现成的音频缓存，秒播！
+      if (msg.audioUrl) {
+          wxState.playingAudio.src = msg.audioUrl;
+          wxState.playingMsgId = String(msgId); 
           window.render();
           
-          audio.play().catch(e => window.actions.showToast('播放被浏览器拦截，请再点一次'));
-          audio.onended = () => { wxState.playingMsgId = null; wxState.playingAudio = null; window.render(); };
+          wxState.playingAudio.play().catch(e => window.actions.showToast('播放被拦截，请重试'));
+          wxState.playingAudio.onended = () => { wxState.playingMsgId = null; window.render(); };
+          return;
+      }
+
+      // 【情况 B】没有音频，向 Minimax 发起请求
+      let charObj = store.contacts.find(c => c.id === wxState.activeChatId || c.name === wxState.activeChatId); 
+      if (msg.sender && typeof msg.sender === 'string') {
+          let found = store.contacts.find(c => c.name === msg.sender || c.id === msg.sender);
+          if (found) charObj = found;
+      }
+      if (!charObj) return;
+
+      // 检查开关
+      if (store.minimaxConfig?.enabled !== false && 
+          store.minimaxConfig?.apiKey && 
+          charObj.minimaxVoiceEnabled && 
+          charObj.minimaxVoiceId) {
+          
+          wxState.playingAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+          wxState.playingAudio.play().catch(()=>{});
+
+          window.actions.showToast('正在请求语音...');
+          
+          fetchMinimaxVoice(msg.text, charObj.minimaxVoiceId).then(url => {
+              // 🛡️ 极限防抖：万一在请求的这两秒钟里，你手快又把气泡收起来了，拿到音频后也别播了！
+              if (!msg.showText) return;
+
+              if (url) {
+                  msg.audioUrl = url; 
+                  if (typeof saveToLocalStorage === 'function') saveToLocalStorage(); 
+                  
+                  wxState.playingAudio.src = url;
+                  wxState.playingMsgId = String(msgId); 
+                  window.render(); 
+                  
+                  wxState.playingAudio.play().catch(e => window.actions.showToast('播放失败'));
+                  wxState.playingAudio.onended = () => { wxState.playingMsgId = null; window.render(); };
+              } else {
+                  window.actions.showToast('获取语音失败');
+              }
+          }).catch(e => console.error(e));
+          
       } else {
-          window.actions.showToast('后台正在生成语音，请稍等两秒再点...');
+          window.actions.showToast('未开启语音或无音色ID');
       }
   },
   clearChatHistory: () => {
@@ -1466,11 +1524,21 @@ window.wxActions = {
     const pGroups = wxState.momentPrivacyGroups || [];
     
     const newMoment = { 
-       id: newId, senderId: my.id, senderName: my.name, avatar: my.avatar, 
-       text: text, imageUrl: wxState.tempMomentImage, virtualImageText: virtualText, 
-       location: wxState.publishLocation || null, // 🌟 包含定位标
-       time: '刚刚', likes: [], comments: [], privacyType: pType, privacyGroups: pGroups 
-    };
+    id: newId,
+    senderId: my.id,
+    senderName: my.name,
+    avatar: my.avatar,
+    text: text,
+    imageUrl: wxState.tempMomentImage,
+    virtualImageText: virtualText,
+    location: wxState.publishLocation || null,
+    time: getNowTime(),          // 保留原有时分字符串，兼容旧数据
+    timestamp: newId,            // 新增毫秒时间戳
+    likes: [],
+    comments: [],
+    privacyType: pType,
+    privacyGroups: pGroups
+};
     store.moments.push(newMoment);
     
     wxState.view = 'main'; 
@@ -1626,19 +1694,20 @@ ${relation}
             }
 
             // 推入朋友圈数据库
-            store.moments.push({ 
-                id: Date.now() + index, 
-                senderId: char.id, 
-                senderName: char.name, 
-                avatar: char.avatar, 
-                text: contentText, 
-                imageUrl: null, 
-                virtualImageText: virtualText, // 🌟 这里直接塞入虚拟照片内容！
-                location: locationText, // 🌟 存入刚才解析出的定位！
-                time: getNowTime(), // 🌟 换成云端下发时的当前真实时间！
-                likes: [], 
-                comments: [] 
-            });
+store.moments.push({ 
+    id: now + index,
+    senderId: char.id,
+    senderName: char.name,
+    avatar: char.avatar,
+    text: contentText,
+    imageUrl: null,
+    virtualImageText: virtualText,
+    location: locationText,
+    time: getNowTime(),          // 保留
+    timestamp: now + index,      // 新增
+    likes: [],
+    comments: []
+});
             successCount++;
             window.render();
         } catch(e) { console.error(char.name + '发朋友圈失败', e); }
@@ -2575,6 +2644,19 @@ export function renderWeChatApp(store) {
   const pId = isGroup ? chatData.boundPersonaId : (char ? char.boundPersonaId : store.personas[0].id);
   const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
   const myAvatar = chatData.myAvatar || boundPersona.avatar; // 🌟 独立情头：优先读取本房间的专属头像，如果没有才用马甲的！
+  const formatMomentTime = (timestamp) => {
+    if (!timestamp) return '刚刚';
+    const now = new Date();
+    const target = new Date(timestamp);
+    const diffDays = Math.floor((now - target) / (1000 * 60 * 60 * 24));
+    const timeStr = target.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+    
+    if (diffDays === 0) return timeStr;
+    if (diffDays === 1) return `昨天 ${timeStr}`;
+    if (diffDays === 2) return `2天前 ${timeStr}`;
+    // 更早的显示具体日期
+    return `${target.getMonth()+1}月${target.getDate()}日 ${timeStr}`;
+};
 
   // 🌟 提取全局复用的重roll导演弹窗
   const globalRerollModalHtml = wxState.showRerollModal ? `
@@ -3509,7 +3591,7 @@ export function renderWeChatApp(store) {
 
                  // 🌟 修复：正则预处理，强制让带引号和括号的句子单独成段落
                  let preProcessedText = msg.text
-                     .replace(/(『[^』]*』)/g, '\\n$1\\n')
+                     .replace(/(『[^』]*』)/g, '\n$1\n')
                      .replace(/(「[^」]*」)/g, '\n$1\n')
                      .replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
                  
@@ -3541,7 +3623,7 @@ export function renderWeChatApp(store) {
                      `;
                  } else {
                      html += `
-                     <div class="mc-offline-msg relative flex items-start animate-in fade-in duration-300 mb-8 ${wxState.isMultiSelecting ? 'cursor-pointer' : ''}" 
+                     <div class="mc-offline-msg bg-white/60 backdrop-blur-md rounded-2xl relative flex p-5 items-start animate-in fade-in duration-300 mb-8 ${wxState.isMultiSelecting ? 'cursor-pointer' : ''}" 
                           ${wxState.isMultiSelecting ? `onclick="window.wxActions.toggleSelectMsg(${msg.id})"` : ''}>
                        ${checkboxHtml}
                        <div class="mc-offline-bubble flex-1 text-[16px] text-gray-800 flex flex-col leading-loose pointer-events-${wxState.isMultiSelecting ? 'none' : 'auto'}"
@@ -3710,9 +3792,9 @@ export function renderWeChatApp(store) {
             <span id="call-duration-display" class="text-white/80 font-mono text-[14px] mt-1">00:00</span>
           </div>
 
-          <div class="absolute inset-0 z-0 bg-gray-900 flex items-center justify-center">${getVidHtml(char.videoAvatar, char.avatar, true)}</div>
+          <div class="absolute inset-0 z-0 bg-gray-900 flex items-center justify-center">${getVidHtml(chatData.charVideoAvatar || char.videoAvatar, char.avatar, true)}</div>
           
-          <div class="absolute top-16 right-5 w-24 h-36 bg-gray-800 rounded-xl border border-white/20 shadow-2xl overflow-hidden z-20">${getVidHtml(store.personas[0].videoAvatar, myAvatar, '')}</div>
+          <div class="absolute top-16 right-5 w-24 h-36 bg-gray-800 rounded-xl border border-white/20 shadow-2xl overflow-hidden z-20">${getVidHtml(chatData.myVideoAvatar || store.personas[0].videoAvatar, myAvatar, '')}</div>
           <div class="absolute bottom-0 left-0 right-0 h-[45%] pt-5 pb-8 px-5 z-20 flex flex-col justify-between">
             <div id="call-scroll" class="flex-1 overflow-y-auto hide-scrollbar flex flex-col space-y-3 mask-image-top mb-4">
               <div class="mt-auto"></div>
@@ -3832,11 +3914,12 @@ export function renderWeChatApp(store) {
         const duration = Math.min(Math.max(Math.round(msg.text.length / 4), 2), 60); const numBars = Math.min(8 + Math.floor(duration * 1.8), 45); 
         let barsHtml = ''; for (let i = 0; i < numBars; i++) barsHtml += `<div class="w-[2px] ${['h-2', 'h-4', 'h-3', 'h-5', 'h-2', 'h-6', 'h-3', 'h-4'][i % 8]} bg-current rounded-full animate-pulse opacity-80" style="animation-delay: ${(i * 100) % 1000}ms"></div>`;        
         
-        // 🌟 回退到最原始、最粗暴、绝不被拦截的行内播放！
-        const playScript = msg.audioUrl ? `new Audio('${msg.audioUrl}').play().catch(e=>window.actions.showToast('生成中或被浏览器拦截'));` : `window.actions.showToast('正在生成语音...');`;        
+        // 💡 变化1：去掉了强行改 DOM 的代码，onclick 里只干干净净地呼叫 playVoiceMsg
+        contentHtml = `<div class="flex flex-col cursor-pointer" onclick="window.wxActions.playVoiceMsg('${msg.id}')"><div class="flex items-center space-x-3 ${msg.isMe ? 'flex-row-reverse space-x-reverse' : ''}"><div class="flex items-center gap-[2px] ${msg.isMe ? 'text-green-800' : 'text-gray-800'}">${barsHtml}</div><span class="text-[13px] opacity-80">${duration}"</span></div></div>`;      
         
-        contentHtml = `<div class="flex flex-col cursor-pointer" onclick="const textOut = this.closest('.relative').querySelector('.mc-voice-text-out'); if(textOut) textOut.classList.toggle('hidden'); ${playScript}"><div class="flex items-center space-x-3 ${msg.isMe ? 'flex-row-reverse space-x-reverse' : ''}"><div class="flex items-center gap-[2px] ${msg.isMe ? 'text-green-800' : 'text-gray-800'}">${barsHtml}</div><span class="text-[13px] opacity-80">${duration}"</span></div></div>`;      
-        voiceTextOut = `<div class="mc-voice-text-out hidden mt-1.5 text-[14px] text-gray-600 bg-gray-100/90 rounded-[10px] px-3 py-2 max-w-full break-words shadow-sm border border-gray-200/50 relative before:content-[''] before:absolute before:border-[6px] before:border-transparent before:border-b-gray-100 ${msg.isMe ? 'before:right-4 before:-top-[11px]' : 'before:left-4 before:-top-[11px]'}">${msg.text}</div>`;
+        // 💡 变化2：根据消息数据的状态，动态决定要不要加上 hidden！
+        const textHiddenClass = msg.showText ? '' : 'hidden'; 
+        voiceTextOut = `<div class="mc-voice-text-out ${textHiddenClass} mt-1.5 text-[14px] text-gray-600 bg-gray-100/90 rounded-[10px] px-3 py-2 max-w-full break-words shadow-sm border border-gray-200/50 relative before:content-[''] before:absolute before:border-[6px] before:border-transparent before:border-b-gray-100 ${msg.isMe ? 'before:right-4 before:-top-[11px]' : 'before:left-4 before:-top-[11px]'}">${msg.text}</div>`;
       } else if (msg.msgType === 'html_card') {
         maxWidthClass = 'max-w-[85%]';
         // 🌟 修复 1：恢复漂亮的白色底板和卡片圆角阴影
@@ -3951,7 +4034,7 @@ export function renderWeChatApp(store) {
         contentHtml = `
           <div class="bg-white rounded-[16px] shadow-sm border border-gray-100 p-5 w-[280px] flex flex-col items-center">
              <div class="w-12 h-12 rounded-full overflow-hidden border border-gray-100 mb-2"><img src="${char?.avatar || ''}" class="w-full h-full object-cover"></div>
-             <span class="text-[15px] font-bold text-gray-800 mb-1">${char?.name || '角色'} 申请添加你为朋友</span>
+             <span class="text-[15px] font-bold text-gray-800 mb-1">${char?.name || '角色'} 申请添加你为好友</span>
              ${reqState === 'pending' ? `
              <div class="flex space-x-3 w-full">
                 <button onclick="window.wxActions.handleFriendReq(${msg.id}, false)" class="flex-1 py-2.5 bg-gray-100 text-gray-600 rounded-xl text-[14px] font-bold active:bg-gray-200 transition-colors">拒绝</button>
@@ -4127,9 +4210,9 @@ export function renderWeChatApp(store) {
       { id: 'mc-tool-reroll', icon: 'refresh-cw', label: '重roll回复', action: 'window.wxActions.rerollReply()', hideInGroup: false },
       { id: 'mc-tool-extract', icon: 'brain-circuit', label: '提取记忆', action: "window.wxActions.openExtractMemoryModal()", hideInGroup: true },
       { id: 'mc-tool-transfer', icon: 'credit-card', label: '转账', action: "window.wxActions.openVirtualModal('transfer')", hideInGroup: false },
+      { id: 'mc-tool-location', icon: 'map-pin', label: '发送定位', action: "window.wxActions.openVirtualModal('location')", hideInGroup: false },
       { id: 'mc-tool-voicecall', icon: 'phone', label: '语音通话', action: "window.wxActions.startCall('voice')", hideInGroup: true },
       { id: 'mc-tool-videocall', icon: 'video', label: '视频通话', action: "window.wxActions.startCall('video')", hideInGroup: true },
-      { id: 'mc-tool-location', icon: 'map-pin', label: '发送定位', action: "window.wxActions.openVirtualModal('location')", hideInGroup: false },
       { id: 'mc-tool-offline', icon: 'coffee', label: '线下剧情', action: "window.wxActions.enterOffline()", hideInGroup: false },
       { id: 'mc-tool-read', icon: 'book-open', label: '一起看书', action: "window.wxActions.openBookSelectModal()", hideInGroup: true }
     ].filter(item => !(isGroup && item.hideInGroup)).map(item => `
@@ -4661,7 +4744,11 @@ export function renderWeChatApp(store) {
 
     if (chat.isGroup) {
         name = chat.groupName || '群聊';
+        if (chat.groupAvatar) {
+        avatarHtml = `<img src="${chat.groupAvatar}" class="w-full h-full object-cover" />`;
+    } else {
         avatarHtml = `<div class="w-full h-full bg-blue-50 text-blue-400 flex items-center justify-center"><i data-lucide="users" class="w-6 h-6"></i></div>`;
+    }
         // 🌟 核心修复 3：精确读取当前群聊的打字名单
         const typingMembers = wxState.typingStatus && wxState.typingStatus[chat.charId];
         if (Array.isArray(typingMembers) && typingMembers.length > 0) {
@@ -4757,7 +4844,7 @@ export function renderWeChatApp(store) {
 
       // 菜单弹出动画区
       const menuHtml = wxState.activeMomentMenuId === m.id ? `
-        <div class="absolute right-8 top-[-6px] bg-[#4c5154] rounded-[6px] flex items-center px-4 py-2 text-white space-x-5 animate-in slide-in-from-right-2 duration-150 z-10 shadow-lg">
+        <div class="absolute right-8 top-[-6px] bg-[#4c5154] rounded-[6px] flex items-center px-4 py-2 text-white space-x-5 animate-in slide-in-from-right-2 duration-150 z-30 shadow-lg" onclick="event.stopPropagation()">
           <div class="flex items-center space-x-1 cursor-pointer active:opacity-50" onclick="window.wxActions.likeMoment(${m.id})"><i data-lucide="heart" class="w-4 h-4"></i><span class="text-[12px] font-bold">${m.likes.includes(my.name)?'取消':'赞'}</span></div>
           <div class="w-[1px] h-4 bg-gray-600"></div>
           <div class="flex items-center space-x-1 cursor-pointer active:opacity-50" onclick="window.wxActions.openMomentComment(${m.id})"><i data-lucide="message-circle" class="w-4 h-4"></i><span class="text-[12px] font-bold">评论</span></div>
@@ -4788,10 +4875,13 @@ export function renderWeChatApp(store) {
             ${m.location ? `<div class="text-[12px] text-blue-500/90 font-bold mb-1.5 flex items-center tracking-wide"><i data-lucide="map-pin" class="w-3.5 h-3.5 mr-1"></i>${m.location}</div>` : ''}
             <div class="flex items-center justify-between mt-3 relative">
               <div class="flex items-center space-x-3 text-[12px] text-gray-400">
-                <span>${m.time}</span>
+                <span>${formatMomentTime(m.timestamp || m.id)}</span>
                 <span class="text-[#576b95] cursor-pointer active:opacity-50" onclick="window.wxActions.deleteMoment(${m.id})">删除</span>
               </div>
-              <div class="bg-gray-100 rounded-[4px] px-2 py-0.5 cursor-pointer active:bg-gray-200" onclick="window.wxActions.toggleMomentMenu(${m.id})"><i data-lucide="more-horizontal" class="text-[#576b95] w-4 h-4"></i></div>
+              <div class="bg-gray-100 rounded-[4px] px-2 py-0.5 cursor-pointer active:bg-gray-200" 
+     onclick="event.stopPropagation(); window.wxActions.toggleMomentMenu(${m.id})">
+  <i data-lucide="more-horizontal" class="text-[#576b95] w-4 h-4"></i>
+</div>
               ${menuHtml}
             </div>
             ${interactHtml}
@@ -5114,20 +5204,24 @@ const planCloudBrain = async (delayMinutes, char, llmMessages, routingId, recurs
   if (!sub) throw new Error("未绑定设备推送凭证！云端不知道把消息发给谁，请先在右上角授权通知！");
 
   const res = await fetch('https://neko-hoshino.duckdns.org/auto-plan', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-secret-token': localStorage.getItem('neko_server_pwd') || '' },
-      body: JSON.stringify({
-          delayMinutes: delayMinutes,
-          recursiveDelayMinutes: recursiveDelayMinutes, // 🌟 传给云端的接力频率
-          maxRecursion: maxRecursion,                   // 🌟 传给云端的最大次数
-          isCancel: isCancel,                           // 🌟 空包弹标记
-          title: char.name,
-          charId: routingId || char.id, 
-          endpoint: sub.endpoint,
-          apiConfig: store.apiConfig, 
-          llmMessages: llmMessages || []    
-      })
-  });
+        method: 'POST',
+        keepalive: true, // 🌟 修复：无论你关闭网页有多快，浏览器都会接管这个空包弹，誓死将它送达云端！
+        headers: {
+            'Content-Type': 'application/json',
+            'x-secret-token': localStorage.getItem('neko_server_pwd') || ''
+        },
+        body: JSON.stringify({
+            delayMinutes: delayMinutes,
+            recursiveDelayMinutes: recursiveDelayMinutes,
+            maxRecursion: maxRecursion,
+            isCancel: isCancel,
+            title: char.name,
+            charId: routingId || char.id,
+            endpoint: sub.endpoint,
+            apiConfig: store.apiConfig,
+            llmMessages: llmMessages || []
+        })
+    });
   
   if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
@@ -5400,12 +5494,25 @@ if (chat.isGroup) {
 
     // 2. 完美还原你的经典删除逻辑！
     if (msgId) {
-        // 【线下剧情模式】的精准重roll：以你点击的这条消息为界，斩断它和后面的所有时间线
-        const targetIndex = chat.messages.findIndex(m => m.id === msgId);
-        if (targetIndex > -1) {
-            chat.messages = chat.messages.slice(0, targetIndex);
+    // 线下模式：找到该消息的索引
+    const targetIndex = chat.messages.findIndex(m => m.id === msgId);
+    if (targetIndex > -1) {
+        // 检查该消息之后是否有线上消息（安全起见，如果存在线上消息，不应该执行重roll，但这里提前返回）
+        let hasOnlineAfter = false;
+        for (let i = targetIndex + 1; i < chat.messages.length; i++) {
+            if (!chat.messages[i].isOffline) {
+                hasOnlineAfter = true;
+                break;
+            }
         }
-    } else {
+        if (hasOnlineAfter) {
+            window.actions.showToast('无法重roll历史消息');
+            return;
+        }
+        // 删除该消息及其之后的所有消息（都是线下消息）
+        chat.messages = chat.messages.slice(0, targetIndex);
+    }
+} else {
         // 【线上模式】的常规重roll：从最后一条开始往回删，直到露出你的上一句话
         if (chat.messages[chat.messages.length - 1].isMe) {
             return window.actions.showToast('只能重roll对方的回复哦');
@@ -5495,6 +5602,7 @@ if (chat.isGroup) {
         if (typeof window.render === 'function') window.render();
     }
 };
+
 // ==================== 以下代码必须放在 wechat.js 的最最最底部 ====================
 
 window.syncCloudMailbox = async () => {
@@ -5650,7 +5758,7 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
                 store.moments.push({ 
                     id: Date.now() + sysMsgOffset++, senderId: char.id, senderName: char.name, avatar: char.avatar, 
                     text: contentText.replace(/^["']|["']$/g, ''), imageUrl: null, virtualImageText: virtualText, 
-                    time: cloudTime, likes: [], comments: [] 
+                    time: cloudTime, timestamp: Date.now() + sysMsgOffset++, likes: [], comments: [] 
                 });
                 hasSystemAction = true;
                 if (typeof window.render === 'function' && wxState.view === 'moments') window.render();
@@ -6045,87 +6153,96 @@ if (cleanedBeforeText.trim()) {
 
         if (finalMsgs.length === 0 && !hasSystemAction) continue;
 
-        if (finalMsgs.length === 0 && hasSystemAction && isActive) {
-            if(typeof window.render === 'function') window.render();
-            if(window.wxActions && window.wxActions.scrollToBottom) window.wxActions.scrollToBottom();
-        }
+        // ==========================================
+        // 🌟 核心分流引擎：精准拿捏 Render 时机
+        // ==========================================
+        const isUserWatchingChat = isActive && !document.hidden;
 
-        for (let i = 0; i < finalMsgs.length; i++) {
-            const newMsg = finalMsgs[i];
-            chat.messages.push(newMsg);
-            // 🌟 关键修复：根据消息发送者名字查找正确的角色对象
-let senderChar = char; // 默认使用当前聊天对象（单聊时正确）
-if (newMsg.sender && typeof newMsg.sender === 'string') {
-    // 优先按名字查找（群聊中名字唯一）
-    let found = store.contacts.find(c => c.name === newMsg.sender);
-    if (!found && !chat.isGroup) {
-        // 单聊时如果名字不匹配，尝试按 ID 查找
-        found = store.contacts.find(c => c.id === newMsg.sender);
-    }
-    if (found) {
-        senderChar = found;
-    } else if (chat.isGroup) {
-        // 群聊中找不到发送者时，记录警告但不中断（使用回退角色）
-        console.warn(`[语音] 未找到发送者 ${newMsg.sender}，将使用回退角色 ${char.name}`);
-    }
-}
+        if (!isUserWatchingChat) {
+            // 【场景 2 & 3】：用户不在聊天室，或者切到后台了
+            // 1. 瞬间全量落袋为安，防止 iOS 截杀
+            chat.messages.push(...finalMsgs);
+            if (typeof saveToLocalStorage === 'function') saveToLocalStorage();
 
-            // 🌟 极速 UI 唤醒：强制刷新当前页面
-            if (isActive) {
-                if(typeof saveScroll === 'function') saveScroll();
-                if(typeof window.render === 'function') window.render();
-                if(typeof restoreScroll === 'function') restoreScroll();
-                if(window.wxActions && window.wxActions.scrollToBottom) window.wxActions.scrollToBottom();
-                
-                // 物理斩杀“输入中”动画（双保险）
-                if (typeof wxState !== 'undefined' && wxState.typingStatus) wxState.typingStatus[chatId] = false;
+            // 2. 增加未读红点（不发出叮咚声，按你之前非活跃状态逻辑走）
+            chat.unreadCount = (chat.unreadCount || 0) + finalMsgs.length;
+            try { new Audio(store.appearance?.newMsgSound || ' ').play().catch(()=>{}); } catch(e) {}
+
+            // 3. 决定是否 Render (千万别打扰别的页面)
+            if (typeof wxState !== 'undefined' && wxState.view === 'main') {
+                // 【场景 2】：人在消息列表，需要红点跳一下！
+                if (typeof window.render === 'function') window.render();
+            } else {
+                // 【场景 3】：人在朋友圈/通讯录，默默数数，绝对不 render 打扰！
             }
 
-            let callAudioPlayed = false;
-            if (senderChar.minimaxVoiceId && store.minimaxConfig?.enabled !== false && store.minimaxConfig?.apiKey && senderChar.minimaxVoiceEnabled) {
-    if (isCall && newMsg.msgType === 'text') {
-    const url = await fetchMinimaxVoice(newMsg.text, senderChar.minimaxVoiceId);
-    if (url && typeof wxState !== 'undefined' && wxState.view === 'call') {
-        newMsg.audioUrl = url;
-        // 使用队列播放器，不再直接覆盖全局播放器
-        playCallAudio(url);
-        callAudioPlayed = true;
-        if(isActive && typeof window.render === 'function') window.render();
-    }
-} else if (!isCall && (newMsg.msgType === 'voice' || (newMsg.msgType === 'text' && senderChar.minimaxVoiceEnabled))) {
-        const url = await fetchMinimaxVoice(newMsg.text, senderChar.minimaxVoiceId);
-        if (url) {
-            newMsg.audioUrl = url;
-            if(isActive && typeof window.render === 'function') window.render();
-        } else {
-            console.warn(`[语音] 生成失败，角色: ${senderChar.name}`);
-        }
-    }
-} else {
-    // 可选：调试信息，帮助定位配置问题
-    if (chat.isGroup && newMsg.msgType === 'voice') {
-        console.log(`[语音] 未生成：角色 ${senderChar.name} 的语音未启用（音色ID: ${senderChar.minimaxVoiceId}, 启用开关: ${senderChar.minimaxVoiceEnabled}）`);
-    }
-}
+            // 4. 后台默默去处理通话语音（隐形闭包，不阻塞）
+            (async () => {
+                for (let i = 0; i < finalMsgs.length; i++) {
+                    const newMsg = finalMsgs[i];
+                    let senderChar = char; 
+                    if (newMsg.sender && typeof newMsg.sender === 'string') {
+                        let found = store.contacts.find(c => c.name === newMsg.sender || c.id === newMsg.sender);
+                        if (found) senderChar = found;
+                    }
 
-            if (!isCall && newMsg.msgType !== 'system' && newMsg.msgType !== 'recall_system') {
-                try { new Audio(store.appearance?.newMsgSound || ' ').play().catch(()=>{}); } catch(e) {}
-                
-                if (!isActive) {
-                    chat.unreadCount = (chat.unreadCount || 0) + 1;
-                    // 👇 🌟 智能重绘拦截：如果在看别人聊天，绝不重绘！只有在“主界面(消息列表)”时才为了画红点而刷新！
-                    if (typeof wxState !== 'undefined' && wxState.view === 'main' && typeof window.render === 'function') {
-                        window.render(); 
+                    if (isCall && newMsg.msgType === 'text' && senderChar.minimaxVoiceId && store.minimaxConfig?.enabled !== false) {
+                        const url = await fetchMinimaxVoice(newMsg.text, senderChar.minimaxVoiceId);
+                        if (url && typeof wxState !== 'undefined' && wxState.view === 'call') {
+                            newMsg.audioUrl = url;
+                            playCallAudio(url);
+                        }
                     }
                 }
-            }
+            })();
 
-            if (i < finalMsgs.length - 1 && !callAudioPlayed && !document.hidden) {
-                await new Promise(resolve => setTimeout(resolve, 300));
-            }
+        } else {
+            // 【场景 1】：用户就盯着这个聊天室！我们要一条条冒出来的流式感！
+            if (typeof wxState !== 'undefined' && wxState.typingStatus) wxState.typingStatus[chatId] = false;
+
+            (async () => {
+                for (let i = 0; i < finalMsgs.length; i++) {
+                    const newMsg = finalMsgs[i];
+                    
+                    // 1. 进一条，存一条，绝不贪多
+                    chat.messages.push(newMsg);
+                    if (typeof saveToLocalStorage === 'function') saveToLocalStorage();
+
+                    // 2. 出来一条就 Render 一下！画面稳稳跟上！
+                    if (typeof window.render === 'function') window.render();
+                    if (window.wxActions && window.wxActions.scrollToBottom) window.wxActions.scrollToBottom();
+
+                    // 3. 叮咚提示音（非电话状态）
+                    if (!isCall && newMsg.msgType !== 'system' && newMsg.msgType !== 'recall_system') {
+                        try { new Audio(store.appearance?.newMsgSound || ' ').play().catch(()=>{}); } catch(e) {}
+                    }
+
+                    // 4. 通话语音处理
+                    let senderChar = char; 
+                    if (newMsg.sender && typeof newMsg.sender === 'string') {
+                        let found = store.contacts.find(c => c.name === newMsg.sender || c.id === newMsg.sender);
+                        if (found) senderChar = found;
+                    }
+                    let callAudioPlayed = false;
+                    if (isCall && newMsg.msgType === 'text' && senderChar.minimaxVoiceId && store.minimaxConfig?.enabled !== false) {
+                        const url = await fetchMinimaxVoice(newMsg.text, senderChar.minimaxVoiceId);
+                        if (url && typeof wxState !== 'undefined' && wxState.view === 'call') {
+                            newMsg.audioUrl = url;
+                            playCallAudio(url);
+                            callAudioPlayed = true;
+                            if (typeof window.render === 'function') window.render(); // 拿到语音后再刷新下UI
+                        }
+                    }
+
+                    // 5. 核心魔法：停顿 0.8 秒，给你完美的打字感
+                    if (i < finalMsgs.length - 1 && !document.hidden) {
+                        await new Promise(resolve => setTimeout(resolve, callAudioPlayed ? 300 : 800));
+                    }
+                }
+            })();
         }
         
-        // 🌟 完美接力：AI 消息上屏完毕，立刻启动下一轮的“主动搭话”巡逻！
+        // 🌟 继续巡逻
         setTimeout(() => { if (typeof window.scheduleCloudTask === 'function') window.scheduleCloudTask(chatId); }, 2000);
     }
   } catch (e) { 
