@@ -3623,7 +3623,7 @@ export function renderWeChatApp(store) {
                      `;
                  } else {
                      html += `
-                     <div class="mc-offline-msg bg-white/60 backdrop-blur-md rounded-2xl relative flex p-5 items-start animate-in fade-in duration-300 mb-8 ${wxState.isMultiSelecting ? 'cursor-pointer' : ''}" 
+                     <div class="mc-offline-msg bg-white/30 backdrop-blur-md rounded-2xl relative flex p-5 items-start animate-in fade-in duration-300 mb-8 ${wxState.isMultiSelecting ? 'cursor-pointer' : ''}" 
                           ${wxState.isMultiSelecting ? `onclick="window.wxActions.toggleSelectMsg(${msg.id})"` : ''}>
                        ${checkboxHtml}
                        <div class="mc-offline-bubble flex-1 text-[16px] text-gray-800 flex flex-col leading-loose pointer-events-${wxState.isMultiSelecting ? 'none' : 'auto'}"
