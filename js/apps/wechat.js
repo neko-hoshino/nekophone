@@ -5203,7 +5203,6 @@ const planCloudBrain = async (delayMinutes, char, llmMessages, routingId, recurs
 
   const res = await fetch('https://neko-hoshino.duckdns.org/auto-plan', {
         method: 'POST',
-        keepalive: true, // 🌟 修复：无论你关闭网页有多快，浏览器都会接管这个空包弹，誓死将它送达云端！
         headers: {
             'Content-Type': 'application/json',
             'x-secret-token': localStorage.getItem('neko_server_pwd') || ''
