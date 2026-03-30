@@ -498,7 +498,7 @@ if (!window.cpActions) {
       try {
           // 替换掉原来的 promptStr 组装
           const historyStr = getTodayChatHistory(targetCharId, targetDateStr);
-          const taskMsg = `【系统任务】今天即将结束，请你结合今天的聊天记录、人设和记忆，写一篇今天的私密日记。\n要求：\n1. 第一人称口吻，真实自然的情感表达。\n2. 总结今天的互动，或者表达对用户的思念/感受。\n3. 直接输出日记正文，严禁带有任何多余的系统标签、标题或格式！`;
+          const taskMsg = `【系统任务】今天即将结束，请你结合今天的聊天记录、人设和记忆，写一篇今天的私密日记。\n要求：\n1. 第一人称口吻，真实自然的情感表达。\n2. 总结今天的互动，或者表达对用户的思念/感受。\n3. 要求：字数 150-300字，支持 ~~阴暗面~~ 和 **高光** 语法。直接输出正文！`;
           
           const promptStr = window.cpActions.buildMasterPrompt(targetCharId, {
               history: historyStr,
@@ -1074,7 +1074,7 @@ if (!window.cpActions) {
           
           const loserName = nextLoser === 'ai' ? ctx.char.name : '用户';
 
-          const taskMsg = `【系统任务】真心话大冒险。本轮的输家已经由系统判定为：【${loserName}】！${avoidPrompt} \n\n❗❗你的任务链：\n1. 随机选择惩罚类型（truth或dare）。\n2. 给输家【${loserName}】制定一个色情、暧昧、直接的惩罚内容。\n   👉 如果输家是【用户】，请你向用户发号施令（例如：“描述你最敏感的地方”、“给我发一张锁骨的照片”）。\n   👉 如果输家是【${ctx.char.name}】（也就是你自己），请你写出你要对用户做的事，或者你自己的坦白（例如：“我会在你耳边喘息一分钟”、“我现在最想亲吻你的脖子”）。\n3. 扮演 ${ctx.char.name} 说一句15字内的反应（比如你输了可以假装不甘心，赢了可以得意）。\n\n❗警告：你只需输出严格 JSON，不要输出输家是谁，也绝对不要带多余的字符：\n{"type": "truth/dare", "content": "惩罚内容", "reaction": "你的反应"}`;
+          const taskMsg = `【系统任务】真心话大冒险。本轮的输家已经由系统判定为：【${loserName}】！${avoidPrompt} \n\n❗❗你的任务链：\n1. 随机选择惩罚类型（truth或dare）。\n2. 给输家【${loserName}】制定一个色情、暧昧、直接的惩罚内容。例如：“你内心深处最大尺度的性幻想是什么？”，“上一次自慰是什么时候？”，“含咬赢家喉结十分钟。”，“让赢家为所欲为十分钟。”\n❗你是以中立的系统身份在制定惩罚，请用输家和赢家来描述，禁止用你和我来描述惩罚内容。\n3. 扮演 ${ctx.char.name} 说一句15字内的反应（比如你输了可以假装不甘心，赢了可以得意）。\n\n❗警告：你只需输出严格 JSON，不要输出输家是谁，也绝对不要带多余的字符：\n{"type": "truth/dare", "content": "惩罚内容", "reaction": "你的反应"}`;
 
           const prompt = window.cpActions.buildMasterPrompt(charId, {
               task: taskMsg,
@@ -1261,8 +1261,302 @@ if (!window.cpActions) {
       window.render();
       await window.cpActions.fetchDareStoryReply(charId, tod.id, tod.messages.length === 0);
   },
+  // ==========================================
+  // 🌟 共同成长 (自律打卡系统) 核心引擎
+  // ==========================================
+  openGrowth: (charId) => {
+      cpState.view = 'growth'; 
+      cpState.activeCharId = charId;
+      cpState.growthTab = 'me';
+      
+      store.coupleSpacesData[charId] = store.coupleSpacesData[charId] || {};
+      const spaceData = store.coupleSpacesData[charId];
+      spaceData.growth = spaceData.growth || { plans: [], records: {} };
+      
+      if (!spaceData.startDate) spaceData.startDate = Date.now();
+      
+      // 🌟 核心：每次点开面板，后台静默按概率自检角色有无完成计划
+      window.cpActions.autoCheckGrowthTasks(charId);
+      
+      window.render();
+  },
+  
+  switchGrowthTab: async (charId, tab) => {
+      cpState.growthTab = tab;
+      const spaceData = store.coupleSpacesData[charId];
+      window.render();
+      
+      // 🌟 如果首次切到 TA的，且 TA 还没有计划，立刻触发 AI 自动生成！
+      if (tab === 'ai' && spaceData.growth.plans.filter(p => p.owner === 'ai').length === 0 && !spaceData.isGeneratingAIPlans) {
+          spaceData.isGeneratingAIPlans = true; window.render();
+          try {
+              const prompt = window.cpActions.buildMasterPrompt(charId, {
+                  task: `【系统任务】你们正在使用情侣App的“共同成长”自律打卡功能。请根据你的人设，为自己制定3个极度符合你目前性格和处境的日常自律/成长计划（每日任务）。\n要求：每条必须具体、量化（例如：每天看10页书，每天去健身房练胸30分钟）。\n❗严格红线：必须输出严格的 JSON 数组格式，绝对不要带有任何 markdown 标记、\`\`\`json 或其他解释：\n["任务1", "任务2", "任务3"]`
+              });
+              const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                  method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                  body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.85 })
+              });
+              const data = await res.json();
+              const jsonStr = data.choices[0].message.content.trim().replace(/^```[a-z]*\n?/gi, '').replace(/```$/g, '').trim();
+              const tasks = JSON.parse(jsonStr);
+              if (Array.isArray(tasks)) {
+                  tasks.forEach(t => {
+                      spaceData.growth.plans.push({ id: 'P_'+Date.now()+'_'+Math.random(), owner: 'ai', type: 'daily', text: t, createdAt: Date.now() });
+                  });
+              }
+          } catch(e) { console.error('AI生成自律计划失败', e); } 
+          finally {
+              spaceData.isGeneratingAIPlans = false;
+              if (window.actions?.saveStore) window.actions.saveStore();
+              window.render();
+          }
+      }
+  },
 
-    notBuilt: (name) => { window.actions.showToast(name + ' 功能正在快马加鞭施工中！'); }
+  autoCheckGrowthTasks: (charId) => {
+      const spaceData = store.coupleSpacesData[charId];
+      if (!spaceData || !spaceData.growth || !spaceData.growth.plans) return;
+      const logicalToday = getLogicalDateStr();
+      spaceData.growth.records[logicalToday] = spaceData.growth.records[logicalToday] || {};
+
+      let changed = false;
+      const prob = Math.min(0.95, new Date().getHours() / 24); 
+
+      spaceData.growth.plans.forEach(p => {
+          if (p.owner === 'ai') {
+              let isDone = false;
+              if (p.type === 'weekly') {
+                  const d = new Date(logicalToday);
+                  const day = d.getDay() || 7;
+                  d.setDate(d.getDate() - day + 1);
+                  const weekDates = [];
+                  for(let i=0; i<7; i++) {
+                      const nd = new Date(d);
+                      nd.setDate(d.getDate() + i);
+                      weekDates.push(`${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,'0')}-${String(nd.getDate()).padStart(2,'0')}`);
+                  }
+                  isDone = weekDates.some(wd => spaceData.growth.records[wd] && spaceData.growth.records[wd][p.id]);
+              } else if (p.type === 'monthly') {
+                  const prefix = logicalToday.substring(0, 7);
+                  isDone = Object.keys(spaceData.growth.records).some(k => k.startsWith(prefix) && spaceData.growth.records[k][p.id]);
+              } else {
+                  isDone = spaceData.growth.records[logicalToday][p.id];
+              }
+
+              if (!isDone && Math.random() < prob) {
+                  spaceData.growth.records[logicalToday][p.id] = true;
+                  changed = true;
+              }
+          }
+      });
+      if (changed && window.actions?.saveStore) window.actions.saveStore();
+  },
+
+  toggleGrowthTask: (charId, planId) => {
+      const spaceData = store.coupleSpacesData[charId];
+      const logicalToday = getLogicalDateStr();
+      spaceData.growth.records[logicalToday] = spaceData.growth.records[logicalToday] || {};
+
+      const p = spaceData.growth.plans.find(x => x.id === planId);
+      if (!p) return;
+
+      // 🌟 扫描周期状态，防止重复打勾和取消打勾
+      let isDone = false;
+      if (p.type === 'weekly') {
+          const d = new Date(logicalToday);
+          const day = d.getDay() || 7;
+          d.setDate(d.getDate() - day + 1); // 算到周一
+          const weekDates = [];
+          for(let i=0; i<7; i++) {
+              const nd = new Date(d);
+              nd.setDate(d.getDate() + i);
+              weekDates.push(`${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,'0')}-${String(nd.getDate()).padStart(2,'0')}`);
+          }
+          isDone = weekDates.some(wd => spaceData.growth.records[wd] && spaceData.growth.records[wd][planId]);
+      } else if (p.type === 'monthly') {
+          const prefix = logicalToday.substring(0, 7); // YYYY-MM
+          isDone = Object.keys(spaceData.growth.records).some(dateKey => dateKey.startsWith(prefix) && spaceData.growth.records[dateKey][planId]);
+      } else {
+          isDone = spaceData.growth.records[logicalToday][planId];
+      }
+
+      // 如果当前周期内已经打卡了，直接无视点击，实现“不可取消”
+      if (isDone) return; 
+
+      spaceData.growth.records[logicalToday][planId] = true;
+      if (window.actions?.saveStore) window.actions.saveStore();
+      window.render();
+  },
+  toggleGrowthCalendar: () => {
+      cpState.growthCalendarExpanded = !cpState.growthCalendarExpanded;
+      window.render();
+  },
+  deleteGrowthTask: (charId, planId) => {
+      if(!confirm('确定要放弃这个计划吗？')) return;
+      const spaceData = store.coupleSpacesData[charId];
+      spaceData.growth.plans = spaceData.growth.plans.filter(p => p.id !== planId);
+      if (window.actions?.saveStore) window.actions.saveStore();
+      window.render();
+  },
+
+  // 🌟 全新分离式弹窗引擎
+  openGrowthManualModal: () => {
+      cpState.growthModalView = 'manual';
+      cpState.growthAddType = 'daily';
+      window.render();
+  },
+  openGrowthAiModal: () => {
+      cpState.growthModalView = 'ai';
+      cpState.growthAddResult = '';
+      cpState.aiGeneratedPlans = []; // 清空上次的生成记录
+      window.render();
+  },
+  closeGrowthModal: () => {
+      cpState.growthModalView = null;
+      window.render();
+  },
+  setGrowthAddType: (type) => {
+      cpState.growthAddType = type;
+      window.render();
+  },
+
+  // 🌟 用户手动保存计划
+  saveGrowthManualPlan: (charId) => {
+      const text = document.getElementById('growth-manual-input').value.trim();
+      if (!text) return window.actions?.showToast('计划内容不能为空哦');
+      
+      const spaceData = store.coupleSpacesData[charId];
+      spaceData.growth.plans.unshift({ id: 'P_'+Date.now(), owner: 'me', type: cpState.growthAddType, text: text, createdAt: Date.now() });
+      cpState.growthModalView = null;
+      if (window.actions?.saveStore) window.actions.saveStore();
+      window.render();
+  },
+
+  // 🧠 AI 智能长短期计划拆解大脑
+  generateGrowthPlan: async (charId) => {
+      const fuzzy = document.getElementById('growth-fuzzy-input').value.trim();
+      if (!fuzzy) return window.actions?.showToast('请先输入你的大概目标哦');
+      
+      cpState.isGeneratingGrowth = true; window.render();
+      try {
+          const prompt = window.cpActions.buildMasterPrompt(charId, {
+              task: `【系统任务】用户想在情侣App的自律打卡板块中创建一个长期计划，大致目标是：【${fuzzy}】。\n请你以靠谱伴侣的身份，帮用户把这个目标拆解成一个行之有效且易于坚持的计划表。既要包含简单的每日任务（daily），也要包含稍有挑战的每周任务（weekly）。总共生成 3 到 5 条任务。\n❗严格红线：必须输出严格的 JSON 数组格式，绝对不要带有任何 markdown 标记、\`\`\`json 或其他多余解释。格式示范：\n[{"type": "daily", "text": "每天喝水2L"}, {"type": "weekly", "text": "每周去跑步3次"}]`
+          });
+          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.8 })
+          });
+          const data = await res.json();
+          const jsonStr = data.choices[0].message.content.trim().replace(/^```[a-z]*\n?/gi, '').replace(/```$/g, '').trim();
+          cpState.aiGeneratedPlans = JSON.parse(jsonStr);
+      } catch(e) { window.actions?.showToast('生成失败，请重试'); } 
+      finally { cpState.isGeneratingGrowth = false; window.render(); }
+  },
+
+  // 🌟 AI 生成结果的编辑与删除
+  deleteAiGeneratedPlan: (idx) => {
+      cpState.aiGeneratedPlans.splice(idx, 1);
+      window.render();
+  },
+  editAiGeneratedPlan: (idx) => {
+      const newText = prompt('修改计划内容：', cpState.aiGeneratedPlans[idx].text);
+      if (newText !== null && newText.trim() !== '') {
+          cpState.aiGeneratedPlans[idx].text = newText.trim();
+          window.render();
+      }
+  },
+
+  // 🌟 将 AI 生成的计划批量存入主库
+  saveAiGeneratedPlans: (charId) => {
+      if (!cpState.aiGeneratedPlans || cpState.aiGeneratedPlans.length === 0) return window.actions?.showToast('没有可保存的计划哦');
+      const spaceData = store.coupleSpacesData[charId];
+      cpState.aiGeneratedPlans.forEach((p, index) => {
+          spaceData.growth.plans.unshift({ id: 'P_'+Date.now()+'_'+index, owner: 'me', type: p.type || 'daily', text: p.text, createdAt: Date.now() });
+      });
+      cpState.growthModalView = null;
+      cpState.aiGeneratedPlans = [];
+      if (window.actions?.saveStore) window.actions.saveStore();
+      window.render();
+  },
+
+  // 🌟 电子宠物小屋核心大脑
+    openPetRoom: (charId) => {
+        cpState.view = 'petRoom';
+        cpState.activeCharId = charId;
+        store.coupleSpacesData[charId] = store.coupleSpacesData[charId] || {};
+        const spaceData = store.coupleSpacesData[charId];
+        
+        // 🌟 1. 领养初始化 (加入房屋背景数据)
+        if (!spaceData.pet) {
+            spaceData.pet = {
+                name: '雪球',
+                hunger: 40,   
+                clean: 60,    
+                mood: 50,     
+                state: 'idle',
+                house: {
+                    currentBackgroundId: 1 // 🌟 默认背景 1.png
+                }
+            };
+        }
+        // 兼容旧数据：如果用户之前进来过但没有 house 数据，补上
+        if (!spaceData.pet.house) {
+            spaceData.pet.house = { currentBackgroundId: 1 };
+        }
+        
+        spaceData.pet.state = 'idle'; // 每次进来默认待机
+        // 关闭之前可能打开的弹窗状态
+        cpState.petModalView = null; 
+        window.render();
+    },
+    // 🌟 电子宠物装修大脑
+    openPetRoomDecorationModal: (charId) => {
+        cpState.activeCharId = charId;
+        cpState.petModalView = 'decoration'; // 🌟 打开装修弹窗
+        window.render();
+    },
+
+    changePetHouseBackground: (charId, bgId) => {
+        const spaceData = store.coupleSpacesData[charId];
+        if (!spaceData || !spaceData.pet || !spaceData.pet.house) return;
+        
+        spaceData.pet.house.currentBackgroundId = bgId; // 🌟 更换背景 ID
+        
+        if (window.actions?.saveStore) window.actions.saveStore();
+        // 🌟 换完背景后，不需要关闭弹窗，可以让用户继续挑选
+        window.render(); 
+    },
+
+    interactPet: (charId, actionType) => {
+        const spaceData = store.coupleSpacesData[charId];
+        if (!spaceData || !spaceData.pet) return;
+        const pet = spaceData.pet;
+        
+        // 如果正在做动作，不许打断它
+        if (pet.state !== 'idle') return;
+
+        // 切换动作状态，并增加相应的属性值
+        pet.state = actionType;
+        if (actionType === 'eat') pet.hunger = Math.min(100, pet.hunger + 30);
+        if (actionType === 'bath') pet.clean = Math.min(100, pet.clean + 40);
+        if (actionType === 'play') pet.mood = Math.min(100, pet.mood + 30);
+
+        if (window.actions?.saveStore) window.actions.saveStore();
+        window.render();
+
+        // 🌟 魔法：让动作 GIF 播放 3 秒后，自动切回待机状态！
+        setTimeout(() => {
+            if (store.coupleSpacesData[charId] && store.coupleSpacesData[charId].pet) {
+                store.coupleSpacesData[charId].pet.state = 'idle';
+                // 确保用户还停留在宠物页面才刷新画面
+                if (cpState.view === 'petRoom' && cpState.activeCharId === charId) {
+                    window.render();
+                }
+            }
+        }, 3000);
+    },
+
   };
 }
 
@@ -1399,6 +1693,27 @@ export function renderCoupleApp(store) {
             <div class="w-8"></div>
          </div>
          <div id="cp-dash-scroll" class="flex-1 overflow-y-auto hide-scrollbar pb-12">
+            <div class="flex items-baseline justify-center mt-4 mb-2 space-x-1">
+                  <span class="text-[11px] font-black text-rose-300 tracking-widest uppercase drop-shadow-sm">相伴</span>
+                  <span class="text-[32px] font-black font-serif text-rose-400 leading-none">${(()=>{
+                      const spaceData = store.coupleSpacesData[char.id] || {};
+                      let earliestDate = Date.now();
+                      
+                      // 修复：从全局存储中正确抓取属于这个角色的纪念日
+                      const annis = (store.anniversaries || []).filter(a => a.charId === char.id);
+                      
+                      if (annis.length > 0) {
+                          // 遍历找到最早的那一个纪念日
+                          const earliestStr = annis.reduce((min, p) => p.date < min ? p.date : min, annis[0].date);
+                          earliestDate = new Date(earliestStr).getTime();
+                      } else if (spaceData.startDate) {
+                          earliestDate = spaceData.startDate;
+                      }
+                      return Math.max(1, Math.ceil((Date.now() - earliestDate) / (1000 * 60 * 60 * 24)));
+                  })()}</span>
+                  <span class="text-[12px] font-bold text-rose-300">天</span>
+            </div>
+         
             <div class="flex items-center justify-center pt-2 pb-10">
                <div class="flex flex-col items-center">
                   <div class="w-20 h-20 rounded-full overflow-hidden shadow-lg border-[3px] border-white z-10 bg-gray-100">${getVidHtml(myAvatar)}</div>
@@ -1434,19 +1749,19 @@ export function renderCoupleApp(store) {
             
             <div class="grid grid-cols-2 gap-3.5 px-5 mb-5">
                <div class="bg-gradient-to-br from-rose-50 to-pink-50/30 rounded-[24px] p-5 shadow-sm border border-pink-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.openTacit('${char.id}')"><i data-lucide="messages-square" class="w-6 h-6 text-rose-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">默契问答</span></div>
-               <div class="bg-gradient-to-br from-orange-50 to-amber-50/30 rounded-[24px] p-5 shadow-sm border border-orange-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.notBuilt('恋爱挑战')"><i data-lucide="swords" class="w-6 h-6 text-orange-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">恋爱挑战</span></div>
+               <div class="bg-gradient-to-br from-orange-50 to-amber-50/30 rounded-[24px] p-5 shadow-sm border border-orange-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.openGrowth('${char.id}')"><i data-lucide="trending-up" class="w-6 h-6 text-orange-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">共同成长</span></div>
                
                <div class="bg-gradient-to-br from-blue-50 to-cyan-50/30 rounded-[24px] p-5 shadow-sm border border-blue-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.openHundredThings('${char.id}')"><i data-lucide="check-square" class="w-6 h-6 text-blue-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">100件小事</span></div>
                <div class="bg-gradient-to-br from-purple-50 to-fuchsia-50/30 rounded-[24px] p-5 shadow-sm border border-purple-100/50 flex flex-col cursor-pointer active:scale-95 transition-transform" onclick="window.cpActions.openToD('${char.id}')"><i data-lucide="dices" class="w-6 h-6 text-purple-400 mb-6 opacity-80"></i><span class="text-[15px] font-extrabold text-gray-800 mb-1 tracking-wide">真心话大冒险</span></div>
             </div>
 
             <div class="px-5 mb-8">
-               <div class="bg-white rounded-[24px] p-5 shadow-[0_4px_15px_rgba(0,0,0,0.02)] border border-emerald-50 flex items-center justify-between cursor-pointer active:scale-[0.98] transition-all" onclick="window.cpActions.notBuilt('宠物小屋')">
+               <div class="bg-white rounded-[24px] p-5 shadow-[0_4px_15px_rgba(0,0,0,0.02)] border border-emerald-50 flex items-center justify-between cursor-pointer active:scale-[0.98] transition-all" onclick="window.cpActions.openPetRoom('${char.id}')">
                   <div class="flex items-center">
                      <div class="w-14 h-14 bg-emerald-50 rounded-full flex items-center justify-center mr-4 border border-emerald-100/50"><i data-lucide="cat" class="text-emerald-400 w-7 h-7"></i></div>
                      <div class="flex flex-col">
                         <span class="text-[16px] font-extrabold text-gray-800 mb-1 tracking-wide">电子宠物小屋</span>
-                        <span class="text-[11px] text-gray-400 font-bold tracking-widest">小猫“雪球”正在睡觉 zzZ</span>
+                        <span class="text-[11px] text-gray-400 font-bold tracking-widest">去看看我们共同的赛博小宝贝</span>
                      </div>
                   </div>
                   <i data-lucide="chevron-right" class="text-gray-300 w-5 h-5"></i>
@@ -1494,7 +1809,7 @@ export function renderCoupleApp(store) {
                         ${a.daysLeft > 0 ? `<span class="text-4xl font-black text-rose-400 font-serif drop-shadow-sm leading-none">${a.daysLeft}<span class="text-[12px] font-bold ml-1 text-rose-300 font-sans">天</span></span>` : '<span class="text-[16px] font-black text-rose-400 font-serif tracking-widest mt-1.5">今天</span>'}
                      </div>
                   </div>
-                  <div class="absolute right-4 top-1/2 -translate-y-1/2 cursor-pointer p-2 bg-rose-50 rounded-full active:scale-90 transition-transform z-50" onclick="window.cpActions.deleteAnniversary('${a.id}')">
+                  <div class="absolute right-4 top-1/2 -translate-y-1/2 cursor-pointer p-2 rounded-full active:scale-90 transition-transform z-50" onclick="window.cpActions.deleteAnniversary('${a.id}')">
                       <i data-lucide="trash-2" class="w-4 h-4 text-rose-400"></i>
                   </div>
                </div>
@@ -2070,6 +2385,381 @@ export function renderCoupleApp(store) {
         `;
   }
 
+  // 🌟 界面 5.5：共同成长 (自律打卡系统)
+  if (cpState.view === 'growth') {
+      const char = store.contacts.find(c => c.id === cpState.activeCharId);
+      const spaceData = store.coupleSpacesData[char.id] || {};
+      const growth = spaceData.growth || { plans: [], records: {} };
+      const logicalToday = getLogicalDateStr();
+      
+      // 🌟 1. 动态生成本周打卡日历 & 全局积分计算引擎
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = today.getMonth();
+      const firstDay = new Date(year, month, 1).getDay();
+      const daysInMonth = new Date(year, month + 1, 0).getDate();
+      const prefixThisMonth = `${year}-${String(month+1).padStart(2,'0')}-`;
+      const [tY, tM, tD] = logicalToday.split('-');
+      // 算出今天是本月的第几行
+      const todayRow = Math.floor((firstDay + parseInt(tD) - 1) / 7);
+
+      // 🎯 积分与统计大脑
+      let totalCheckins = 0, totalPerfects = 0;
+      let monthCheckins = 0, monthPerfects = 0;
+      let totalScore = 0;
+      let consecutiveCheckins = 0, consecutivePerfects = 0;
+      let lastDateObj = null;
+
+      const allDates = Object.keys(growth.records).sort();
+      allDates.forEach(dateStr => {
+          const recordsDay = growth.records[dateStr];
+          const activePlans = growth.plans;
+
+          const myDailyPlans = activePlans.filter(p => p.owner === 'me' && p.type === 'daily');
+          const taDailyPlans = activePlans.filter(p => p.owner === 'ai' && p.type === 'daily');
+
+          const myDailyCompleted = myDailyPlans.filter(p => recordsDay[p.id]).length;
+          const taDailyCompleted = taDailyPlans.filter(p => recordsDay[p.id]).length;
+
+          const myDailyOk = myDailyPlans.length > 0 && myDailyCompleted === myDailyPlans.length;
+          const taDailyOk = taDailyPlans.length > 0 && taDailyCompleted === taDailyPlans.length;
+
+          const myHasCheck = activePlans.filter(p => p.owner === 'me' && recordsDay[p.id]).length > 0;
+          const taHasCheck = activePlans.filter(p => p.owner === 'ai' && recordsDay[p.id]).length > 0;
+
+          const bothChecked = myHasCheck && taHasCheck;
+          const bothPerfect = bothChecked && myDailyOk && taDailyOk;
+
+          if (!bothChecked) {
+              consecutiveCheckins = 0;
+              consecutivePerfects = 0;
+              return; 
+          }
+
+          // 判断断签 (相隔大于 1 天)
+          const currDateObj = new Date(dateStr);
+          if (lastDateObj) {
+              const diffDays = Math.round((currDateObj - lastDateObj) / (1000 * 60 * 60 * 24));
+              if (diffDays > 1) {
+                  consecutiveCheckins = 0;
+                  consecutivePerfects = 0;
+              }
+          }
+          lastDateObj = currDateObj;
+
+          totalCheckins++;
+          if (dateStr.startsWith(prefixThisMonth)) monthCheckins++;
+          consecutiveCheckins++;
+          totalScore += 10; 
+          if (consecutiveCheckins % 3 === 0) totalScore += 10; 
+
+          if (bothPerfect) {
+              totalPerfects++;
+              if (dateStr.startsWith(prefixThisMonth)) monthPerfects++;
+              consecutivePerfects++;
+              totalScore += 10; 
+              if (consecutivePerfects % 3 === 0) totalScore += 20; 
+          } else {
+              consecutivePerfects = 0;
+          }
+      });
+
+      // 🌟 生成格子并通过 cellArray 抓取本周
+      let cellArray = [];
+      for(let i=0; i<firstDay; i++) { cellArray.push({ row: 0, html: `<div></div>` }); } 
+      
+      for(let d=1; d<=daysInMonth; d++) {
+          const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+          const recordsDay = growth.records[dateStr] || {};
+          const activePlans = growth.plans; 
+          
+          const myDailyPlans = activePlans.filter(p => p.owner === 'me' && p.type === 'daily');
+          const taDailyPlans = activePlans.filter(p => p.owner === 'ai' && p.type === 'daily');
+          
+          const myDailyCompleted = myDailyPlans.filter(p => recordsDay[p.id]).length;
+          const taDailyCompleted = taDailyPlans.filter(p => recordsDay[p.id]).length;
+          
+          const myDailyOk = myDailyPlans.length > 0 && myDailyCompleted === myDailyPlans.length;
+          const taDailyOk = taDailyPlans.length > 0 && taDailyCompleted === taDailyPlans.length;
+          
+          const myHasCheck = activePlans.filter(p => p.owner === 'me' && recordsDay[p.id]).length > 0;
+          const taHasCheck = activePlans.filter(p => p.owner === 'ai' && recordsDay[p.id]).length > 0;
+          
+          const bothChecked = myHasCheck && taHasCheck;
+          const bothPerfect = bothChecked && myDailyOk && taDailyOk; 
+          
+          const isTodayDate = dateStr === logicalToday;
+          const cellRow = Math.floor((firstDay + d - 1) / 7);
+          
+          let bgClass = isTodayDate ? 'bg-white border border-gray-100 shadow-md text-gray-800' : 'bg-transparent text-gray-600';
+          if (bothPerfect || bothChecked) {
+              bgClass = isTodayDate ? 'bg-white border border-gray-100 shadow-md text-gray-300' : 'bg-transparent text-gray-300';
+          }
+          
+          let stampHtml = '';
+          if (bothPerfect) {
+              stampHtml = `<div class="absolute inset-0 flex items-center justify-center pointer-events-none z-10"><div class="w-10 h-10 border-2 border-rose-400/80 rounded-full flex flex-col items-center justify-center rotate-[-12deg] mix-blend-multiply"><span class="text-[8px] font-black text-rose-500 uppercase tracking-tighter leading-none mt-1">Perfect</span><div class="w-7 h-[1.5px] bg-rose-400/80 my-[1px]"></div><span class="text-[6px] font-bold text-rose-500/90">${month+1}.${d}</span></div></div>`;
+          } else if (bothChecked) {
+              stampHtml = `<div class="absolute inset-0 flex items-center justify-center pointer-events-none z-10"><div class="w-9 h-9 border-[1.5px] border-orange-400/70 rounded-full flex items-center justify-center rotate-[15deg] mix-blend-multiply"><span class="text-[10px] font-black text-orange-500/80 uppercase tracking-widest font-serif">Done</span></div></div>`;
+          }
+          
+          let dotsHtml = '';
+          if (!bothChecked && !bothPerfect) {
+              if (myHasCheck) dotsHtml += '<div class="w-1.5 h-1.5 rounded-full bg-pink-400 shadow-sm mx-[1px]"></div>';
+              if (taHasCheck) dotsHtml += '<div class="w-1.5 h-1.5 rounded-full bg-blue-400 shadow-sm mx-[1px]"></div>';
+          }
+          let dotsContainer = dotsHtml ? `<div class="absolute bottom-1 left-0 right-0 flex justify-center">${dotsHtml}</div>` : '';
+
+          const html = `
+          <div class="flex justify-center relative h-11 items-center my-1">
+              <div class="w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-bold ${bgClass} transition-all relative z-0">
+                  <span>${d}</span>
+                  ${dotsContainer}
+              </div>
+              ${stampHtml}
+          </div>`;
+          
+          cellArray.push({ row: cellRow, html: html });
+      }
+
+      // 🌟 强行过滤，只渲染今天所在的这一周
+      let finalCells = cellArray.filter(c => c.row === todayRow);
+
+      let daysHtml = '';
+      const weekDays = ['日','一','二','三','四','五','六'];
+      daysHtml += weekDays.map(d => `<div class="text-[10px] text-gray-400 text-center font-bold mb-2">${d}</div>`).join('');
+      daysHtml += finalCells.map(c => c.html).join('');
+
+      // 🌟 精简版单行图例 (已拉近间距)
+      const legendHtml = `
+      <div class="flex items-center justify-center space-x-5 w-full mt-2 pt-3 border-t border-gray-50 text-[9px] font-bold text-gray-400 tracking-wider">
+          <div class="flex items-center"><div class="w-1.5 h-1.5 rounded-full bg-pink-400 mr-1 shadow-sm"></div>我</div>
+          <div class="flex items-center"><div class="w-1.5 h-1.5 rounded-full bg-blue-400 mr-1 shadow-sm"></div>TA</div>
+          <div class="flex items-center"><span class="text-[8px] font-black text-orange-400 border border-orange-300 rounded-[2px] px-0.5 rotate-[5deg] mr-1">DONE</span>共同</div>
+          <div class="flex items-center"><span class="text-[8px] font-black text-rose-400 border border-rose-300 rounded-[2px] px-0.5 rotate-[-5deg] mr-1">PERFECT</span>完美</div>
+      </div>
+      `;
+
+      // 🌟 2. 计划列表渲染 (带长短周期检测、沉底排序和颜色区分)
+      const currentTab = cpState.growthTab;
+      const currentPlans = growth.plans.filter(p => p.owner === currentTab);
+
+      // 核心辅助大脑：判断某个计划在当前周期内是否已达标
+      const checkIsDone = (p, dateStr) => {
+          if (p.type === 'weekly') {
+              const d = new Date(dateStr);
+              const day = d.getDay() || 7;
+              d.setDate(d.getDate() - day + 1);
+              const weekDates = [];
+              for(let i=0; i<7; i++) {
+                  const nd = new Date(d);
+                  nd.setDate(d.getDate() + i);
+                  weekDates.push(`${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,'0')}-${String(nd.getDate()).padStart(2,'0')}`);
+              }
+              return weekDates.some(wd => growth.records[wd] && growth.records[wd][p.id]);
+          } else if (p.type === 'monthly') {
+              const prefix = dateStr.substring(0, 7);
+              return Object.keys(growth.records).some(k => k.startsWith(prefix) && growth.records[k][p.id]);
+          } else {
+              return growth.records[dateStr] && growth.records[dateStr][p.id];
+          }
+      };
+
+      const typeWeight = { daily: 1, weekly: 2, monthly: 3 };
+
+      // 🌟 重新洗牌排序：未打卡在上，已打卡沉底；同状态下 每日 > 每周 > 每月
+      const sortedPlans = [...currentPlans].sort((a, b) => {
+          const aDone = checkIsDone(a, logicalToday);
+          const bDone = checkIsDone(b, logicalToday);
+          if (aDone !== bDone) return aDone ? 1 : -1;
+          return typeWeight[a.type] - typeWeight[b.type];
+      });
+
+      const planHtml = sortedPlans.length === 0 ? `
+          <div class="flex flex-col items-center justify-center py-10 opacity-60">
+              ${spaceData.isGeneratingAIPlans ? `<i data-lucide="loader-2" class="w-10 h-10 animate-spin text-orange-400 mb-3"></i><span class="text-[13px] font-bold text-orange-500">TA 正在认真思考自律计划...</span>` : `<i data-lucide="target" class="w-12 h-12 text-gray-400 mb-3"></i><span class="text-[13px] font-bold text-gray-500">还没有制定计划哦</span>`}
+          </div>
+      ` : sortedPlans.map(p => {
+          const isDone = checkIsDone(p, logicalToday);
+          const typeBadge = p.type === 'daily' ? '每日' : (p.type === 'weekly' ? '每周' : '每月');
+          // 彻底阻断打卡动作：不是自己的计划 或者 已经完成的，都不许碰
+          const canToggle = p.owner === 'me' && !isDone; 
+
+          // 🌟 专属颜色挂载
+          let colorClass = 'text-orange-400 bg-orange-50';
+          let borderColor = 'border-orange-400 bg-orange-400';
+          if (p.type === 'weekly') {
+              colorClass = 'text-blue-500 bg-blue-50';
+              borderColor = 'border-blue-400 bg-blue-400';
+          } else if (p.type === 'monthly') {
+              colorClass = 'text-purple-500 bg-purple-50';
+              borderColor = 'border-purple-400 bg-purple-400';
+          }
+
+          return `
+          <div class="bg-white rounded-[20px] p-4 shadow-[0_4px_15px_rgba(0,0,0,0.02)] border border-gray-100 flex items-center transition-all duration-300 ${isDone ? 'opacity-50 bg-gray-50/80 scale-[0.98]' : ''}">
+              <div class="w-6 h-6 rounded-full border-2 ${isDone ? borderColor : 'border-gray-300'} flex items-center justify-center mr-4 shrink-0 ${canToggle ? 'cursor-pointer active:scale-90' : 'cursor-not-allowed opacity-80'}" ${canToggle ? `onclick="window.cpActions.toggleGrowthTask('${char.id}', '${p.id}')"` : ''}>
+                  ${isDone ? '<i data-lucide="check" class="w-4 h-4 text-white"></i>' : ''}
+              </div>
+              <div class="flex-1 flex flex-col justify-center ${canToggle ? 'cursor-pointer' : ''}" ${canToggle ? `onclick="window.cpActions.toggleGrowthTask('${char.id}', '${p.id}')"` : ''}>
+                  <span class="text-[15px] font-bold ${isDone ? 'text-gray-400 line-through' : 'text-gray-800'} leading-snug">${p.text}</span>
+                  <span class="text-[10px] font-black ${colorClass} px-2 py-0.5 rounded-full self-start mt-1.5 tracking-widest">${typeBadge}</span>
+              </div>
+              <i data-lucide="trash-2" class="w-4 h-4 text-gray-300 hover:text-red-400 cursor-pointer active:scale-90 ml-3 shrink-0" onclick="window.cpActions.deleteGrowthTask('${char.id}', '${p.id}')"></i>
+          </div>
+          `;
+      }).join('');
+
+      return `
+      <div class="w-full h-full flex flex-col bg-[#fcfcfc] relative animate-in fade-in slide-in-from-right-4 duration-300 z-[60]">
+          <div class="pt-8 pb-3 px-4 shrink-0 flex items-center justify-between bg-[#fcfcfc]/90 backdrop-blur-md sticky top-0 z-20">
+              <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.openDashboard('${char.id}')"><i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i></div>
+              <span class="text-lg font-extrabold text-gray-800 tracking-wide">共同成长</span>
+              <div class="w-8"></div>
+          </div>
+
+          <div id="cp-growth-scroll" class="flex-1 overflow-y-auto hide-scrollbar">
+              <div class="px-5 py-2">
+                  <div class="bg-white rounded-[24px] p-5 shadow-[0_4px_20px_rgba(0,0,0,0.04)] border border-gray-50 flex flex-col">
+                      <div class="flex items-center justify-between mb-4">
+                          <span class="text-[14px] font-extrabold text-gray-800 flex items-center"><i data-lucide="calendar-days" class="w-4 h-4 mr-1.5 text-orange-400"></i>打卡日历</span>
+                          <span class="text-[11px] font-bold text-gray-400">${year}年${month+1}月</span>
+                      </div>
+                      
+                      <div class="grid grid-cols-7 gap-y-0 relative transition-all duration-300">${daysHtml}</div>
+                      
+                      ${legendHtml}
+
+                      <div class="mt-4 bg-gray-50/60 rounded-[16px] p-3 border border-gray-100/50">
+                          <div class="flex items-center justify-between mb-3 px-1">
+                              <span class="text-[12px] font-extrabold text-gray-700 flex items-center"><i data-lucide="award" class="w-4 h-4 mr-1 text-orange-400"></i>成就与积分</span>
+                              <div class="bg-orange-100/60 text-orange-600 px-2.5 py-0.5 rounded-full flex items-center shadow-sm border border-orange-200/50">
+                                  <i data-lucide="coins" class="w-3.5 h-3.5 mr-1 text-orange-500"></i>
+                                  <span class="text-[13px] font-black font-serif drop-shadow-sm">${totalScore}</span>
+                              </div>
+                          </div>
+                          
+                          <div class="grid grid-cols-3 gap-y-2 gap-x-2">
+                              <div class="flex flex-col items-center bg-white py-1.5 rounded-lg border border-gray-100 shadow-sm">
+                                  <span class="text-[9px] font-bold text-gray-400">本月打卡</span>
+                                  <span class="text-[14px] font-black text-gray-700 font-serif">${monthCheckins}</span>
+                              </div>
+                              <div class="flex flex-col items-center bg-white py-1.5 rounded-lg border border-gray-100 shadow-sm relative overflow-hidden">
+                                  <span class="text-[9px] font-bold text-gray-400">连续打卡</span>
+                                  <span class="text-[14px] font-black text-blue-500 font-serif">${consecutiveCheckins}</span>
+                              </div>
+                              <div class="flex flex-col items-center bg-white py-1.5 rounded-lg border border-gray-100 shadow-sm">
+                                  <span class="text-[9px] font-bold text-gray-400">总计打卡</span>
+                                  <span class="text-[14px] font-black text-gray-700 font-serif">${totalCheckins}</span>
+                              </div>
+                              
+                              <div class="flex flex-col items-center bg-white py-1.5 rounded-lg border border-gray-100 shadow-sm">
+                                  <span class="text-[9px] font-bold text-gray-400">本月完美</span>
+                                  <span class="text-[14px] font-black text-rose-400 font-serif">${monthPerfects}</span>
+                              </div>
+                              <div class="flex flex-col items-center bg-white py-1.5 rounded-lg border border-gray-100 shadow-sm relative overflow-hidden">
+                                  <span class="text-[9px] font-bold text-gray-400">连续完美</span>
+                                  <span class="text-[14px] font-black text-rose-500 font-serif">${consecutivePerfects}</span>
+                              </div>
+                              <div class="flex flex-col items-center bg-white py-1.5 rounded-lg border border-gray-100 shadow-sm">
+                                  <span class="text-[9px] font-bold text-gray-400">总计完美</span>
+                                  <span class="text-[14px] font-black text-rose-400 font-serif">${totalPerfects}</span>
+                              </div>
+                          </div>
+                      </div>
+                      
+                  </div>
+              </div>
+
+              <div class="mt-4 px-5">
+                  <div class="flex items-center bg-gray-100/80 p-1 rounded-full mb-5">
+                      <div class="flex-1 py-2 text-center text-[13px] font-bold rounded-full cursor-pointer transition-all ${currentTab === 'me' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400'}" onclick="window.cpActions.switchGrowthTab('${char.id}', 'me')">我的计划</div>
+                      <div class="flex-1 py-2 text-center text-[13px] font-bold rounded-full cursor-pointer transition-all ${currentTab === 'ai' ? 'bg-white shadow-sm text-gray-800' : 'text-gray-400'}" onclick="window.cpActions.switchGrowthTab('${char.id}', 'ai')">TA 的计划</div>
+                  </div>
+
+                  <div class="flex flex-col space-y-3 relative min-h-[200px] pb-28">
+                      ${planHtml}
+                  </div>
+              </div>
+          </div>
+          
+          ${currentTab === 'me' ? `
+          <div class="absolute bottom-6 left-0 right-0 z-30 flex justify-center space-x-3 px-5">
+              <button onclick="window.cpActions.openGrowthManualModal()" class="flex-1 flex items-center justify-center py-3.5 bg-white border border-gray-200 text-gray-800 font-bold text-[14px] rounded-[18px] shadow-xl active:scale-95 transition-transform">
+                  <i data-lucide="edit-3" class="w-4 h-4 mr-1.5"></i> 自己写计划
+              </button>
+              <button onclick="window.cpActions.openGrowthAiModal()" class="flex-1 flex items-center justify-center py-3.5 bg-gray-900 text-white font-bold text-[14px] rounded-[18px] shadow-xl active:scale-95 transition-transform">
+                  <i data-lucide="sparkles" class="w-4 h-4 mr-1.5 text-orange-400"></i> 让 TA 帮我写
+              </button>
+          </div>
+          ` : ''}
+          
+          ${cpState.growthModalView ? `
+          <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in" onclick="window.cpActions.closeGrowthModal()">
+              <div style="background: #ffffff !important;" class="w-full max-w-sm rounded-[32px] p-6 shadow-2xl flex flex-col animate-in zoom-in-95 duration-200 max-h-[80vh]" onclick="event.stopPropagation()">
+                  <div class="flex justify-between items-center mb-5 shrink-0">
+                      <span class="text-[18px] font-black text-gray-900">${cpState.growthModalView === 'manual' ? '自己写计划' : '让 TA 帮你做计划'}</span>
+                      <button onclick="window.cpActions.closeGrowthModal()" class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 active:scale-95"><i data-lucide="x" class="w-4 h-4"></i></button>
+                  </div>
+                  
+                  <div class="flex flex-col space-y-4 overflow-y-auto hide-scrollbar flex-1 pb-2">
+                      ${cpState.growthModalView === 'manual' ? `
+                          <div class="animate-in fade-in">
+                              <span class="text-[12px] font-bold text-gray-500 mb-2 block">打卡频率</span>
+                              <div class="flex space-x-2">
+                                  ${['daily:每日', 'weekly:每周', 'monthly:每月'].map(t => {
+                                      const [val, label] = t.split(':');
+                                      const isActive = cpState.growthAddType === val;
+                                      return `<div class="flex-1 py-2 text-center text-[12px] font-bold rounded-[10px] cursor-pointer transition-all ${isActive ? 'bg-orange-100 text-orange-600 border border-orange-200' : 'bg-gray-50 text-gray-500 border border-transparent'}" onclick="window.cpActions.setGrowthAddType('${val}');">${label}</div>`;
+                                  }).join('')}
+                              </div>
+                          </div>
+                          <div class="mt-2 animate-in fade-in">
+                              <span class="text-[12px] font-bold text-gray-500 mb-2 block">计划内容</span>
+                              <textarea id="growth-manual-input" class="w-full bg-gray-50 border border-gray-100 rounded-[16px] px-4 py-3 outline-none text-[14px] font-medium text-gray-800 focus:bg-white focus:border-orange-200 transition-all resize-none h-24 shadow-inner placeholder-gray-400" placeholder="例如：每天早睡 / 每天背20个单词"></textarea>
+                          </div>
+                          <button onclick="window.cpActions.saveGrowthManualPlan('${char.id}')" class="w-full py-3.5 mt-4 bg-gray-900 text-white font-black rounded-[16px] active:scale-95 transition-transform tracking-widest text-[14px] shrink-0">创建计划</button>
+                      ` : `
+                          <div class="mt-1 animate-in fade-in shrink-0">
+                              <span class="text-[12px] font-bold text-gray-500 mb-2 block">你想达成什么目标？</span>
+                              <div class="flex items-center space-x-2">
+                                  <input id="growth-fuzzy-input" type="text" class="flex-1 bg-gray-50 px-4 py-3 rounded-[12px] text-[14px] font-medium text-gray-800 outline-none placeholder-gray-400 border border-gray-100 focus:border-orange-200 focus:bg-orange-50/30 transition-all" placeholder="如: 想变瘦/想更自律/想考研">
+                                  <button onclick="window.cpActions.generateGrowthPlan('${char.id}')" class="w-12 h-12 bg-gray-900 text-white rounded-[12px] flex items-center justify-center shrink-0 active:scale-95 transition-all">
+                                      ${cpState.isGeneratingGrowth ? '<i data-lucide="loader-2" class="w-5 h-5 animate-spin"></i>' : '<i data-lucide="sparkles" class="w-5 h-5 text-orange-400"></i>'}
+                                  </button>
+                              </div>
+                          </div>
+                          
+                          ${cpState.aiGeneratedPlans && cpState.aiGeneratedPlans.length > 0 ? `
+                          <div class="mt-4 animate-in fade-in flex flex-col space-y-2">
+                              <span class="text-[12px] font-bold text-orange-500 mb-1 flex items-center"><i data-lucide="bot" class="w-3.5 h-3.5 mr-1"></i>${char.name} 为你定制的计划表</span>
+                              ${cpState.aiGeneratedPlans.map((p, idx) => `
+                                  <div class="bg-orange-50/50 border border-orange-100 rounded-[12px] p-3 flex items-center justify-between group">
+                                      <div class="flex flex-col flex-1 pr-2">
+                                          <span class="text-[13px] font-bold text-gray-800 leading-snug">${p.text}</span>
+                                          <span class="text-[10px] font-black text-orange-400 mt-1">${p.type === 'weekly' ? '每周任务' : '每日任务'}</span>
+                                      </div>
+                                      <div class="flex items-center space-x-2 shrink-0">
+                                          <i data-lucide="edit-3" class="w-4 h-4 text-gray-400 hover:text-gray-800 cursor-pointer active:scale-90" onclick="window.cpActions.editAiGeneratedPlan(${idx})"></i>
+                                          <i data-lucide="trash-2" class="w-4 h-4 text-gray-400 hover:text-red-400 cursor-pointer active:scale-90" onclick="window.cpActions.deleteAiGeneratedPlan(${idx})"></i>
+                                      </div>
+                                  </div>
+                              `).join('')}
+                          </div>
+                          ` : ''}
+
+                          ${cpState.aiGeneratedPlans && cpState.aiGeneratedPlans.length > 0 && !cpState.isGeneratingGrowth ? `
+                              <button onclick="window.cpActions.saveAiGeneratedPlans('${char.id}')" class="w-full py-3.5 mt-4 bg-orange-500 text-white font-black rounded-[16px] active:scale-95 transition-transform tracking-widest text-[14px] shadow-md shadow-orange-200 shrink-0">保存这些计划</button>
+                          ` : ''}
+                      `}
+                  </div>
+              </div>
+          </div>
+          ` : ''}
+      </div>
+      `;
+    }
+
   // 🌟 界面 6：默契问答
   if (cpState.view === 'tacit') {
         const char = store.contacts.find(c => c.id === cpState.activeCharId);
@@ -2509,6 +3199,215 @@ export function renderCoupleApp(store) {
         </div>
         `;
   }
+
+  // 🐾 界面 9：电子宠物小屋 (标准路径：../image/)
+  if (cpState.view === 'petRoom') {
+      const char = store.contacts.find(c => c.id === cpState.activeCharId);
+      const spaceData = store.coupleSpacesData[char.id];
+      const pet = spaceData.pet;
+
+      // 🌟 标准路径，完全无视图片右侧空白，防滑动、防撕裂！
+      const spriteUrl = '../image/AllCats.png'; //
+
+      // 🌟 房屋背景路径 (../image/house/)
+      const bgId = pet.house.currentBackgroundId;
+      const backgroundUrl = `../image/house/${bgId}.png`;
+
+      // 标准路径：../
+      const spriteCss = `
+        <style>
+           :root {
+               /* 🌟 用户试出来的标准 64px 像素格 */
+               --pet-w: 64px; 
+               --pet-h: 64px; 
+           }
+           .pet-viewport {
+               width: var(--pet-w); 
+               height: var(--pet-h);
+               overflow: hidden; /* 绝对透视窗，多余的空白全部被物理裁掉 */
+               position: relative;
+               transform: scale(2.0); /* 用户设置，放大猫猫 */
+               transform-origin: bottom center;
+               filter: drop-shadow(0px 6px 4px rgba(0,0,0,0.2)); 
+           }
+           .pet-sprite {
+               position: absolute;
+               top: 0; left: 0;
+               /* 强制保持原图物理像素大小，绝对不拉伸！ */
+               max-width: none !important;
+               width: auto !important; 
+               height: auto !important;
+               image-rendering: pixelated; 
+           }
+           
+           /* 待机 (第 1 行，共 6 帧) */
+           @keyframes play-idle {
+               from { transform: translate(0, 0); }
+               to { transform: translate(calc(var(--pet-w) * -6), 0); }
+           }
+           /* 吃饭 (第 11 行，共 4 帧) */
+           @keyframes play-eat {
+               from { transform: translate(0, calc(var(--pet-h) * -10)); }
+               to { transform: translate(calc(var(--pet-w) * -4), calc(var(--pet-h) * -10)); }
+           }
+           /* 玩耍 (第 12 行，共 3 帧) */
+           @keyframes play-play {
+               from { transform: translate(0, calc(var(--pet-h) * -11)); }
+               to { transform: translate(calc(var(--pet-w) * -3), calc(var(--pet-h) * -11)); }
+           }
+           /* 洗澡 (第 13 行，共 8 帧) */
+           @keyframes play-bath {
+               from { transform: translate(0, calc(var(--pet-h) * -12)); }
+               to { transform: translate(calc(var(--pet-w) * -8), calc(var(--pet-h) * -12)); }
+           }
+           
+           /* steps() 函数是防滑动的核心魔法！ */
+           .anim-idle { animation: play-idle 1s steps(6) infinite; }
+           .anim-eat { animation: play-eat 0.8s steps(4) infinite; }
+           .anim-play { animation: play-play 0.6s steps(3) infinite; }
+           .anim-bath { animation: play-bath 1.2s steps(8) infinite; }
+        </style>
+      `;
+
+      let statusText = 'zzZ 正在发呆...';
+      if (pet.state === 'eat') statusText = '吧唧吧唧... 好吃！🍗';
+      if (pet.state === 'bath') statusText = '咕噜咕噜... 洗脸脸 🛁';
+      if (pet.state === 'play') statusText = '芜湖！好开心！✨';
+
+      // 🌟 装修弹窗的 HTML 代码
+      const backgroundsList = [];
+      for (let i = 1; i <= 20; i++) {
+          backgroundsList.push(i);
+      }
+
+      const decorationModalHtml = cpState.petModalView === 'decoration' ? `
+          <div class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-end animate-in fade-in duration-300">
+              <div class="w-full bg-white rounded-t-[32px] p-6 shadow-2xl flex flex-col h-[70%] animate-in slide-in-from-bottom-6 duration-300">
+                  <div class="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-5 shrink-0" onclick="cpState.petModalView = null; window.render();"></div>
+                  
+                  <div class="flex items-center justify-between mb-6 shrink-0">
+                      <div class="flex items-center">
+                          <div class="w-10 h-10 bg-orange-50 rounded-full flex items-center justify-center mr-3 border border-orange-100">
+                              <i data-lucide="layout-dashboard" class="text-orange-400 w-5 h-5"></i>
+                          </div>
+                          <span class="text-lg font-extrabold text-gray-800 tracking-wide">装修宠物小屋</span>
+                      </div>
+                      <div class="cursor-pointer active:scale-90 p-1 bg-gray-100 rounded-full" onclick="cpState.petModalView = null; window.render();">
+                          <i data-lucide="x" class="w-6 h-6 text-gray-400"></i>
+                      </div>
+                  </div>
+
+                  <div class="flex-1 overflow-y-auto hide-scrollbar pb-10">
+                      <div class="grid grid-cols-2 gap-4">
+                          ${backgroundsList.map(bgId => {
+                              const isCurrent = bgId === pet.house.currentBackgroundId;
+                              const thumbUrl = `../image/house/${bgId}.png`;
+                              return `
+                                  <div class="relative group cursor-pointer active:scale-95 transition-all ${isCurrent ? 'ring-4 ring-orange-400 rounded-[18px]' : ''}" onclick="window.cpActions.changePetHouseBackground('${char.id}', ${bgId})">
+                                      <img src="${thumbUrl}" class="w-full h-32 object-cover rounded-[16px] shadow-sm border border-gray-100 group-hover:opacity-90 transition-opacity" />
+                                      <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-3 rounded-b-[16px]">
+                                          <span class="text-[12px] font-black text-white tracking-wider">背景风格 ${bgId}</span>
+                                      </div>
+                                      ${isCurrent ? `
+                                          <div class="absolute top-3 right-3 bg-orange-400 text-white rounded-full p-1 shadow-md">
+                                              <i data-lucide="check" class="w-4 h-4"></i>
+                                          </div>
+                                      ` : ''}
+                                  </div>
+                              `;
+                          }).join('')}
+                      </div>
+                  </div>
+                  
+              </div>
+          </div>
+      ` : '';
+
+      return `
+      <div class="w-full h-full flex flex-col bg-[#f0f4f8] relative animate-in fade-in slide-in-from-right-4 duration-300 z-[60]">
+          
+          <div class="pt-8 pb-3 px-4 shrink-0 flex items-center justify-between bg-white sticky top-0 z-20 shadow-sm border-b border-gray-100">
+              <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.openDashboard('${char.id}')"><i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i></div>
+              <span class="text-lg font-extrabold text-gray-800 tracking-wide">${pet.name} 的小屋</span>
+              <div class="w-8"></div>
+          </div>
+
+          <div class="flex-1 overflow-y-auto hide-scrollbar flex flex-col pb-10">
+              
+              <div class="bg-white m-5 p-5 rounded-[24px] shadow-[0_4px_15px_rgba(0,0,0,0.03)] border border-gray-50 flex flex-col space-y-4">
+                  <div class="flex items-center justify-between">
+                      <span class="text-[11px] font-bold text-gray-400 w-12 shrink-0">饱食度</span>
+                      <div class="flex-1 h-3 bg-gray-100 rounded-full mx-3 overflow-hidden shadow-inner">
+                          <div class="h-full bg-orange-400 rounded-full transition-all duration-500 ease-out" style="width: ${pet.hunger}%"></div>
+                      </div>
+                      <span class="text-[11px] font-black text-gray-600 w-8 text-right">${pet.hunger}%</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                      <span class="text-[11px] font-bold text-gray-400 w-12 shrink-0">清洁度</span>
+                      <div class="flex-1 h-3 bg-gray-100 rounded-full mx-3 overflow-hidden shadow-inner">
+                          <div class="h-full bg-blue-400 rounded-full transition-all duration-500 ease-out" style="width: ${pet.clean}%"></div>
+                      </div>
+                      <span class="text-[11px] font-black text-gray-600 w-8 text-right">${pet.clean}%</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                      <span class="text-[11px] font-bold text-gray-400 w-12 shrink-0">心情值</span>
+                      <div class="flex-1 h-3 bg-gray-100 rounded-full mx-3 overflow-hidden shadow-inner">
+                          <div class="h-full bg-pink-400 rounded-full transition-all duration-500 ease-out" style="width: ${pet.mood}%"></div>
+                      </div>
+                      <span class="text-[11px] font-black text-gray-600 w-8 text-right">${pet.mood}%</span>
+                  </div>
+              </div>
+
+              <div class="flex-1 flex flex-col items-center justify-center relative mt-4 mx-5 rounded-[32px] overflow-hidden border border-gray-100 shadow-inner" style="background-image: url('${backgroundUrl}'); background-size: cover; background-position: center;">
+                  
+                  <div class="absolute inset-0 opacity-10 pointer-events-none" style="background-image: linear-gradient(#94a3b8 1px, transparent 1px), linear-gradient(90deg, #94a3b8 1px, transparent 1px); background-size: 16px 16px;"></div>
+                  
+                  <div class="absolute top-4 right-4 z-20 cursor-pointer p-2 rounded-full bg-white/60 backdrop-blur border border-white/20 shadow active:scale-95 transition-all group hover:bg-white" onclick="window.cpActions.openPetRoomDecorationModal('${char.id}')">
+                      <i data-lucide="layout-dashboard" class="w-5 h-5 text-orange-400 transition-transform group-hover:rotate-12"></i>
+                      <span class="text-[10px] font-extrabold text-orange-500 ml-1.5 align-middle">装修</span>
+                  </div>
+
+                  <div class="bg-white/90 backdrop-blur border border-gray-100 px-4 py-2 rounded-2xl rounded-bl-sm shadow-sm text-[12px] font-bold text-gray-600 mb-8 relative z-10 transition-all ${pet.state !== 'idle' ? 'scale-110 text-rose-500 bg-rose-50 border-rose-100' : ''}">
+                      ${statusText}
+                  </div>
+
+                  ${spriteCss}
+
+                  <div class="relative w-48 h-48 flex flex-col items-center justify-end z-10 pb-4">
+                      <div class="pet-viewport z-10">
+                          <img src="${spriteUrl}" class="pet-sprite anim-${pet.state}" />
+                      </div>
+                      <div class="w-24 h-3 bg-black/10 rounded-[100%] mt-1 z-0 absolute bottom-1"></div>
+                  </div>
+              </div>
+          </div>
+
+          <div class="bg-white px-6 py-6 pb-8 border-t border-gray-100 shadow-[0_-10px_30px_rgba(0,0,0,0.03)] flex justify-around relative z-20">
+              <div class="flex flex-col items-center cursor-pointer group" onclick="window.cpActions.interactPet('${char.id}', 'eat')">
+                  <div class="w-14 h-14 rounded-full bg-orange-50 flex items-center justify-center mb-2 shadow-sm border border-orange-100 group-active:scale-90 transition-transform ${pet.state !== 'idle' ? 'opacity-50 grayscale' : ''}">
+                      <i data-lucide="beef" class="w-6 h-6 text-orange-400"></i>
+                  </div>
+                  <span class="text-[12px] font-bold text-gray-600">喂食</span>
+              </div>
+              <div class="flex flex-col items-center cursor-pointer group" onclick="window.cpActions.interactPet('${char.id}', 'bath')">
+                  <div class="w-14 h-14 rounded-full bg-blue-50 flex items-center justify-center mb-2 shadow-sm border border-blue-100 group-active:scale-90 transition-transform ${pet.state !== 'idle' ? 'opacity-50 grayscale' : ''}">
+                      <i data-lucide="bath" class="w-6 h-6 text-blue-400"></i>
+                  </div>
+                  <span class="text-[12px] font-bold text-gray-600">洗澡</span>
+              </div>
+              <div class="flex flex-col items-center cursor-pointer group" onclick="window.cpActions.interactPet('${char.id}', 'play')">
+                  <div class="w-14 h-14 rounded-full bg-pink-50 flex items-center justify-center mb-2 shadow-sm border border-pink-100 group-active:scale-90 transition-transform ${pet.state !== 'idle' ? 'opacity-50 grayscale' : ''}">
+                      <i data-lucide="gamepad-2" class="w-6 h-6 text-pink-400"></i>
+                  </div>
+                  <span class="text-[12px] font-bold text-gray-600">玩耍</span>
+              </div>
+          </div>
+
+          ${decorationModalHtml}
+
+      </div>
+      `;
+  }
 }
 
 // ==========================================
@@ -2612,7 +3511,7 @@ if (!window.cpBootScanStarted) {
                 try {
                     // 替换掉原来的 promptStr 组装
           const historyStr = getTodayChatHistory(charId, logicalToday);
-          const taskMsg = `【系统任务】今天即将结束，请你结合今天的聊天记录、人设和记忆，写一篇今天的私密日记。\n要求：\n1. 第一人称口吻，真实自然的情感表达。\n2. 总结今天的互动，或者表达对用户的思念/感受。\n3. 直接输出日记正文，严禁带有任何多余的系统标签、标题或格式！`;
+          const taskMsg = `【系统任务】今天即将结束，请你结合今天的聊天记录、人设和记忆，写一篇今天的私密日记。\n要求：\n1. 第一人称口吻，真实自然的情感表达。\n2. 总结今天的互动，或者表达对用户的思念/感受。\n3. 要求：字数 150-300字，支持 ~~阴暗面~~ 和 **高光** 语法。直接输出正文！`;
           
           const prompt = window.cpActions.buildMasterPrompt(charId, {
               history: historyStr,

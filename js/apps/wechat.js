@@ -317,49 +317,33 @@ window.wxActions = {
       newEl.scrollTop = newEl.scrollHeight - oldScrollHeight + oldScrollTop;
     }
   },
-  // ================= 🎵 终极语音引擎 (完美交互版) =================
+  // ================= 🎵 终极语音引擎 (文字与声音解耦版) =================
   playVoiceMsg: (msgId) => {
-      // 1. 找聊天室
+      // 1. 找聊天室和消息
       const chat = store.chats.find(c => c.id === wxState.activeChatId || c.charId === wxState.activeChatId);
       if (!chat) return;
-
-      // 2. 强行匹配找消息
       const msg = chat.messages.find(m => String(m.id) === String(msgId) || String(m.timestamp) === String(msgId));
       if (!msg) return;
 
-      // 🌟 3. 翻转文字的显示状态
+      // 🌟 2. 翻转文字的显示状态
       msg.showText = !msg.showText;
 
-      // 🛑 4. 核心拦截：如果是为了“收起”而点击，立刻退出！绝不播放！
+      // 🛑 3. 拦截：如果是“收起”
       if (!msg.showText) {
-          // 顺手把正在放的声音给掐了（如果点的是同一条）
           if (wxState.playingAudio && wxState.playingMsgId === String(msgId) && !wxState.playingAudio.paused) {
               wxState.playingAudio.pause();
               wxState.playingMsgId = null;
           }
-          window.render(); // 刷新 UI，让文字立刻消失
-          return; // 👉 提前结束战斗，后面的代码全都不执行！
+          window.render(); // 刷新 UI，让文字消失
+          return; 
       }
 
-      // ================= 下面都是“展开”时的播放逻辑 =================
+      // 🌟 4. 核心解耦：如果是“展开”，第一件事就是立刻 Render！
+      // 保证不管这角色有没有声音，文字百分之百先干脆利落地弹出来！
+      window.render();
+
+      // ================= 下面是独立的播放逻辑 =================
       
-      // 霸占音频通道
-      if (!wxState.playingAudio) {
-          wxState.playingAudio = new Audio();
-      }
-
-      // 【情况 A】已经有现成的音频缓存，秒播！
-      if (msg.audioUrl) {
-          wxState.playingAudio.src = msg.audioUrl;
-          wxState.playingMsgId = String(msgId); 
-          window.render();
-          
-          wxState.playingAudio.play().catch(e => window.actions.showToast('播放被拦截，请重试'));
-          wxState.playingAudio.onended = () => { wxState.playingMsgId = null; window.render(); };
-          return;
-      }
-
-      // 【情况 B】没有音频，向 Minimax 发起请求
       let charObj = store.contacts.find(c => c.id === wxState.activeChatId || c.name === wxState.activeChatId); 
       if (msg.sender && typeof msg.sender === 'string') {
           let found = store.contacts.find(c => c.name === msg.sender || c.id === msg.sender);
@@ -367,39 +351,58 @@ window.wxActions = {
       }
       if (!charObj) return;
 
-      // 检查开关
-      if (store.minimaxConfig?.enabled !== false && 
-          store.minimaxConfig?.apiKey && 
-          charObj.minimaxVoiceEnabled && 
-          charObj.minimaxVoiceId) {
-          
-          wxState.playingAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-          wxState.playingAudio.play().catch(()=>{});
+      // 5. 资格审查：看这个角色配没配语音
+      const canPlayVoice = store.minimaxConfig?.enabled !== false && 
+                           store.minimaxConfig?.apiKey && 
+                           charObj.minimaxVoiceEnabled && 
+                           charObj.minimaxVoiceId;
 
-          window.actions.showToast('正在请求语音...');
-          
-          fetchMinimaxVoice(msg.text, charObj.minimaxVoiceId).then(url => {
-              // 🛡️ 极限防抖：万一在请求的这两秒钟里，你手快又把气泡收起来了，拿到音频后也别播了！
-              if (!msg.showText) return;
-
-              if (url) {
-                  msg.audioUrl = url; 
-                  if (typeof saveToLocalStorage === 'function') saveToLocalStorage(); 
-                  
-                  wxState.playingAudio.src = url;
-                  wxState.playingMsgId = String(msgId); 
-                  window.render(); 
-                  
-                  wxState.playingAudio.play().catch(e => window.actions.showToast('播放失败'));
-                  wxState.playingAudio.onended = () => { wxState.playingMsgId = null; window.render(); };
-              } else {
-                  window.actions.showToast('获取语音失败');
-              }
-          }).catch(e => console.error(e));
-          
-      } else {
-          window.actions.showToast('未开启语音或无音色ID');
+      if (!canPlayVoice) {
+          // 💡 如果没开语音，代码到这里直接和平退出！
+          // 文字刚才已经展开了，不需要做多余的动作。
+          return; 
       }
+
+      // 6. 合法发声的后续逻辑（维持我们打磨好的原样）
+      if (!wxState.playingAudio) {
+          wxState.playingAudio = new Audio();
+      }
+
+      // 【情况 A】有现成音频
+      if (msg.audioUrl) {
+          wxState.playingAudio.src = msg.audioUrl;
+          wxState.playingMsgId = String(msgId); 
+          window.render(); // 更新小喇叭动画
+          
+          wxState.playingAudio.play().catch(e => window.actions.showToast('播放被拦截，请重试'));
+          wxState.playingAudio.onended = () => { wxState.playingMsgId = null; window.render(); };
+          return;
+      }
+
+      // 【情况 B】请求新音频
+      wxState.playingAudio.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
+      wxState.playingAudio.play().catch(()=>{});
+
+      // 注释掉了烦人的 Toast 提示，以免每次点开新语音都弹窗
+      // window.actions.showToast('正在请求语音...');
+      
+      fetchMinimaxVoice(msg.text, charObj.minimaxVoiceId).then(url => {
+          if (!msg.showText) return; // 极限防抖
+
+          if (url) {
+              msg.audioUrl = url; 
+              if (typeof saveToLocalStorage === 'function') saveToLocalStorage(); 
+              
+              wxState.playingAudio.src = url;
+              wxState.playingMsgId = String(msgId); 
+              window.render(); 
+              
+              wxState.playingAudio.play().catch(e => window.actions.showToast('播放失败'));
+              wxState.playingAudio.onended = () => { wxState.playingMsgId = null; window.render(); };
+          } else {
+              window.actions.showToast('获取语音失败');
+          }
+      }).catch(e => console.error(e));
   },
   clearChatHistory: () => {
     if(!confirm('⚠️ 确定要清空当前窗口的聊天记录吗？此操作不会删除角色或其记忆设定。')) return;
