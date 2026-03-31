@@ -233,9 +233,9 @@ ${emojiRule}
     }
     // 💡 处理普通文本
     else {
-      if (m.isMe) { msgContent = `[${m.time || '刚刚'}] [用户 ${myName} 说]：${m.text}`; }
-      else if (groupInfo && m.sender !== charName) { msgContent = `[${m.time || '刚刚'}] [群成员 ${m.sender} 说]：${m.text}`; } 
-      else { msgContent = `[${m.time || '刚刚'}] ${m.text}`; }
+      if (m.isMe) { msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] [用户 ${myName} 说]：${m.text}`; }
+      else if (groupInfo && m.sender !== charName) { msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] [群成员 ${m.sender} 说]：${m.text}`; } 
+      else { msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] ${m.text}`; }
       
       if (m.isIntercepted) msgContent += `\n[系统/事件记录：该消息发送失败，已被用户拒收！]`;
     }
@@ -262,7 +262,7 @@ ${emojiRule}
       finalSystemPrompt += `\n\n【绝密指令：心声面板同步】
 在你的回复最末尾（必须另起一行），附带当前真实内心状态数据！格式必须为严格 JSON 并用 [心声] 包裹！除hidden字段外，其他字段必须全部输出！示范格式如下（必须严格遵守！）：
 示范：
-[心声] {"mood": 85, "emotion": "开心/吃醋 (必须严格在10字内概括!)", "lust": 60（注意人设和语境，不要随便发情）, "status": "正在看手机 (10字内的动作!)", "os": "这里写内心独白，不少于50字，必须符合你的人设，风格正常、阳光、日常、符合社会规范，把没说出口的话写在这里！", "hidden": "这里写阴暗、色情、变态、占有欲、直白，必须包含对 User 的性幻想、偷窥欲、嫉妒心或想要占有的冲动，严格50字以上！(注意：如果 lust 小于50，请留空字符串或不要输出这个字段)"}`;
+[心声] {"mood": 85, "emotion": "开心/吃醋 (必须严格在8字内概括!)", "lust": 60（注意人设和语境，不要随便发情）, "status": "正在看手机 (8字内的动作!)", "os": "这里写内心独白，不少于50字，必须符合你的人设，风格正常、阳光、日常、符合社会规范，把没说出口的话写在这里！", "hidden": "这里写阴暗、色情、变态、占有欲、直白，必须包含对 User 的性幻想、偷窥欲、嫉妒心或想要占有的冲动，严格50字以上！(注意：如果 lust 小于50，请留空字符串或不要输出这个字段)"}`;
   }
 
   if (targetObj.isBlockedByChar) {

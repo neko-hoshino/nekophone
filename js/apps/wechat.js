@@ -1,7 +1,48 @@
 ﻿// js/apps/wechat.js
 import { store } from '../store.js';
 
-const getNowTime = () => new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+// 🌟 升级：原生生成包含年月日的完整时间（供系统底层存储使用）
+const getNowTime = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = (d.getMonth() + 1).toString().padStart(2, '0');
+    const day = d.getDate().toString().padStart(2, '0');
+    const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+    return `${year}-${month}-${day} ${time}`;
+};
+
+// 🌟 新增：专门给 UI 渲染用的智能格式化函数 (今天只显示时间，非今天显示完整日期)
+window.formatSmartTime = (ts, fallbackTimeStr) => {
+    if (!ts) return fallbackTimeStr || ''; // 兼容没有 timestamp 的远古旧数据
+    const date = new Date(ts);
+    const now = new Date();
+    const isToday = date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    const timeStr = `${hours}:${minutes}`;
+
+    if (isToday) {
+        return timeStr; // 例：12:35
+    } else {
+        const year = date.getFullYear();
+        const month = (date.getMonth() + 1).toString().padStart(2, '0');
+        const day = date.getDate().toString().padStart(2, '0');
+        return `${year}-${month}-${day} ${timeStr}`; // 例：2026-04-01 12:35
+    }
+};
+
+// 🌟 新增：专门给 AI 喂上下文用的格式化函数 (强行带上日期，杜绝 AI 串戏)
+window.formatFullTimeForAI = (ts, fallbackTimeStr) => {
+    if (!ts) return fallbackTimeStr || '';
+    const date = new Date(ts);
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, '0');
+    const day = date.getDate().toString().padStart(2, '0');
+    const hours = date.getHours().toString().padStart(2, '0');
+    const minutes = date.getMinutes().toString().padStart(2, '0');
+    return `${year}-${month}-${day} ${hours}:${minutes}`;
+};
 
 // 🌟 修复8：解析时间距离的引擎
 const formatTimeElapsed = (ts) => {
@@ -140,7 +181,7 @@ async function triggerAutoMemory(charId, msgs) {
         else if (m.msgType === 'real_image') content = `[真实照片]`;
         else if (m.msgType === 'emoji') content = `[表情包]: ${m.text}`;
         else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
-        return `${senderName}: ${content}`;
+        return `[${window.formatFullTimeForAI(m.timestamp, m.time)}] ${senderName}: ${content}`;
     }).join('\n');
     
     const promptStr = `【后台任务】请判断以下近期的对话记录中，是否包含剧情进展、情感转折或新设定。
@@ -1237,7 +1278,7 @@ window.wxActions = {
         else if (m.msgType === 'real_image') content = `[真实照片]`;
         else if (m.msgType === 'emoji') content = `[表情包]: ${m.text}`;
         else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
-        return `${senderName}: ${content}`;
+        return `[${window.formatFullTimeForAI(m.timestamp, m.time)}] ${senderName}: ${content}`;
       }).join('\n');
 
       const fullContent = msgsToForward.map(m => {
@@ -1313,7 +1354,7 @@ window.wxActions = {
         else if (m.msgType === 'real_image') content = `[真实照片]`;
         else if (m.msgType === 'emoji') content = `[表情包]: ${m.text}`;
         else if (m.msgType !== 'text' && m.msgType !== 'action') content = `[${m.msgType}] ${m.text}`;
-            return `${senderName}: ${content}`;
+            return `[${window.formatFullTimeForAI(m.timestamp, m.time)}] ${senderName}: ${content}`;
         }).join('\n');
         
         const promptStr = `【任务】请提取并总结以下对话记录。\n要求：${wxState.extractMemoryConfig.type === 'core' ? '总结出这段对话中体现的【核心人物关系】或【不可磨灭的重大背景状态】。' : '客观地总结刚刚这段剧情中【发生了什么事】。'}\n直接输出总结内容，不加引号，不带“总结”、“这段对话”等废话，务必控制在50字以内。\n(注：用户的名字是 ${myName})\n\n【对话记录】\n${logText}`;
@@ -1634,7 +1675,7 @@ window.wxActions = {
                 const recentMsgs = chat.messages.filter(m => !m.isHidden && !m.isOffline && m.msgType === 'text').slice(-10);
                 if (recentMsgs.length > 0) {
                     // 🌟 这里换成 myName，AI 就能认清刚才是谁在陪他聊天了！
-                    recentChatStr = recentMsgs.map(m => `${m.isMe ? myName : (m.sender || char.name)}: ${m.text}`).join('\n');
+                    recentChatStr = recentMsgs.map(m => `[${window.formatFullTimeForAI(m.timestamp, m.time)}] ${m.isMe ? myName : (m.sender || char.name)}: ${m.text}`).join('\n');
                 }
             }
             
@@ -1671,7 +1712,7 @@ ${relation}
 
 【任务】请结合以上所有信息，发一条最新朋友圈动态。
 ❗特殊动作：如果要配图，请在文案末尾输出 [附带虚拟照片: 画面描述]（例如：[附带虚拟照片: 一杯冰美式]）。如果要显示所在位置，请输出 [附带定位: 具体的地点名称]（例如：[附带定位: 星巴克]）。
-❗必须严格必须严格按照 [附带虚拟照片: xxx] 或 [附带定位: 具体的地点名称] 的格式！绝对禁止捏造/更改指令格式！
+❗[附带虚拟照片:xxx] 与 [附带定位:xxx] 必须与你的朋友圈正文保持在同一行，绝对禁止在这两个标签前使用换行符！必须严格必须严格按照 [附带虚拟照片: xxx] 或 [附带定位: 具体的地点名称] 的格式！绝对禁止捏造/更改指令格式！
 直接输出文案，绝不加引号，50字以内。`;
 
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -1680,6 +1721,10 @@ ${relation}
             });
             const data = await res.json();
             let contentText = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+            
+            // 🌟 强行把照片和定位吸附到上一行末尾，消灭换行！
+            contentText = contentText.replace(/[\r\n]+\s*(\[附带虚拟照片|\[附带定位)/g, ' $1');
+
             // 🌟 解析 AI 附加的定位指令！
             let locationText = null;
             const locMatch = contentText.match(/\[附带定位[:：]?\s*([^\]]+)\]/);
@@ -1696,21 +1741,24 @@ ${relation}
                 contentText = contentText.replace(/\[附带虚拟照片[:：]?\s*([^\]]+)\]/, '').trim();
             }
 
+            // 🌟 核心修复：使用 Date.now() 获取纯数字时间戳，绝不生成字符串！
+            const currentTimestamp = Date.now();
+
             // 推入朋友圈数据库
-store.moments.push({ 
-    id: now + index,
-    senderId: char.id,
-    senderName: char.name,
-    avatar: char.avatar,
-    text: contentText,
-    imageUrl: null,
-    virtualImageText: virtualText,
-    location: locationText,
-    time: getNowTime(),          // 保留
-    timestamp: now + index,      // 新增
-    likes: [],
-    comments: []
-});
+            store.moments.push({ 
+                id: currentTimestamp + index,
+                senderId: char.id,
+                senderName: char.name,
+                avatar: char.avatar,
+                text: contentText,
+                imageUrl: null,
+                virtualImageText: virtualText,
+                location: locationText,
+                time: getNowTime(),          
+                timestamp: currentTimestamp + index, 
+                likes: [],
+                comments: []
+            });
             successCount++;
             window.render();
         } catch(e) { console.error(char.name + '发朋友圈失败', e); }
@@ -1757,7 +1805,7 @@ store.moments.push({
                   if (chat && chat.messages) {
                       const recentMsgs = chat.messages.filter(msg => !msg.isHidden && !msg.isOffline && msg.msgType === 'text').slice(-10);
                       if (recentMsgs.length > 0) {
-                          recentChatStr = recentMsgs.map(msg => `${msg.isMe ? my.name : (msg.sender || char.name)}: ${msg.text}`).join('\n');
+                          recentChatStr = recentMsgs.map(msg => `[${window.formatFullTimeForAI(msg.timestamp, msg.time)}] ${msg.isMe ? my.name : (msg.sender || char.name)}: ${msg.text}`).join('\n');
                       }
                   }
                   
@@ -3880,7 +3928,7 @@ export function renderWeChatApp(store) {
           ? `<span class="text-[11px] font-bold text-gray-400 mb-1 ml-1 block">${msg.sender}</span>` : '';
       let timeHtml = '';
       if (msg.time && msg.time !== lastRenderedTime) {
-        timeHtml = `<div class="flex justify-center my-3 animate-in fade-in"><span class="mc-time-tag text-[11px] text-gray-400 font-medium">${msg.time}</span></div>`;
+        timeHtml = `<div class="flex justify-center my-3 animate-in fade-in"><span class="mc-time-tag text-[11px] text-gray-400 font-medium">${window.formatSmartTime(msg.timestamp, msg.time)}</span></div>`;
         lastRenderedTime = msg.time;
       }
       
@@ -5410,7 +5458,7 @@ window.scheduleCloudTask = async (charId) => {
 
             momentHistory.push({
                 id: Date.now(), sender: boundPersona.name,
-                text: `(系统最高指令：系统时间 ${timeString}。距离你上次发朋友圈已超过 ${targetObj.autoMomentFreq} 小时。请你立刻执行 [发朋友圈] 指令！\n\n【状态】\n${relation}\n\n1. 拒绝书面语（如岁月静好），说人话！\n2. 朋友圈通常没头没尾（如“困死”）。\n\n⚠️注意：你这次的唯一任务就是输出 [发朋友圈] 动态内容！绝对不要发普通的聊天回复！必要时可带[附带虚拟照片:描述]或[附带定位:地点]❗必须严格必须严格按照格式输出！绝不可包含系统标签！整条消息不许换行！)`,
+                text: `(系统最高指令：系统时间 ${timeString}。距离你上次发朋友圈已超过 ${targetObj.autoMomentFreq} 小时。请你立刻执行 [发朋友圈] 指令！\n\n【状态】\n${relation}\n\n1. 拒绝书面语（如岁月静好），说人话！\n2. 朋友圈通常没头没尾（如“困死”）。\n\n⚠️注意：你这次的唯一任务就是输出 [发朋友圈] 动态内容！绝对不要发普通的聊天回复！必要时可带[附带虚拟照片:描述]或[附带定位:地点]❗[附带虚拟照片:xxx] 与 [附带定位:xxx] 必须与你的朋友圈正文保持在同一行，绝对禁止在这两个标签前使用换行符！必须严格必须严格按照格式输出！)`,
                 isMe: true, isHidden: true, msgType: 'text'
             });
 
@@ -5557,7 +5605,7 @@ if (chat.isGroup) {
             tempHistory.push({
                 id: Date.now(),
                 sender: 'system', 
-                text: `(系统最高指令：你的上一条回复不符合要求。请严格按照以下修改要求重新生成回复：“${requirement}”。\n⚠️绝对警告：你必须直接输出角色的台词！严禁回复“好的”、“明白”、“我这就修改”等任何废话！绝对不能把这条要求当做用户对你说的话！)`,
+                text: `(系统最高指令：你的上一条回复不符合要求。请严格按照以下修改要求重新生成回复：“${requirement}”。\n⚠️绝对警告：这条系统要求角色看不见！❗绝对不能把这条系统要求当做用户对角色说的话！你必须直接输出角色的台词！严禁回复“好的”、“明白”、“我这就修改”等任何废话！)`,
                 isMe: true,
                 isHidden: true, 
                 msgType: 'text'
@@ -5680,14 +5728,17 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
         }
 
         const isActive = typeof wxState !== 'undefined' && wxState.activeChatId === chatId;
-        const isCall = typeof wxState !== 'undefined' && wxState.view === 'call' && isActive && !chat.isGroup;
+        
+        // 🌟 核心修复 1：增加后台悬浮窗通话的判定！即使最小化，也能识别通话状态
+        const isOngoingCall = typeof store !== 'undefined' && store.activeCall && store.activeCall.charId === chatId;
+        const isCall = ((typeof wxState !== 'undefined' && wxState.view === 'call' && isActive) || isOngoingCall) && !chat.isGroup;
 
         // 🌟 安全解除“正在输入中”
         if (typeof wxState !== 'undefined' && wxState.typingStatus) wxState.typingStatus[chatId] = false;
 
         let replyText = msg.text || '';
         replyText = replyText.replace(/\\n/g, '\n').replace(/\/n/g, '\n').replace(/`\{[\s\S]*?\}`/gi, '').trim();
-        replyText = replyText.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        replyText = replyText.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
 
         // 🌟 1. 提取心声面板
         const thoughtRegex = /\[心声\]\s*(\{.*?\})/s;
@@ -5734,6 +5785,9 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
         if (/\[(语音|视频)?通话(已)?结束\]/.test(remainingText)) remainingText = remainingText.replace(/\[(语音|视频)?通话(已)?结束\][:：]?\s*/g, '').trim();
         if (/\[(点击收款|接收转账)\]/.test(remainingText)) remainingText = remainingText.replace(/\[(点击收款|接收转账)\][:：]?\s*/g, '').trim();
         
+        // 🌟 【新增代码】：在解析开始前，全局扫描聊天内容，强行把掉到下一行的照片和定位吸附回上一行！
+        remainingText = remainingText.replace(/[\r\n]+\s*(\[附带虚拟照片|\[附带定位)/g, ' $1');
+
         // 🌟 终极安全的朋友圈拦截器：只吃当前这一行，绝对不吞噬换行后的正常聊天！
         if (/\[(?:发朋友圈|发布朋友圈)\]/.test(remainingText)) {
             const match = remainingText.match(/\[(?:发朋友圈|发布朋友圈)\][:：]?\s*([^\n]+)/); // 关键：允许带括号，遇到换行才停
@@ -5897,7 +5951,10 @@ planCloudBrain(customAlarmMinutes, char, llmMessages, 'ALARM|' + chat.charId + '
             }, 1000);
         }
 
-        if (isActive && typeof wxState !== 'undefined' && wxState.view === 'chatRoom') remainingText = remainingText.replace(/\*[^*]*\*/g, '').replace(/[(（][^)）]*[)）]/g, '').trim();
+        // 🌟 核心修复 2：如果是通话中（即使最小化），绝对不触发纯净模式抹除！并且升级正则兼容 **双星号**
+        if (isActive && typeof wxState !== 'undefined' && wxState.view === 'chatRoom' && !isOngoingCall) {
+            remainingText = remainingText.replace(/\*\*?[^*]+\*\*?/g, '').replace(/[(（][^)）]*[)）]/g, '').trim();
+        }
         
 // 在 while 循环之前声明当前说话者（默认为角色名字）
 let currentSpeakerName = char.name;

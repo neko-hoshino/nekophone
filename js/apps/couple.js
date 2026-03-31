@@ -1481,80 +1481,366 @@ if (!window.cpActions) {
   },
 
   // 🌟 电子宠物小屋核心大脑
+    // 🌟 全新的生理节律与“老公代劳”计算器
+    updatePetStats: (charId) => {
+        const spaceData = store.coupleSpacesData[charId];
+        if (!spaceData || !spaceData.pet) return;
+        const pet = spaceData.pet;
+        const now = Date.now();
+
+        if (pet.foodLevel === undefined) pet.foodLevel = 100;
+        if (pet.hunger === undefined) pet.hunger = 100;
+        if (pet.clean === undefined) pet.clean = 100;
+        if (pet.lastUpdate === undefined) pet.lastUpdate = now;
+        if (pet.lastInteract === undefined) pet.lastInteract = now;
+        if (pet.album === undefined) pet.album = [];
+
+        const hoursPassed = (now - pet.lastUpdate) / (1000 * 60 * 60);
+        pet.lastUpdate = now;
+
+        // 1. 食物与饱食度：加快消耗！食物每小时掉 20 点（5小时吃光）
+        pet.foodLevel = Math.max(0, pet.foodLevel - hoursPassed * 20);
+        if (pet.foodLevel <= 0) {
+            pet.hunger = Math.max(0, pet.hunger - hoursPassed * 10);
+        } else {
+            pet.hunger = Math.min(100, pet.hunger + hoursPassed * 10);
+        }
+        // 2. 清洁度：每小时掉 5 点
+        pet.clean = Math.max(0, pet.clean - hoursPassed * 5);
+
+        const hoursSinceInteract = (now - pet.lastInteract) / (1000 * 60 * 60);
+        const interactScore = Math.max(0, 100 - hoursSinceInteract * 4); 
+        pet.mood = Math.round((pet.hunger * 0.4) + (pet.clean * 0.3) + (interactScore * 0.3));
+
+        // 🌟 方案一引擎：触发便利贴盲盒！(离线超 2 小时，且状态低于 60)
+        if (hoursPassed > 2 && !pet.stickyNote) {
+            const roll = Math.random();
+            if (roll < 0.6) { // 60% 概率触发老公代劳
+                if (pet.hunger < 60) {
+                    pet.foodLevel = 100; pet.hunger = 100;
+                    window.cpActions.generateStickyNote(charId, 'eat');
+                } else if (pet.clean < 60) {
+                    pet.clean = 100;
+                    window.cpActions.generateStickyNote(charId, 'bath');
+                }
+            }
+        }
+        if(window.actions?.saveStore) window.actions.saveStore();
+    },
+
+    // 🌟 便利贴生成器
+    generateStickyNote: async (charId, type) => {
+        const pet = store.coupleSpacesData[charId].pet;
+        pet.stickyNote = "正在加载便利贴..."; window.render();
+        try {
+            const actionDesc = type === 'eat' ? '给雪球加满了猫粮，喂了它' : '给雪球洗了个香喷喷的澡，清理了屋子';
+            const prompt = window.cpActions.buildMasterPrompt(charId, {
+                task: `【系统任务】你刚刚趁用户不在，${actionDesc}。请你在墙上留一张黄色实体便利贴告诉用户。\n要求：字数在30字以内，语气自然、宠溺或带点邀功/玩笑，像真实的同居情侣留言。直接输出便利贴内容！`
+            });
+            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.85 })
+            });
+            const data = await res.json();
+            pet.stickyNote = data.choices[0].message.content.trim();
+            window.render();
+        } catch(e) { pet.stickyNote = "我刚来给雪球弄好啦，乖乖按时吃饭！"; window.render(); }
+    },
+    removeStickyNote: (charId) => {
+        store.coupleSpacesData[charId].pet.stickyNote = null;
+        if(window.actions?.saveStore) window.actions.saveStore(); window.render();
+    },
+
+    // 🌟 方案三引擎：传话筒逻辑
+    leavePetMessage: (charId) => {
+        const msg = prompt("想让雪球帮我带什么话给 TA？");
+        if (!msg) return;
+        const pet = store.coupleSpacesData[charId].pet;
+        pet.userMessage = msg;
+        pet.aiReply = null; 
+        if(window.actions?.saveStore) window.actions.saveStore(); window.render();
+        window.actions?.showToast("雪球记住啦，等TA回信吧~");
+        window.cpActions.generatePetReply(charId, msg);
+    },
+    generatePetReply: async (charId, userMsg) => {
+        const pet = store.coupleSpacesData[charId].pet;
+        try {
+            const prompt = window.cpActions.buildMasterPrompt(charId, {
+                task: `【系统任务】用户让你们共同的宠物猫“雪球”给你带了一句话：“${userMsg}”。\n请你简短地回复用户，这句话将会由雪球顶在头上转达给用户。\n要求：字数在20字以内，自然的生活化口吻。直接输出回复内容！`
+            });
+            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.85 })
+            });
+            const data = await res.json();
+            pet.aiReply = data.choices[0].message.content.trim();
+            if (cpState.view === 'petRoom') window.render();
+        } catch(e) { pet.aiReply = "好滴，我知道啦！"; }
+    },
+    clearPetReply: (charId) => {
+        store.coupleSpacesData[charId].pet.aiReply = null;
+        store.coupleSpacesData[charId].pet.userMessage = null;
+        window.render();
+    },
+
+    // 🌟 方案二引擎：拍立得相册逻辑
+    openPetAlbum: async (charId) => {
+        cpState.petModalView = 'album';
+        const pet = store.coupleSpacesData[charId].pet;
+        const logicalToday = (typeof getLogicalDateStr === 'function') ? getLogicalDateStr() : new Date().toLocaleDateString('zh-CN');
+        
+        // 每天打开相册自动抓拍并生成一张相片
+        const hasToday = pet.album.find(a => a.date === logicalToday);
+        if (!hasToday) {
+            pet.album.unshift({ id: Date.now(), date: logicalToday, imgState: 'loading', text: '正在冲洗今天的拍立得...' });
+            window.render();
+            
+            try {
+                const prompt = window.cpActions.buildMasterPrompt(charId, {
+                    task: `【系统任务】请结合今天的聊天记录或你的想象，写一段你和宠物猫“雪球”今天发生的趣事作为拍立得相册的配文。\n要求：第一人称口吻，字数100字左右，像随手记录的日记，充满生活气息。直接输出配文！`
+                });
+                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.85 })
+                });
+                const data = await res.json();
+                
+                // 随机定格一个猫的动作作为照片画面
+                const imgStates = ['calm', 'sleep', 'pet-head', 'run', 'cozy', 'pet-belly'];
+                pet.album[0].imgState = imgStates[Math.floor(Math.random() * imgStates.length)];
+                pet.album[0].text = data.choices[0].message.content.trim();
+                if(window.actions?.saveStore) window.actions.saveStore(); window.render();
+            } catch(e) {
+                pet.album[0].imgState = 'sleep';
+                pet.album[0].text = "今天雪球睡了一整天，像个小猪猪。";
+                window.render();
+            }
+        } else {
+            window.render();
+        }
+    },
+    closePetAlbum: () => { cpState.petModalView = null; window.render(); },
+    // 🌟 宠物领养与取名大脑
+    nextAdoptCat: () => {
+        cpState.adoptCatIndex = cpState.adoptCatIndex >= 5 ? 0 : (cpState.adoptCatIndex || 0) + 1;
+        window.render();
+    },
+    prevAdoptCat: () => {
+        cpState.adoptCatIndex = cpState.adoptCatIndex <= 0 ? 5 : (cpState.adoptCatIndex || 0) - 1;
+        window.render();
+    },
+    startNameAdoptCat: () => {
+        cpState.petAdoptionPhase = 'name';
+        window.render();
+    },
+    closeNameAdoptCat: () => {
+        cpState.petAdoptionPhase = 'select';
+        window.render();
+    },
+    confirmAdoptCat: (charId) => {
+        const input = document.getElementById('pet-name-input');
+        const petName = (input && input.value.trim() !== '') ? input.value.trim() : '雪球';
+        
+        // 映射用户挑选的皮肤
+        const catFiles = ['AllCats.png', 'AllCatsBlack.png', 'AllCatsGrey.png', 'AllCatsGreyWhite.png', 'AllCatsOrange.png', 'AllCatsWhite.png'];
+        const selectedFile = catFiles[cpState.adoptCatIndex || 0];
+        
+        const spaceData = store.coupleSpacesData[charId];
+        spaceData.pet = {
+            name: petName,
+            spriteUrl: `../image/${selectedFile}`, // 🌟 永久记录专属皮肤！
+            hunger: 100, clean: 100, mood: 100, foodLevel: 100,
+            lastUpdate: Date.now(), lastInteract: Date.now(),
+            state: 'calm', baseState: 'active', posX: 50, facing: 1,
+            house: { currentBackgroundId: 1 },
+            album: []
+        };
+        
+        cpState.view = 'petRoom'; // 领养完毕，正式进入小屋
+        cpState.petAdoptionPhase = null;
+        if (window.actions?.saveStore) window.actions.saveStore();
+        window.render();
+    },
+
+    // 🌟 新增：专门用于切换装修标签页的安全动作
+    switchPetDecoTab: (tabId) => {
+        cpState.petDecoTab = tabId;
+        window.render();
+    },
+
     openPetRoom: (charId) => {
-        cpState.view = 'petRoom';
         cpState.activeCharId = charId;
         store.coupleSpacesData[charId] = store.coupleSpacesData[charId] || {};
         const spaceData = store.coupleSpacesData[charId];
         
-        // 🌟 1. 领养初始化 (加入房屋背景数据)
         if (!spaceData.pet) {
-            spaceData.pet = {
-                name: '雪球',
-                hunger: 40,   
-                clean: 60,    
-                mood: 50,     
-                state: 'idle',
-                house: {
-                    currentBackgroundId: 1 // 🌟 默认背景 1.png
-                }
-            };
-        }
-        // 兼容旧数据：如果用户之前进来过但没有 house 数据，补上
-        if (!spaceData.pet.house) {
-            spaceData.pet.house = { currentBackgroundId: 1 };
+            cpState.view = 'petAdoption';
+            cpState.adoptCatIndex = 0;
+            cpState.petAdoptionPhase = 'select';
+            window.render();
+            return;
         }
         
-        spaceData.pet.state = 'idle'; // 每次进来默认待机
-        // 关闭之前可能打开的弹窗状态
+        cpState.view = 'petRoom';
+        
+        // 🌟 核心修复：为老存档强行注入缺失的窗户和爬架字段！
+        if (!spaceData.pet.house) spaceData.pet.house = {};
+        if (spaceData.pet.house.currentBackgroundId === undefined) spaceData.pet.house.currentBackgroundId = 1;
+        if (spaceData.pet.house.currentWindowId === undefined) spaceData.pet.house.currentWindowId = 1; // 默认窗户 1
+        if (spaceData.pet.house.currentShelfId === undefined) spaceData.pet.house.currentShelfId = 0;   // 默认没爬架
+        if (!spaceData.pet.house.ownedItems) spaceData.pet.house.ownedItems = [];
+
+        window.cpActions.updatePetStats(charId);
+        
+        const pet = spaceData.pet;
+        if (pet.mood < 40) {
+            pet.baseState = 'sad';
+            pet.state = 'sad';
+        } else if (Math.random() < 0.2) { 
+            pet.baseState = 'sleep';
+            pet.state = 'sleep';
+        } else {
+            pet.baseState = 'active'; 
+            pet.state = 'calm'; 
+        }
+        
         cpState.petModalView = null; 
-        window.render();
-    },
-    // 🌟 电子宠物装修大脑
-    openPetRoomDecorationModal: (charId) => {
-        cpState.activeCharId = charId;
-        cpState.petModalView = 'decoration'; // 🌟 打开装修弹窗
+        cpState.petDecoTab = 'wallpaper'; // 默认打开墙纸页
         window.render();
     },
 
-    changePetHouseBackground: (charId, bgId) => {
+    // 🌟 装修：购买并应用装饰
+    applyDecoration: (charId, type, itemId, cost) => {
         const spaceData = store.coupleSpacesData[charId];
-        if (!spaceData || !spaceData.pet || !spaceData.pet.house) return;
+        const pet = spaceData.pet;
+        const itemKey = `${type}_${itemId}`;
         
-        spaceData.pet.house.currentBackgroundId = bgId; // 🌟 更换背景 ID
+        // 1. 如果不是默认道具(ID为1或0)且未拥有，则尝试购买
+        const isDefault = (type === 'wallpaper' && itemId === 1) || (type === 'window' && itemId === 1) || (type === 'shelf' && itemId === 0);
         
+        if (!isDefault && !pet.house.ownedItems.includes(itemKey)) {
+            // 这里我们需要动态计算一次当前积分（复用你之前的积分逻辑）
+            const currentScore = window.cpActions.calculateCurrentScore(charId);
+            if (currentScore < cost) {
+                if (window.actions?.showToast) window.actions.showToast('积分不足哦，快去共同成长打卡吧！');
+                return;
+            }
+            // 扣除积分（这里我们通过在记录里加一个负分项来变相扣除，或者直接记录已购）
+            pet.house.ownedItems.push(itemKey);
+            if (window.actions?.showToast) window.actions.showToast('购买成功！雪球很喜欢新家具~');
+        }
+
+        // 2. 应用装饰
+        if (type === 'wallpaper') pet.house.currentBackgroundId = itemId;
+        if (type === 'window') pet.house.currentWindowId = itemId;
+        if (type === 'shelf') pet.house.currentShelfId = itemId;
+
         if (window.actions?.saveStore) window.actions.saveStore();
-        // 🌟 换完背景后，不需要关闭弹窗，可以让用户继续挑选
-        window.render(); 
+        window.render();
+    },
+
+    // 🌟 积分助手：为了装修实时查分
+    calculateCurrentScore: (charId) => {
+        const growth = store.coupleSpacesData[charId].growth;
+        if (!growth) return 0;
+        let score = 0;
+        let consecutiveCheckins = 0;
+        let consecutivePerfects = 0;
+        let lastDateObj = null;
+
+        Object.keys(growth.records).sort().forEach(dateStr => {
+            const recordsDay = growth.records[dateStr];
+            const activePlans = growth.plans;
+            const bothChecked = (activePlans.filter(p => p.owner === 'me' && recordsDay[p.id]).length > 0) && (activePlans.filter(p => p.owner === 'ai' && recordsDay[p.id]).length > 0);
+            if (!bothChecked) { consecutiveCheckins = 0; consecutivePerfects = 0; return; }
+            
+            const currDateObj = new Date(dateStr);
+            if (lastDateObj && Math.round((currDateObj - lastDateObj) / (1000 * 60 * 60 * 24)) > 1) { consecutiveCheckins = 0; consecutivePerfects = 0; }
+            lastDateObj = currDateObj;
+
+            consecutiveCheckins++;
+            score += 10; 
+            if (consecutiveCheckins % 3 === 0) score += 10; 
+
+            const myDaily = activePlans.filter(p => p.owner === 'me' && p.type === 'daily');
+            const taDaily = activePlans.filter(p => p.owner === 'ai' && p.type === 'daily');
+            const bothPerfect = bothChecked && myDaily.every(p => recordsDay[p.id]) && taDaily.every(p => recordsDay[p.id]);
+
+            if (bothPerfect) {
+                consecutivePerfects++;
+                score += 10; 
+                if (consecutivePerfects % 3 === 0) score += 20; 
+            } else { consecutivePerfects = 0; }
+        });
+        
+        // 减去已消耗的积分
+        const pet = store.coupleSpacesData[charId].pet;
+        const spent = (pet.house.ownedItems || []).length * 50; // 假设每件家具 50 积分
+        return Math.max(0, score - spent);
     },
 
     interactPet: (charId, actionType) => {
         const spaceData = store.coupleSpacesData[charId];
         if (!spaceData || !spaceData.pet) return;
         const pet = spaceData.pet;
-        
-        // 如果正在做动作，不许打断它
-        if (pet.state !== 'idle') return;
 
-        // 切换动作状态，并增加相应的属性值
-        pet.state = actionType;
-        if (actionType === 'eat') pet.hunger = Math.min(100, pet.hunger + 30);
-        if (actionType === 'bath') pet.clean = Math.min(100, pet.clean + 40);
-        if (actionType === 'play') pet.mood = Math.min(100, pet.mood + 30);
+        if (['bath', 'pet-head', 'pet-belly'].includes(pet.state)) return;
 
-        if (window.actions?.saveStore) window.actions.saveStore();
+        pet.lastInteract = Date.now();
+
+        if (actionType === 'eat') {
+            pet.foodLevel = 100;
+            window.cpActions.updatePetStats(charId);
+            window.render();
+            if (window.actions?.showToast) window.actions.showToast('哗啦啦... 猫粮倒满啦！');
+            return;
+        }
+
+        if (actionType === 'bath') {
+            pet.state = 'bath';
+        } else if (actionType === 'play') {
+            pet.state = Math.random() > 0.5 ? 'pet-head' : 'pet-belly';
+            // 🌟 哄哄魔法：摸摸它能立刻恢复心情，并打破“难过”的死循环！
+            pet.mood = Math.min(100, pet.mood + 30);
+            if (pet.baseState === 'sad' && pet.mood >= 40) {
+                pet.baseState = 'active'; 
+            }
+        }
+
         window.render();
 
-        // 🌟 魔法：让动作 GIF 播放 3 秒后，自动切回待机状态！
         setTimeout(() => {
             if (store.coupleSpacesData[charId] && store.coupleSpacesData[charId].pet) {
-                store.coupleSpacesData[charId].pet.state = 'idle';
-                // 确保用户还停留在宠物页面才刷新画面
+                const p = store.coupleSpacesData[charId].pet;
+                if (actionType === 'bath') p.clean = 100;
+                
+                // 互动结束后，退回它的基础状态
+                p.state = p.baseState === 'sleep' ? 'sleep' : (p.baseState === 'sad' ? 'sad' : 'calm'); 
+                window.cpActions.updatePetStats(charId);
                 if (cpState.view === 'petRoom' && cpState.activeCharId === charId) {
                     window.render();
                 }
             }
-        }, 3000);
+        }, 3000); // 互动动画保持 3 秒
+    },
+    // 🌟 电子宠物装修大脑
+    openPetRoomDecorationModal: (charId) => {
+        cpState.activeCharId = charId;
+        cpState.petModalView = 'decoration'; 
+        window.render();
+    },
+    // 🌟 新增：专门用于关闭装修弹窗的安全动作
+    closePetRoomDecorationModal: () => {
+        cpState.petModalView = null;
+        window.render();
+    },
+    changePetHouseBackground: (charId, bgId) => {
+        const spaceData = store.coupleSpacesData[charId];
+        if (!spaceData || !spaceData.pet || !spaceData.pet.house) return;
+        
+        spaceData.pet.house.currentBackgroundId = bgId; 
+        if (window.actions?.saveStore) window.actions.saveStore();
+        window.render(); 
     },
 
   };
@@ -2732,7 +3018,7 @@ export function renderCoupleApp(store) {
                           
                           ${cpState.aiGeneratedPlans && cpState.aiGeneratedPlans.length > 0 ? `
                           <div class="mt-4 animate-in fade-in flex flex-col space-y-2">
-                              <span class="text-[12px] font-bold text-orange-500 mb-1 flex items-center"><i data-lucide="bot" class="w-3.5 h-3.5 mr-1"></i>${char.name} 为你定制的计划表</span>
+                              <span class="text-[12px] font-bold text-orange-500 mb-1 flex items-center">${char.name}为你定制的计划表</span>
                               ${cpState.aiGeneratedPlans.map((p, idx) => `
                                   <div class="bg-orange-50/50 border border-orange-100 rounded-[12px] p-3 flex items-center justify-between group">
                                       <div class="flex flex-col flex-1 pr-2">
@@ -3200,214 +3486,471 @@ export function renderCoupleApp(store) {
         `;
   }
 
-  // 🐾 界面 9：电子宠物小屋 (标准路径：../image/)
-  if (cpState.view === 'petRoom') {
+  // 🐾 界面 10：宠物领养中心
+  if (cpState.view === 'petAdoption') {
       const char = store.contacts.find(c => c.id === cpState.activeCharId);
-      const spaceData = store.coupleSpacesData[char.id];
-      const pet = spaceData.pet;
+      const catFiles = ['AllCats.png', 'AllCatsBlack.png', 'AllCatsGrey.png', 'AllCatsGreyWhite.png', 'AllCatsOrange.png', 'AllCatsWhite.png'];
+      const selectedFile = catFiles[cpState.adoptCatIndex || 0];
+      const currentSpriteUrl = `../image/${selectedFile}`;
 
-      // 🌟 标准路径，完全无视图片右侧空白，防滑动、防撕裂！
-      const spriteUrl = '../image/AllCats.png'; //
-
-      // 🌟 房屋背景路径 (../image/house/)
-      const bgId = pet.house.currentBackgroundId;
-      const backgroundUrl = `../image/house/${bgId}.png`;
-
-      // 标准路径：../
-      const spriteCss = `
+      const adoptCss = `
         <style>
-           :root {
-               /* 🌟 用户试出来的标准 64px 像素格 */
-               --pet-w: 64px; 
-               --pet-h: 64px; 
-           }
-           .pet-viewport {
-               width: var(--pet-w); 
-               height: var(--pet-h);
-               overflow: hidden; /* 绝对透视窗，多余的空白全部被物理裁掉 */
-               position: relative;
-               transform: scale(2.0); /* 用户设置，放大猫猫 */
+           .adopt-viewport {
+               width: 64px; height: 64px;
+               overflow: hidden; position: relative;
+               transform: scale(3.5); /* 把箱子放得大大的 */
                transform-origin: bottom center;
-               filter: drop-shadow(0px 6px 4px rgba(0,0,0,0.2)); 
            }
-           .pet-sprite {
-               position: absolute;
-               top: 0; left: 0;
-               /* 强制保持原图物理像素大小，绝对不拉伸！ */
-               max-width: none !important;
-               width: auto !important; 
-               height: auto !important;
+           .adopt-sprite {
+               position: absolute; top: 0; left: 0;
+               max-width: none !important; width: auto !important; height: auto !important;
                image-rendering: pixelated; 
+               /* 🌟 第9行(索引8) 10帧动画：精确定位到纸箱猫猫 */
+               animation: play-box 1.5s steps(10) infinite;
            }
-           
-           /* 待机 (第 1 行，共 6 帧) */
-           @keyframes play-idle {
-               from { transform: translate(0, 0); }
-               to { transform: translate(calc(var(--pet-w) * -6), 0); }
+           @keyframes play-box {
+               from { transform: translate(0, calc(64px * -8)); }
+               to { transform: translate(calc(64px * -10), calc(64px * -8)); }
            }
-           /* 吃饭 (第 11 行，共 4 帧) */
-           @keyframes play-eat {
-               from { transform: translate(0, calc(var(--pet-h) * -10)); }
-               to { transform: translate(calc(var(--pet-w) * -4), calc(var(--pet-h) * -10)); }
-           }
-           /* 玩耍 (第 12 行，共 3 帧) */
-           @keyframes play-play {
-               from { transform: translate(0, calc(var(--pet-h) * -11)); }
-               to { transform: translate(calc(var(--pet-w) * -3), calc(var(--pet-h) * -11)); }
-           }
-           /* 洗澡 (第 13 行，共 8 帧) */
-           @keyframes play-bath {
-               from { transform: translate(0, calc(var(--pet-h) * -12)); }
-               to { transform: translate(calc(var(--pet-w) * -8), calc(var(--pet-h) * -12)); }
-           }
-           
-           /* steps() 函数是防滑动的核心魔法！ */
-           .anim-idle { animation: play-idle 1s steps(6) infinite; }
-           .anim-eat { animation: play-eat 0.8s steps(4) infinite; }
-           .anim-play { animation: play-play 0.6s steps(3) infinite; }
-           .anim-bath { animation: play-bath 1.2s steps(8) infinite; }
         </style>
       `;
 
-      let statusText = 'zzZ 正在发呆...';
-      if (pet.state === 'eat') statusText = '吧唧吧唧... 好吃！🍗';
-      if (pet.state === 'bath') statusText = '咕噜咕噜... 洗脸脸 🛁';
-      if (pet.state === 'play') statusText = '芜湖！好开心！✨';
-
-      // 🌟 装修弹窗的 HTML 代码
-      const backgroundsList = [];
-      for (let i = 1; i <= 20; i++) {
-          backgroundsList.push(i);
-      }
-
-      const decorationModalHtml = cpState.petModalView === 'decoration' ? `
-          <div class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-end animate-in fade-in duration-300">
-              <div class="w-full bg-white rounded-t-[32px] p-6 shadow-2xl flex flex-col h-[70%] animate-in slide-in-from-bottom-6 duration-300">
-                  <div class="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-5 shrink-0" onclick="cpState.petModalView = null; window.render();"></div>
-                  
-                  <div class="flex items-center justify-between mb-6 shrink-0">
-                      <div class="flex items-center">
-                          <div class="w-10 h-10 bg-orange-50 rounded-full flex items-center justify-center mr-3 border border-orange-100">
-                              <i data-lucide="layout-dashboard" class="text-orange-400 w-5 h-5"></i>
-                          </div>
-                          <span class="text-lg font-extrabold text-gray-800 tracking-wide">装修宠物小屋</span>
-                      </div>
-                      <div class="cursor-pointer active:scale-90 p-1 bg-gray-100 rounded-full" onclick="cpState.petModalView = null; window.render();">
-                          <i data-lucide="x" class="w-6 h-6 text-gray-400"></i>
-                      </div>
+      // 🌟 取名弹窗
+      const nameModal = cpState.petAdoptionPhase === 'name' ? `
+          <div class="absolute inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-5 animate-in fade-in duration-300">
+              <div style="background: #ffffff !important;" class="w-full rounded-[32px] p-6 shadow-2xl flex flex-col items-center animate-in zoom-in-95 duration-300">
+                  <div class="w-16 h-16 bg-orange-50 rounded-full flex items-center justify-center mb-4 border border-orange-100 shadow-inner">
+                      <i data-lucide="edit-3" class="text-orange-400 w-8 h-8"></i>
                   </div>
-
-                  <div class="flex-1 overflow-y-auto hide-scrollbar pb-10">
-                      <div class="grid grid-cols-2 gap-4">
-                          ${backgroundsList.map(bgId => {
-                              const isCurrent = bgId === pet.house.currentBackgroundId;
-                              const thumbUrl = `../image/house/${bgId}.png`;
-                              return `
-                                  <div class="relative group cursor-pointer active:scale-95 transition-all ${isCurrent ? 'ring-4 ring-orange-400 rounded-[18px]' : ''}" onclick="window.cpActions.changePetHouseBackground('${char.id}', ${bgId})">
-                                      <img src="${thumbUrl}" class="w-full h-32 object-cover rounded-[16px] shadow-sm border border-gray-100 group-hover:opacity-90 transition-opacity" />
-                                      <div class="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-3 rounded-b-[16px]">
-                                          <span class="text-[12px] font-black text-white tracking-wider">背景风格 ${bgId}</span>
-                                      </div>
-                                      ${isCurrent ? `
-                                          <div class="absolute top-3 right-3 bg-orange-400 text-white rounded-full p-1 shadow-md">
-                                              <i data-lucide="check" class="w-4 h-4"></i>
-                                          </div>
-                                      ` : ''}
-                                  </div>
-                              `;
-                          }).join('')}
-                      </div>
-                  </div>
+                  <span class="text-[18px] font-extrabold text-gray-800 mb-2">给小猫起个名字吧</span>
+                  <span class="text-[12px] font-bold text-gray-400 mb-6 text-center">以后这就是我们共同的赛博小宝贝啦</span>
                   
+                  <input id="pet-name-input" type="text" class="w-full bg-gray-50 border border-gray-100 rounded-[16px] px-4 py-3.5 outline-none text-[15px] font-black text-center text-gray-800 focus:bg-white focus:border-orange-300 transition-all mb-6 shadow-inner" placeholder="例如：雪球 / 咪咪" value="雪球" maxlength="10">
+                  
+                  <div class="flex space-x-3 w-full">
+                      <button onclick="window.cpActions.closeNameAdoptCat()" class="flex-1 py-3.5 bg-gray-100 text-gray-600 font-bold rounded-[16px] active:scale-95 transition-transform">返回重选</button>
+                      <button onclick="window.cpActions.confirmAdoptCat('${char.id}')" class="flex-1 py-3.5 bg-orange-500 text-white font-black rounded-[16px] shadow-[0_4px_15px_rgba(249,115,22,0.3)] active:scale-95 transition-transform">确认领养</button>
+                  </div>
               </div>
           </div>
       ` : '';
 
       return `
+      <div class="w-full h-full flex flex-col bg-[#fcfcfc] relative animate-in fade-in slide-in-from-right-4 duration-300 z-[60]">
+          
+          <div class="pt-8 pb-3 px-4 shrink-0 flex items-center justify-between bg-white/90 backdrop-blur-md sticky top-0 z-20 shadow-sm border-b border-gray-100">
+              <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.openDashboard('${char.id}')"><i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i></div>
+              <span class="text-lg font-extrabold text-gray-800 tracking-wide">领养中心</span>
+              <div class="w-8"></div>
+          </div>
+
+          <div class="flex-1 flex flex-col items-center justify-center relative overflow-hidden bg-gradient-to-b from-orange-50/50 to-orange-100/30">
+                  <div class="absolute inset-0 opacity-[0.03] pointer-events-none" style="background-image: radial-gradient(circle at 2px 2px, black 1px, transparent 0); background-size: 20px 20px;"></div>
+                  
+                  ${adoptCss}
+
+                  <div class="relative flex items-center justify-center space-x-6 mb-16 z-40">
+                  <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-md cursor-pointer active:scale-90 transition-transform" onclick="window.cpActions.prevAdoptCat()">
+                      <i data-lucide="chevron-left" class="w-6 h-6 text-gray-600"></i>
+                  </div>
+                  <div class="flex flex-col items-center w-24">
+                      <span class="text-[13px] font-black text-orange-500 tracking-widest uppercase mb-1">挑选猫咪</span>
+                      <span class="text-[10px] font-bold text-gray-400">${(cpState.adoptCatIndex || 0) + 1} / 6</span>
+                  </div>
+                  <div class="w-12 h-12 bg-white rounded-full flex items-center justify-center shadow-md cursor-pointer active:scale-90 transition-transform" onclick="window.cpActions.nextAdoptCat()">
+                      <i data-lucide="chevron-right" class="w-6 h-6 text-gray-600"></i>
+                  </div>
+              </div>
+
+              <div class="relative w-full flex flex-col items-center justify-center h-48 mb-16 z-10">
+                  <div class="adopt-viewport z-10">
+                      <img src="${currentSpriteUrl}" class="adopt-sprite" />
+                  </div>
+                  <div class="w-32 h-4 bg-black/10 rounded-[100%] absolute bottom-[-10px] filter blur-[2px] z-0"></div>
+              </div>
+
+              <button onclick="window.cpActions.startNameAdoptCat()" class="relative z-40 px-10 py-4 bg-gray-900 text-white font-black text-[15px] rounded-full shadow-xl hover:bg-gray-800 active:scale-95 transition-transform flex items-center space-x-2">
+                  <i data-lucide="heart" class="w-5 h-5 text-rose-400 fill-rose-400/20"></i>
+                  <span>就要这只小可爱</span>
+              </button>
+
+          </div>
+
+          ${nameModal}
+      </div>
+      `;
+  }
+
+  // 🐾 界面 9：电子宠物小屋
+  if (cpState.view === 'petRoom') {
+      const char = store.contacts.find(c => c.id === cpState.activeCharId);
+      const spaceData = store.coupleSpacesData[char.id];
+      const pet = spaceData.pet;
+
+      // 🌟 动态读取当前宠物的专属皮肤，兼容旧档
+      const spriteUrl = pet.spriteUrl || '../image/AllCats.png'; 
+      const bgId = pet.house.currentBackgroundId;
+      const backgroundUrl = `../image/house/${bgId}.png`;
+
+      let bowlImg = 'bowl003.png'; 
+      if (pet.foodLevel > 70) bowlImg = 'bowl000.png';
+      else if (pet.foodLevel > 30) bowlImg = 'bowl001.png';
+      else if (pet.foodLevel > 0) bowlImg = 'bowl002.png';
+      const bowlUrl = `../image/house/${bowlImg}`;
+
+      const spriteCss = `
+        <style>
+           :root { var(--pet-w): 64px; var(--pet-h): 64px; }
+           
+           /* 🌟 跑圈专用动画：在极左(15%)和极右(85%)进行完美转身 */
+           @keyframes run-lap {
+               0%    { left: 50%; bottom: 12%; transform: translateX(-50%) scaleX(1) scale(1); z-index: 10; }
+               25%   { left: 85%; bottom: 18%; transform: translateX(-50%) scaleX(1) scale(0.85); z-index: 5; }
+               25.1% { left: 85%; bottom: 18%; transform: translateX(-50%) scaleX(-1) scale(0.85); z-index: 5; }
+               50%   { left: 50%; bottom: 25%; transform: translateX(-50%) scaleX(-1) scale(0.7); z-index: 2; }
+               75%   { left: 15%; bottom: 18%; transform: translateX(-50%) scaleX(-1) scale(0.85); z-index: 5; }
+               75.1% { left: 15%; bottom: 18%; transform: translateX(-50%) scaleX(1) scale(0.85); z-index: 5; }
+               100%  { left: 50%; bottom: 12%; transform: translateX(-50%) scaleX(1) scale(1); z-index: 10; }
+           }
+
+           .pet-viewport-container {
+               position: absolute;
+               /* 默认站立的位置 */
+               left: 50%; bottom: 12%; 
+               transform: translateX(-50%);
+               transition: left 1s ease-in-out; 
+               z-index: 10;
+           }
+           /* 当小猫跑动时，挂载这套绕圈动画 */
+           .is-running {
+               animation: run-lap 8s linear infinite;
+           }
+
+           .pet-viewport {
+               width: 64px; height: 64px;
+               overflow: hidden; 
+               position: relative;
+               transform: scale(2.0); 
+               transform-origin: bottom center;
+               filter: drop-shadow(0px 6px 4px rgba(0,0,0,0.2)); 
+           }
+           .pet-sprite {
+               position: absolute; top: 0; left: 0;
+               max-width: none !important; width: auto !important; height: auto !important;
+               image-rendering: pixelated; 
+           }
+           
+           @keyframes play-calm { from { transform: translate(0, 0); } to { transform: translate(calc(64px * -6), 0); } }
+           @keyframes play-sleep { from { transform: translate(0, calc(64px * -3)); } to { transform: translate(calc(64px * -4), calc(64px * -3)); } }
+           @keyframes play-pet-head { from { transform: translate(0, calc(64px * -4)); } to { transform: translate(calc(64px * -10), calc(64px * -4)); } }
+           @keyframes play-run { from { transform: translate(0, calc(64px * -5)); } to { transform: translate(calc(64px * -6), calc(64px * -5)); } }
+           @keyframes play-sad { from { transform: translate(0, calc(64px * -10)); } to { transform: translate(calc(64px * -4), calc(64px * -10)); } }
+           @keyframes play-cozy { from { transform: translate(0, calc(64px * -12)); } to { transform: translate(calc(64px * -8), calc(64px * -12)); } }
+           @keyframes play-pet-belly { from { transform: translate(0, calc(64px * -14)); } to { transform: translate(calc(64px * -4), calc(64px * -14)); } }
+           @keyframes loading-bar { from { width: 0%; } to { width: 100%; } }
+           
+           .anim-calm { animation: play-calm 1s steps(6) infinite; }
+           .anim-sleep { animation: play-sleep 1.5s steps(4) infinite; }
+           .anim-pet-head { animation: play-pet-head 1.2s steps(10) infinite; }
+           .anim-run { animation: play-run 0.5s steps(6) infinite; } 
+           .anim-sad { animation: play-sad 1s steps(4) infinite; }
+           .anim-cozy { animation: play-cozy 1.2s steps(8) infinite; }
+           .anim-pet-belly { animation: play-pet-belly 0.8s steps(4) infinite; }
+        </style>
+      `;
+
+      // 🌟 状态文案体系更新 (加入传话筒优先级)
+      let statusText = '正在安静地陪着你...';
+      if (pet.state === 'run') statusText = '芜湖！满屋子跑酷！✨';
+      if (pet.state === 'sleep') statusText = '呼噜呼噜... zzZ 💤';
+      if (pet.state === 'pet-head') statusText = '喵呜~ 舒服~ ❤️';
+      if (pet.state === 'pet-belly') statusText = '呼噜噜... 别停~ 🥺';
+      if (pet.state === 'sad') statusText = '饿了或者脏了，不开森... 🥀';
+      if (pet.state === 'cozy') statusText = '伸个懒腰，生活真美好~ 🌸';
+
+      // 🌟 传话筒状态覆盖！
+      if (pet.aiReply) {
+          statusText = `<span class="text-blue-500 font-black">TA 回复你：</span>${pet.aiReply} <i data-lucide="x-circle" class="w-4 h-4 inline ml-1 cursor-pointer text-gray-400 hover:text-red-400 active:scale-90 align-text-bottom" onclick="window.cpActions.clearPetReply('${char.id}')"></i>`;
+      } else if (pet.userMessage) {
+          statusText = `正在拼命记住你要带给 TA 的话... 🐾`;
+      }
+
+      const containerClass = pet.state === 'run' ? 'pet-viewport-container is-running' : 'pet-viewport-container';
+
+      const backgroundsList = [];
+      for (let i = 1; i <= 20; i++) backgroundsList.push(i);
+
+      // 🌟 装修中央弹窗 (修复了透明背景和点击失效的问题)
+      const currentScore = window.cpActions.calculateCurrentScore(char.id);
+      
+      const decorationModalHtml = cpState.petModalView === 'decoration' ? `
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-5 animate-in fade-in duration-300" onclick="window.cpActions.closePetRoomDecorationModal()">
+            <div class="w-full h-[80%] bg-[#ffffff] rounded-[32px] shadow-2xl flex flex-col animate-in zoom-in-95 duration-300 overflow-hidden" onclick="event.stopPropagation()">
+                
+                <div class="px-6 py-5 border-b border-gray-100 flex justify-between items-center bg-[#ffffff] shrink-0">
+                    <div class="flex flex-col">
+                        <span class="font-black text-gray-800 text-[16px]">装修宠物小屋</span>
+                        <div class="flex items-center mt-1">
+                            <i data-lucide="coins" class="w-3.5 h-3.5 mr-1 text-orange-500"></i>
+                            <span class="text-[13px] font-black font-serif text-orange-600">${currentScore}</span>
+                        </div>
+                    </div>
+                    <i data-lucide="x" class="w-6 h-6 text-gray-400 bg-gray-100 rounded-full p-1 cursor-pointer active:scale-90" onclick="window.cpActions.closePetRoomDecorationModal()"></i>
+                </div>
+
+                <div class="flex space-x-4 px-6 py-3 overflow-x-auto hide-scrollbar border-b border-gray-100 shrink-0 bg-gray-50">
+                    ${[
+                        {id:'wallpaper', n:'墙纸'}, {id:'window', n:'窗户'}, {id:'shelf', n:'猫爬架'},
+                        {id:'bed', n:'猫窝'}, {id:'decor', n:'墙饰'}, {id:'toy', n:'玩具'}
+                    ].map(tab => `
+                        <div onclick="window.cpActions.switchPetDecoTab('${tab.id}')" class="shrink-0 pb-1 px-1 text-[13px] font-bold transition-all cursor-pointer ${cpState.petDecoTab === tab.id ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-400 hover:text-gray-600'}">${tab.n}</div>
+                    `).join('')}
+                </div>
+
+                <div class="flex-1 overflow-y-auto p-6 hide-scrollbar bg-[#ffffff]">
+                    <div class="grid grid-cols-2 gap-4">
+                        ${(() => {
+                            let items = [];
+                            if (cpState.petDecoTab === 'wallpaper') {
+                                for(let i=1; i<=20; i++) items.push({ id: i, name: `背景 ${i}`, img: `../image/house/${i}.png`, price: i===1?0:50 });
+                            } else if (cpState.petDecoTab === 'window') {
+                                for(let i=1; i<=8; i++) items.push({ id: i, name: `窗户 ${i}`, img: `../image/house/window${i}.png`, price: i===1?0:30 });
+                            } else if (cpState.petDecoTab === 'shelf') {
+                                for(let i=0; i<=14; i++) items.push({ id: i, name: `爬架 ${i}`, img: `../image/house/shelf0${String(i).padStart(2,'0')}.png`, price: i===0?0:80 });
+                            }
+
+                            if (items.length === 0) return `<div class="col-span-2 text-center py-20 text-gray-300 text-xs font-bold tracking-widest">这里的道具还在制作中...</div>`;
+
+                            return items.map(item => {
+                                const itemKey = `${cpState.petDecoTab}_${item.id}`;
+                                const isOwned = pet.house.ownedItems.includes(itemKey) || item.price === 0;
+                                const isEquipped = (cpState.petDecoTab === 'wallpaper' && pet.house.currentBackgroundId === item.id) ||
+                                                 (cpState.petDecoTab === 'window' && pet.house.currentWindowId === item.id) ||
+                                                 (cpState.petDecoTab === 'shelf' && pet.house.currentShelfId === item.id);
+
+                                return `
+                                    <div class="relative flex flex-col group cursor-pointer" onclick="window.cpActions.applyDecoration('${char.id}', '${cpState.petDecoTab}', ${item.id}, ${item.price})">
+                                        <div class="aspect-square bg-gray-50 rounded-[20px] overflow-hidden border-2 ${isEquipped ? 'border-orange-400' : 'border-transparent'} shadow-sm transition-all active:scale-95">
+                                            <img src="${item.img}" class="w-full h-full object-cover" />
+                                            ${!isOwned ? `
+                                                <div class="absolute inset-0 bg-black/40 flex items-center justify-center rounded-[18px]">
+                                                    <div class="bg-white/90 px-2 py-1 rounded-full flex items-center shadow-lg">
+                                                        <i data-lucide="coins" class="w-3 h-3 mr-1 text-orange-500"></i>
+                                                        <span class="text-[10px] font-black text-gray-800">${item.price}</span>
+                                                    </div>
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                        <span class="mt-2 text-[11px] font-bold text-center ${isEquipped ? 'text-orange-500' : 'text-gray-500'}">${item.name} ${isEquipped ? '· 已装扮' : ''}</span>
+                                    </div>
+                                `;
+                            }).join('');
+                        })()}
+                    </div>
+                </div>
+            </div>
+        </div>
+      ` : '';
+
+      // 🌟 新增：拍立得相册弹窗
+      const albumModalHtml = cpState.petModalView === 'album' ? `
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-5 animate-in fade-in duration-300" onclick="window.cpActions.closePetAlbum()">
+            <div class="w-full h-[85%] bg-[#f4f5f7] rounded-[32px] shadow-2xl flex flex-col animate-in zoom-in-95 duration-300" onclick="event.stopPropagation()">
+                <div class="px-6 py-5 border-b border-gray-200 flex justify-between items-center bg-white rounded-t-[32px] shrink-0">
+                    <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="camera" class="w-5 h-5 mr-2 text-blue-500"></i>雪球的拍立得</span>
+                    <i data-lucide="x" class="w-6 h-6 text-gray-400 bg-gray-100 rounded-full p-1 cursor-pointer active:scale-90" onclick="window.cpActions.closePetAlbum()"></i>
+                </div>
+                <div class="flex-1 overflow-y-auto p-6 space-y-6 hide-scrollbar relative">
+                    ${spriteCss} 
+                    ${pet.album.length === 0 ? '<div class="text-center text-gray-400 text-xs mt-10">还没有照片哦...</div>' : pet.album.map(a => `
+                        <div class="bg-white p-3 pb-6 rounded-sm shadow-[0_10px_20px_rgba(0,0,0,0.05)] border border-gray-200 transform ${Math.random() > 0.5 ? 'rotate-1' : '-rotate-1'} mx-2">
+                            <div class="w-full h-44 bg-[#e5e7eb] flex items-center justify-center overflow-hidden relative shadow-inner">
+                                ${a.imgState === 'loading' ? '<i data-lucide="loader-2" class="w-6 h-6 text-gray-400 animate-spin"></i>' : `
+                                    <div class="pet-viewport" style="transform: scale(2.5); bottom: -15px;">
+                                        <img src="${spriteUrl}" class="pet-sprite anim-${a.imgState}" />
+                                    </div>
+                                `}
+                            </div>
+                            <div class="mt-4 px-2 text-[14px] text-gray-700 font-serif leading-relaxed text-justify font-medium">
+                                ${a.text}
+                            </div>
+                            <div class="mt-3 px-2 text-[10px] font-black text-gray-300 tracking-wider font-sans text-right">
+                                ${a.date}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+      ` : '';
+
+      return `
       <div class="w-full h-full flex flex-col bg-[#f0f4f8] relative animate-in fade-in slide-in-from-right-4 duration-300 z-[60]">
           
-          <div class="pt-8 pb-3 px-4 shrink-0 flex items-center justify-between bg-white sticky top-0 z-20 shadow-sm border-b border-gray-100">
+          <div class="pt-8 pb-3 px-4 shrink-0 flex items-center justify-between bg-white/90 backdrop-blur-md sticky top-0 z-20 shadow-sm border-b border-gray-100">
               <div class="cursor-pointer active:scale-90 p-1 -ml-1" onclick="window.cpActions.openDashboard('${char.id}')"><i data-lucide="chevron-left" class="w-8 h-8 text-gray-800"></i></div>
               <span class="text-lg font-extrabold text-gray-800 tracking-wide">${pet.name} 的小屋</span>
               <div class="w-8"></div>
           </div>
 
-          <div class="flex-1 overflow-y-auto hide-scrollbar flex flex-col pb-10">
+          <div class="flex-1 overflow-y-auto hide-scrollbar flex flex-col relative" style="background-image: url('${backgroundUrl}'); background-size: cover; background-position: center bottom;">
               
-              <div class="bg-white m-5 p-5 rounded-[24px] shadow-[0_4px_15px_rgba(0,0,0,0.03)] border border-gray-50 flex flex-col space-y-4">
-                  <div class="flex items-center justify-between">
-                      <span class="text-[11px] font-bold text-gray-400 w-12 shrink-0">饱食度</span>
-                      <div class="flex-1 h-3 bg-gray-100 rounded-full mx-3 overflow-hidden shadow-inner">
-                          <div class="h-full bg-orange-400 rounded-full transition-all duration-500 ease-out" style="width: ${pet.hunger}%"></div>
-                      </div>
-                      <span class="text-[11px] font-black text-gray-600 w-8 text-right">${pet.hunger}%</span>
+              <div class="absolute inset-0 bg-black/10 pointer-events-none z-0"></div>
+
+              ${pet.house.currentWindowId > 0 ? `
+              <div class="absolute top-[25%] left-1/2 -translate-x-1/2 w-[85%] h-36 z-[1] pointer-events-none opacity-95">
+                  <img src="../image/house/window${pet.house.currentWindowId}.png" class="w-full h-full object-contain filter drop-shadow-md" />
+              </div>
+              ` : ''}
+
+              ${pet.house.currentShelfId >= 0 ? `
+              <div class="absolute bottom-[15%] left-[2%] w-36 h-56 z-[2] pointer-events-none">
+                  <img src="../image/house/shelf0${String(pet.house.currentShelfId).padStart(2,'0')}.png" class="w-full h-full object-contain filter drop-shadow-lg" style="image-rendering: pixelated;" />
+              </div>
+              ` : ''}
+
+              <div class="absolute top-36 right-4 z-20 flex flex-col space-y-3">
+                  <div class="cursor-pointer p-2.5 rounded-full bg-white/80 backdrop-blur-md border border-white shadow-lg active:scale-95 transition-all group hover:bg-white flex items-center justify-center" onclick="window.cpActions.openPetRoomDecorationModal('${char.id}')" title="装修">
+                      <i data-lucide="layout-dashboard" class="w-4 h-4 text-orange-400 group-hover:rotate-12 transition-transform"></i>
                   </div>
-                  <div class="flex items-center justify-between">
-                      <span class="text-[11px] font-bold text-gray-400 w-12 shrink-0">清洁度</span>
-                      <div class="flex-1 h-3 bg-gray-100 rounded-full mx-3 overflow-hidden shadow-inner">
-                          <div class="h-full bg-blue-400 rounded-full transition-all duration-500 ease-out" style="width: ${pet.clean}%"></div>
-                      </div>
-                      <span class="text-[11px] font-black text-gray-600 w-8 text-right">${pet.clean}%</span>
+                  <div class="cursor-pointer p-2.5 rounded-full bg-white/80 backdrop-blur-md border border-white shadow-lg active:scale-95 transition-all group hover:bg-white flex items-center justify-center" onclick="window.cpActions.openPetAlbum('${char.id}')" title="拍立得相册">
+                      <i data-lucide="camera" class="w-4 h-4 text-blue-400 group-hover:scale-110 transition-transform"></i>
                   </div>
-                  <div class="flex items-center justify-between">
-                      <span class="text-[11px] font-bold text-gray-400 w-12 shrink-0">心情值</span>
-                      <div class="flex-1 h-3 bg-gray-100 rounded-full mx-3 overflow-hidden shadow-inner">
-                          <div class="h-full bg-pink-400 rounded-full transition-all duration-500 ease-out" style="width: ${pet.mood}%"></div>
-                      </div>
-                      <span class="text-[11px] font-black text-gray-600 w-8 text-right">${pet.mood}%</span>
+                  <div class="cursor-pointer p-2.5 rounded-full bg-white/80 backdrop-blur-md border border-white shadow-lg active:scale-95 transition-all group hover:bg-white flex items-center justify-center" onclick="window.cpActions.leavePetMessage('${char.id}')" title="传话给TA">
+                      <i data-lucide="mic" class="w-4 h-4 text-pink-400 group-hover:scale-110 transition-transform"></i>
                   </div>
               </div>
 
-              <div class="flex-1 flex flex-col items-center justify-center relative mt-4 mx-5 rounded-[32px] overflow-hidden border border-gray-100 shadow-inner" style="background-image: url('${backgroundUrl}'); background-size: cover; background-position: center;">
-                  
-                  <div class="absolute inset-0 opacity-10 pointer-events-none" style="background-image: linear-gradient(#94a3b8 1px, transparent 1px), linear-gradient(90deg, #94a3b8 1px, transparent 1px); background-size: 16px 16px;"></div>
-                  
-                  <div class="absolute top-4 right-4 z-20 cursor-pointer p-2 rounded-full bg-white/60 backdrop-blur border border-white/20 shadow active:scale-95 transition-all group hover:bg-white" onclick="window.cpActions.openPetRoomDecorationModal('${char.id}')">
-                      <i data-lucide="layout-dashboard" class="w-5 h-5 text-orange-400 transition-transform group-hover:rotate-12"></i>
-                      <span class="text-[10px] font-extrabold text-orange-500 ml-1.5 align-middle">装修</span>
+              ${pet.stickyNote ? `
+                  <div class="absolute top-36 left-6 z-20 w-36 bg-yellow-100/95 backdrop-blur-sm p-3.5 shadow-md transform -rotate-3 rounded-br-2xl rounded-tl-sm border border-yellow-200/50">
+                      <i data-lucide="pin" class="absolute -top-2 left-1/2 -translate-x-1/2 w-5 h-5 text-red-400 drop-shadow-sm"></i>
+                      <div class="text-[13px] text-yellow-900 font-medium leading-relaxed font-serif mt-2 break-words">
+                          ${pet.stickyNote}
+                      </div>
+                      <i data-lucide="x" class="absolute top-1 right-1 w-3.5 h-3.5 text-yellow-600/30 cursor-pointer active:scale-90 hover:text-yellow-600" onclick="window.cpActions.removeStickyNote('${char.id}')"></i>
                   </div>
+              ` : ''}
 
-                  <div class="bg-white/90 backdrop-blur border border-gray-100 px-4 py-2 rounded-2xl rounded-bl-sm shadow-sm text-[12px] font-bold text-gray-600 mb-8 relative z-10 transition-all ${pet.state !== 'idle' ? 'scale-110 text-rose-500 bg-rose-50 border-rose-100' : ''}">
+              <div class="bg-white/90 backdrop-blur-md m-4 p-4 rounded-[24px] shadow-sm border border-white/50 flex flex-col space-y-4 relative z-10">
+                  <div class="flex items-center justify-between">
+                      <span class="text-[11px] font-bold text-gray-500 w-12 shrink-0">饱食度</span>
+                      <div class="flex-1 h-2.5 bg-gray-100 rounded-full mx-3 overflow-hidden shadow-inner">
+                          <div class="h-full bg-orange-400 rounded-full transition-all duration-500 ease-out" style="width: ${Math.round(pet.hunger)}%"></div>
+                      </div>
+                      <span class="text-[11px] font-black text-gray-700 w-8 text-right">${Math.round(pet.hunger)}%</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                      <span class="text-[11px] font-bold text-gray-500 w-12 shrink-0">清洁度</span>
+                      <div class="flex-1 h-2.5 bg-gray-100 rounded-full mx-3 overflow-hidden shadow-inner">
+                          <div class="h-full bg-blue-400 rounded-full transition-all duration-500 ease-out" style="width: ${Math.round(pet.clean)}%"></div>
+                      </div>
+                      <span class="text-[11px] font-black text-gray-700 w-8 text-right">${Math.round(pet.clean)}%</span>
+                  </div>
+                  <div class="flex items-center justify-between">
+                      <span class="text-[11px] font-bold text-gray-500 w-12 shrink-0">心情值</span>
+                      <div class="flex-1 h-2.5 bg-gray-100 rounded-full mx-3 overflow-hidden shadow-inner">
+                          <div class="h-full bg-pink-400 rounded-full transition-all duration-500 ease-out" style="width: ${Math.round(pet.mood)}%"></div>
+                      </div>
+                      <span class="text-[11px] font-black text-gray-700 w-8 text-right">${Math.round(pet.mood)}%</span>
+                  </div>
+              </div>
+
+              <div class="flex-1 flex flex-col items-center justify-end relative pb-8 z-10 w-full overflow-hidden">
+                  
+                  <div class="bg-white/95 backdrop-blur border border-gray-100 px-4 py-2 rounded-2xl rounded-bl-sm shadow-md text-[12px] font-bold text-gray-600 mb-8 absolute bottom-36 z-30 transition-all ${['pet-head','pet-belly','run'].includes(pet.state) ? 'scale-110 text-rose-500 bg-rose-50 border-rose-100' : ''} ${pet.aiReply ? 'ring-2 ring-blue-200' : ''}">
                       ${statusText}
                   </div>
 
                   ${spriteCss}
 
-                  <div class="relative w-48 h-48 flex flex-col items-center justify-end z-10 pb-4">
-                      <div class="pet-viewport z-10">
-                          <img src="${spriteUrl}" class="pet-sprite anim-${pet.state}" />
+                  ${pet.state === 'bath' ? `
+                      <div class="absolute inset-0 bg-white/40 backdrop-blur-sm z-[100] flex flex-col items-center justify-center">
+                          <i data-lucide="droplets" class="w-10 h-10 text-blue-400 mb-3 animate-bounce"></i>
+                          <div class="w-40 h-4 bg-blue-100 rounded-full overflow-hidden shadow-inner relative">
+                             <div class="h-full bg-blue-400" style="animation: loading-bar 3s linear forwards;"></div>
+                          </div>
+                          <span class="text-[12px] font-black text-blue-500 mt-3 tracking-widest drop-shadow-sm">正在努力洗香香...</span>
                       </div>
-                      <div class="w-24 h-3 bg-black/10 rounded-[100%] mt-1 z-0 absolute bottom-1"></div>
+                  ` : `
+                      <div class="${containerClass}">
+                          <div class="pet-viewport">
+                              <img src="${spriteUrl}" class="pet-sprite anim-${pet.state}" />
+                          </div>
+                          <div class="w-20 h-2 bg-black/15 rounded-[100%] absolute bottom-1 left-1/2 -translate-x-1/2 z-0 filter blur-[1px]"></div>
+                      </div>
+                  `}
+
+                  <div class="absolute bottom-4 right-8 z-10 w-12 h-12 flex flex-col items-center group cursor-pointer" onclick="window.cpActions.interactPet('${char.id}', 'eat')">
+                      <img src="${bowlUrl}" class="w-full h-full object-contain filter drop-shadow-md group-active:scale-95 transition-transform" style="image-rendering: pixelated;" />
+                      <div class="w-10 h-1.5 bg-black/10 rounded-[100%] absolute -bottom-1 z-[-1] filter blur-[1px]"></div>
                   </div>
               </div>
           </div>
 
-          <div class="bg-white px-6 py-6 pb-8 border-t border-gray-100 shadow-[0_-10px_30px_rgba(0,0,0,0.03)] flex justify-around relative z-20">
+          <div class="bg-white px-6 py-6 pb-8 border-t border-gray-100 shadow-[0_-10px_30px_rgba(0,0,0,0.03)] flex justify-around relative z-20 shrink-0">
               <div class="flex flex-col items-center cursor-pointer group" onclick="window.cpActions.interactPet('${char.id}', 'eat')">
-                  <div class="w-14 h-14 rounded-full bg-orange-50 flex items-center justify-center mb-2 shadow-sm border border-orange-100 group-active:scale-90 transition-transform ${pet.state !== 'idle' ? 'opacity-50 grayscale' : ''}">
+                  <div class="w-14 h-14 rounded-full bg-orange-50 flex items-center justify-center mb-2 shadow-sm border border-orange-100 group-active:scale-90 transition-transform ${['bath', 'pet-head', 'pet-belly'].includes(pet.state) ? 'opacity-50 grayscale' : ''}">
                       <i data-lucide="beef" class="w-6 h-6 text-orange-400"></i>
                   </div>
                   <span class="text-[12px] font-bold text-gray-600">喂食</span>
               </div>
               <div class="flex flex-col items-center cursor-pointer group" onclick="window.cpActions.interactPet('${char.id}', 'bath')">
-                  <div class="w-14 h-14 rounded-full bg-blue-50 flex items-center justify-center mb-2 shadow-sm border border-blue-100 group-active:scale-90 transition-transform ${pet.state !== 'idle' ? 'opacity-50 grayscale' : ''}">
+                  <div class="w-14 h-14 rounded-full bg-blue-50 flex items-center justify-center mb-2 shadow-sm border border-blue-100 group-active:scale-90 transition-transform ${['bath', 'pet-head', 'pet-belly'].includes(pet.state) ? 'opacity-50 grayscale' : ''}">
                       <i data-lucide="bath" class="w-6 h-6 text-blue-400"></i>
                   </div>
                   <span class="text-[12px] font-bold text-gray-600">洗澡</span>
               </div>
               <div class="flex flex-col items-center cursor-pointer group" onclick="window.cpActions.interactPet('${char.id}', 'play')">
-                  <div class="w-14 h-14 rounded-full bg-pink-50 flex items-center justify-center mb-2 shadow-sm border border-pink-100 group-active:scale-90 transition-transform ${pet.state !== 'idle' ? 'opacity-50 grayscale' : ''}">
-                      <i data-lucide="gamepad-2" class="w-6 h-6 text-pink-400"></i>
+                  <div class="w-14 h-14 rounded-full bg-pink-50 flex items-center justify-center mb-2 shadow-sm border border-pink-100 group-active:scale-90 transition-transform ${['bath', 'pet-head', 'pet-belly'].includes(pet.state) ? 'opacity-50 grayscale' : ''}">
+                      <i data-lucide="hand-heart" class="w-6 h-6 text-pink-400"></i>
                   </div>
-                  <span class="text-[12px] font-bold text-gray-600">玩耍</span>
+                  <span class="text-[12px] font-bold text-gray-600">摸摸</span>
               </div>
           </div>
 
           ${decorationModalHtml}
-
+          ${albumModalHtml}
       </div>
       `;
   }
+}
+
+// 🌟 终极宠物漫游与情绪 AI 引擎 (每 8 秒思考一次人生)
+if (!window.petAiRunning) {
+    window.petAiRunning = true;
+    setInterval(() => {
+        if (cpState.view !== 'petRoom') return;
+        
+        const charId = cpState.activeCharId;
+        const spaceData = store.coupleSpacesData[charId];
+        if (!spaceData || !spaceData.pet) return;
+        
+        const pet = spaceData.pet;
+
+        // 如果在洗澡、被摸，绝对不能打断
+        if (['bath', 'pet-head', 'pet-belly'].includes(pet.state)) return;
+
+        // 后台静默刷新一下生理状态
+        window.cpActions.updatePetStats(charId);
+
+        // 🌟 只在它没睡着、没难过（即 baseState 是 active）时，才让它切换动作！
+        if (pet.baseState === 'active') {
+            const roll = Math.random();
+            if (roll < 0.2) {
+                pet.state = 'run'; // 20% 概率跑一圈（CSS动画控制它刚好跑完回到原点）
+            } else if (roll < 0.7) {
+                pet.state = 'calm'; // 50% 概率安静站着
+            } else {
+                pet.state = 'cozy'; // 30% 概率伸懒腰
+            }
+        } else if (pet.baseState === 'sleep') {
+            pet.state = 'sleep';
+        } else if (pet.baseState === 'sad') {
+            pet.state = 'sad';
+        }
+
+        window.render();
+    }, 8000); // 8000 毫秒 = 8秒钟，和跑圈的时间完美对齐！
 }
 
 // ==========================================
