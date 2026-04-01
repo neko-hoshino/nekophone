@@ -1735,8 +1735,6 @@ if (!window.cpActions) {
         cpState.activeCharId = charId;
         store.coupleSpacesData[charId] = store.coupleSpacesData[charId] || {};
         const spaceData = store.coupleSpacesData[charId];
-        // 🌟 【临时失忆符】加上这一行！
-        delete spaceData.pet;
 
         if (!spaceData.pet) {
             cpState.view = 'petAdoption';
@@ -3773,7 +3771,11 @@ let preProcessedText = cleanText
                             } else if (cpState.petDecoTab === 'window') {
                                 for(let i=1; i<=8; i++) items.push({ pfx: 'window', id: i, name: `窗户 ${i}`, img: `./image/house/window${i}.png`, price: i===1?0:30 });
                             } else if (cpState.petDecoTab === 'shelf') {
-                                for(let i=1; i<=14; i++) items.push({ pfx: 'shelf', id: i, name: `落地架 ${i}`, img: `./image/house/shelf${p3(i)}.png`, price: 80 });
+                                for(let i=1; i<=14; i++) {
+                                    // 🌟 拦截器：如果遇到 5 和 6，直接跳过不卖了！
+                                    if (i === 5 || i === 6) continue; 
+                                    items.push({ pfx: 'shelf', id: i, name: `落地架 ${i}`, img: `./image/house/shelf${p3(i)}.png`, price: 80 });
+                                }
                                 for(let i=1; i<=4; i++) items.push({ pfx: 'tile', id: i, name: `墙上爬架 ${i}`, img: `./image/house/tile${p3(i)}.png`, price: 60 });
                             } else if (cpState.petDecoTab === 'bed') {
                                 for(let i=1; i<=12; i++) items.push({ pfx: 'bed', id: i, name: `猫窝 ${i}`, img: `./image/house/bed${p3(i)}.png`, price: 70 });
