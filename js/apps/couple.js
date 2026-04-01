@@ -1648,7 +1648,7 @@ if (!window.cpActions) {
         const spaceData = store.coupleSpacesData[charId];
         spaceData.pet = {
             name: petName,
-            spriteUrl: `../image/${selectedFile}`, // 🌟 永久记录专属皮肤！
+            spriteUrl: `./image/${selectedFile}`, // 🌟 永久记录专属皮肤！
             hunger: 100, clean: 100, mood: 100, foodLevel: 100,
             lastUpdate: Date.now(), lastInteract: Date.now(),
             state: 'calm', baseState: 'active', posX: 50, facing: 1,
@@ -1662,9 +1662,72 @@ if (!window.cpActions) {
         window.render();
     },
 
-    // 🌟 新增：专门用于切换装修标签页的安全动作
+    // 🌟 切换标签页时，重置滚动条记忆
     switchPetDecoTab: (tabId) => {
         cpState.petDecoTab = tabId;
+        window.render();
+    },
+
+    // 🌟 完美版装修大脑：防重复购买 + 一键卸下 + 基础硬装保护
+    applyDecoration: (charId, prefix, itemId, cost) => {
+        const spaceData = store.coupleSpacesData[charId];
+        const pet = spaceData.pet;
+        const itemKey = `${prefix}_${itemId}`;
+        const isDefault = (prefix === 'bg' && itemId === 1) || (prefix === 'window' && itemId === 1);
+        
+        // 获取当前正在装备的 ID
+        let currId = 0;
+        if (prefix === 'bg') currId = pet.house.currentBackgroundId;
+        else if (prefix === 'window') currId = pet.house.currentWindowId;
+        else if (prefix === 'shelf') currId = pet.house.currentShelfId;
+        else if (prefix === 'tile') currId = pet.house.currentTileId;
+        else if (prefix === 'bed') currId = pet.house.currentBedId;
+        else if (prefix === 'plant') currId = pet.house.currentPlantId;
+        else if (prefix === 'frame') currId = pet.house.currentFrameId;
+        else if (prefix === 'fish') currId = pet.house.currentFishId;
+        else if (prefix === 'toy') currId = pet.house.currentToyId;
+        else if (prefix === 'ball') currId = pet.house.currentBallId;
+        else if (prefix === 'cube') currId = pet.house.currentCubeId;
+
+        const isEquipped = currId === itemId;
+
+        // 1. 如果已经穿在身上，执行“卸下”逻辑
+        if (isEquipped) {
+            if (!['bg', 'window'].includes(prefix)) {
+                itemId = 0; // 置零即为卸下
+                if (window.actions?.showToast) window.actions.showToast('已收起该家具~');
+            } else {
+                if (window.actions?.showToast) window.actions.showToast('基础装修不可卸下哦！');
+                return; // 基础硬装直接拦截，不准卸下
+            }
+        } 
+        // 2. 如果没穿在身上，检查是否需要购买
+        else {
+            if (!isDefault && !pet.house.ownedItems.includes(itemKey)) {
+                const currentScore = window.cpActions.calculateCurrentScore(charId);
+                if (currentScore < cost) {
+                    if (window.actions?.showToast) window.actions.showToast('积分不足哦，快去共同成长打卡吧！');
+                    return;
+                }
+                pet.house.ownedItems.push(itemKey);
+                if (window.actions?.showToast) window.actions.showToast('购买成功！已自动为您布置~');
+            }
+        }
+
+        // 3. 应用变更（无论是新买的、已拥有的、还是被置为 0 的）
+        if (prefix === 'bg') pet.house.currentBackgroundId = itemId;
+        else if (prefix === 'window') pet.house.currentWindowId = itemId;
+        else if (prefix === 'shelf') pet.house.currentShelfId = itemId;
+        else if (prefix === 'tile') pet.house.currentTileId = itemId;
+        else if (prefix === 'bed') pet.house.currentBedId = itemId;
+        else if (prefix === 'plant') pet.house.currentPlantId = itemId;
+        else if (prefix === 'frame') pet.house.currentFrameId = itemId;
+        else if (prefix === 'fish') pet.house.currentFishId = itemId;
+        else if (prefix === 'toy') pet.house.currentToyId = itemId;
+        else if (prefix === 'ball') pet.house.currentBallId = itemId;
+        else if (prefix === 'cube') pet.house.currentCubeId = itemId;
+
+        if (window.actions?.saveStore) window.actions.saveStore();
         window.render();
     },
 
@@ -1672,7 +1735,9 @@ if (!window.cpActions) {
         cpState.activeCharId = charId;
         store.coupleSpacesData[charId] = store.coupleSpacesData[charId] || {};
         const spaceData = store.coupleSpacesData[charId];
-        
+        // 🌟 【临时失忆符】加上这一行！
+        delete spaceData.pet;
+
         if (!spaceData.pet) {
             cpState.view = 'petAdoption';
             cpState.adoptCatIndex = 0;
@@ -1683,59 +1748,35 @@ if (!window.cpActions) {
         
         cpState.view = 'petRoom';
         
-        // 🌟 核心修复：为老存档强行注入缺失的窗户和爬架字段！
+        // 🌟 强行扩容旧存档的储物空间
         if (!spaceData.pet.house) spaceData.pet.house = {};
-        if (spaceData.pet.house.currentBackgroundId === undefined) spaceData.pet.house.currentBackgroundId = 1;
-        if (spaceData.pet.house.currentWindowId === undefined) spaceData.pet.house.currentWindowId = 1; // 默认窗户 1
-        if (spaceData.pet.house.currentShelfId === undefined) spaceData.pet.house.currentShelfId = 0;   // 默认没爬架
-        if (!spaceData.pet.house.ownedItems) spaceData.pet.house.ownedItems = [];
+        const h = spaceData.pet.house;
+        if (h.currentBackgroundId === undefined) h.currentBackgroundId = 1;
+        if (h.currentWindowId === undefined) h.currentWindowId = 1; 
+        if (h.currentShelfId === undefined) h.currentShelfId = 0;   
+        if (h.currentTileId === undefined) h.currentTileId = 0;   
+        if (h.currentBedId === undefined) h.currentBedId = 0;   
+        if (h.currentPlantId === undefined) h.currentPlantId = 0;   
+        if (h.currentFrameId === undefined) h.currentFrameId = 0;   
+        if (h.currentFishId === undefined) h.currentFishId = 0;   
+        if (h.currentToyId === undefined) h.currentToyId = 0;   
+        if (h.currentBallId === undefined) h.currentBallId = 0;   
+        if (h.currentCubeId === undefined) h.currentCubeId = 0;   
+        if (!h.ownedItems) h.ownedItems = [];
 
         window.cpActions.updatePetStats(charId);
         
         const pet = spaceData.pet;
         if (pet.mood < 40) {
-            pet.baseState = 'sad';
-            pet.state = 'sad';
+            pet.baseState = 'sad'; pet.state = 'sad';
         } else if (Math.random() < 0.2) { 
-            pet.baseState = 'sleep';
-            pet.state = 'sleep';
+            pet.baseState = 'sleep'; pet.state = 'sleep';
         } else {
-            pet.baseState = 'active'; 
-            pet.state = 'calm'; 
+            pet.baseState = 'active'; pet.state = 'calm'; 
         }
         
         cpState.petModalView = null; 
-        cpState.petDecoTab = 'wallpaper'; // 默认打开墙纸页
-        window.render();
-    },
-
-    // 🌟 装修：购买并应用装饰
-    applyDecoration: (charId, type, itemId, cost) => {
-        const spaceData = store.coupleSpacesData[charId];
-        const pet = spaceData.pet;
-        const itemKey = `${type}_${itemId}`;
-        
-        // 1. 如果不是默认道具(ID为1或0)且未拥有，则尝试购买
-        const isDefault = (type === 'wallpaper' && itemId === 1) || (type === 'window' && itemId === 1) || (type === 'shelf' && itemId === 0);
-        
-        if (!isDefault && !pet.house.ownedItems.includes(itemKey)) {
-            // 这里我们需要动态计算一次当前积分（复用你之前的积分逻辑）
-            const currentScore = window.cpActions.calculateCurrentScore(charId);
-            if (currentScore < cost) {
-                if (window.actions?.showToast) window.actions.showToast('积分不足哦，快去共同成长打卡吧！');
-                return;
-            }
-            // 扣除积分（这里我们通过在记录里加一个负分项来变相扣除，或者直接记录已购）
-            pet.house.ownedItems.push(itemKey);
-            if (window.actions?.showToast) window.actions.showToast('购买成功！雪球很喜欢新家具~');
-        }
-
-        // 2. 应用装饰
-        if (type === 'wallpaper') pet.house.currentBackgroundId = itemId;
-        if (type === 'window') pet.house.currentWindowId = itemId;
-        if (type === 'shelf') pet.house.currentShelfId = itemId;
-
-        if (window.actions?.saveStore) window.actions.saveStore();
+        cpState.petDecoTab = 'wallpaper'; 
         window.render();
     },
 
@@ -1814,9 +1855,17 @@ if (!window.cpActions) {
                 const p = store.coupleSpacesData[charId].pet;
                 if (actionType === 'bath') p.clean = 100;
                 
-                // 互动结束后，退回它的基础状态
-                p.state = p.baseState === 'sleep' ? 'sleep' : (p.baseState === 'sad' ? 'sad' : 'calm'); 
+                // 🌟 核心修复：刷新最新状态后，重新评估一次情绪！
                 window.cpActions.updatePetStats(charId);
+                
+                // 如果刚才还在难过，但现在心情已经及格了，立刻脱离难过状态，变回开心！
+                if (p.baseState === 'sad' && p.mood >= 40) {
+                    p.baseState = 'active'; 
+                }
+                
+                // 互动结束后，再退回它的基础状态
+                p.state = p.baseState === 'sleep' ? 'sleep' : (p.baseState === 'sad' ? 'sad' : 'calm'); 
+                
                 if (cpState.view === 'petRoom' && cpState.activeCharId === charId) {
                     window.render();
                 }
@@ -3216,9 +3265,13 @@ export function renderCoupleApp(store) {
 
         let storyHtml = target.messages.map(msg => {
             let nameStr = msg.isMe ? boundPersona.name : char.name;
-            // 🌟 替换为『』解析
-            let lines = msg.text.replace(/(『[^』]*』)/g, '\n$1\n').replace(/(「[^」]*」)/g, '\n$1\n').replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
-            let formattedLines = lines.split('\n').filter(l=>l.trim()).map(l => {
+            // 移除 think 标签
+let cleanText = msg.text.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+let preProcessedText = cleanText
+    .replace(/(『[^』]*』)/g, '\n$1\n')
+    .replace(/(「[^」]*」)/g, '\n$1\n')
+    .replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
+            let formattedLines = preProcessedText.split('\n').filter(l=>l.trim()).map(l => {
                 let line = l.trim();
                 if (line.startsWith('『') && line.endsWith('』')) return `<p class="cp-story-dialogue my-1.5 leading-relaxed text-[#d4b856]">${line}</p>`; 
                 else if (line.startsWith('（') && line.endsWith('）')) return `<p class="cp-story-thought my-1.5 leading-relaxed text-[#9ca3af]">${line.slice(1, -1)}</p>`; 
@@ -3421,8 +3474,13 @@ export function renderCoupleApp(store) {
         // 🌟 正则替换：严格解析『』包裹的对话
         let storyHtml = tod.messages.map(msg => {
             let nameStr = msg.sender === 'me' ? ctx.boundP.name : char.name;
-            let lines = msg.text.replace(/(『[^』]*』)/g, '\n$1\n').replace(/(「[^」]*」)/g, '\n$1\n').replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
-            let formattedLines = lines.split('\n').filter(l=>l.trim()).map(l => {
+            // 移除 think 标签
+let cleanText = msg.text.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+let preProcessedText = cleanText
+    .replace(/(『[^』]*』)/g, '\n$1\n')
+    .replace(/(「[^」]*」)/g, '\n$1\n')
+    .replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
+            let formattedLines = preProcessedText.split('\n').filter(l=>l.trim()).map(l => {
                 let line = l.trim();
                 if (line.startsWith('『') && line.endsWith('』')) return `<p class="cp-story-dialogue my-1.5 leading-relaxed text-[#d4b856]">${line}</p>`; 
                 else if (line.startsWith('（') && line.endsWith('）')) return `<p class="cp-story-thought my-1.5 leading-relaxed text-[#9ca3af]">${line.slice(1, -1)}</p>`; 
@@ -3491,7 +3549,7 @@ export function renderCoupleApp(store) {
       const char = store.contacts.find(c => c.id === cpState.activeCharId);
       const catFiles = ['AllCats.png', 'AllCatsBlack.png', 'AllCatsGrey.png', 'AllCatsGreyWhite.png', 'AllCatsOrange.png', 'AllCatsWhite.png'];
       const selectedFile = catFiles[cpState.adoptCatIndex || 0];
-      const currentSpriteUrl = `../image/${selectedFile}`;
+      const currentSpriteUrl = `./image/${selectedFile}`;
 
       const adoptCss = `
         <style>
@@ -3588,15 +3646,15 @@ export function renderCoupleApp(store) {
       const pet = spaceData.pet;
 
       // 🌟 动态读取当前宠物的专属皮肤，兼容旧档
-      const spriteUrl = pet.spriteUrl || '../image/AllCats.png'; 
+      const spriteUrl = pet.spriteUrl || './image/AllCats.png'; 
       const bgId = pet.house.currentBackgroundId;
-      const backgroundUrl = `../image/house/${bgId}.png`;
+      const backgroundUrl = `./image/house/${bgId}.png`;
 
       let bowlImg = 'bowl003.png'; 
       if (pet.foodLevel > 70) bowlImg = 'bowl000.png';
       else if (pet.foodLevel > 30) bowlImg = 'bowl001.png';
       else if (pet.foodLevel > 0) bowlImg = 'bowl002.png';
-      const bowlUrl = `../image/house/${bowlImg}`;
+      const bowlUrl = `./image/house/${bowlImg}`;
 
       const spriteCss = `
         <style>
@@ -3680,7 +3738,7 @@ export function renderCoupleApp(store) {
       const backgroundsList = [];
       for (let i = 1; i <= 20; i++) backgroundsList.push(i);
 
-      // 🌟 装修中央弹窗 (修复了透明背景和点击失效的问题)
+      // 🌟 终极家具商城面板 (自动补零，标签清晰，记忆滚动条)
       const currentScore = window.cpActions.calculateCurrentScore(char.id);
       
       const decorationModalHtml = cpState.petModalView === 'decoration' ? `
@@ -3699,39 +3757,66 @@ export function renderCoupleApp(store) {
                 </div>
 
                 <div class="flex space-x-4 px-6 py-3 overflow-x-auto hide-scrollbar border-b border-gray-100 shrink-0 bg-gray-50">
-                    ${[
-                        {id:'wallpaper', n:'墙纸'}, {id:'window', n:'窗户'}, {id:'shelf', n:'猫爬架'},
-                        {id:'bed', n:'猫窝'}, {id:'decor', n:'墙饰'}, {id:'toy', n:'玩具'}
-                    ].map(tab => `
+                    ${[ {id:'wallpaper', n:'墙纸'}, {id:'window', n:'窗户'}, {id:'shelf', n:'猫爬架'}, {id:'bed', n:'猫窝'}, {id:'decor', n:'装饰'}, {id:'toy', n:'玩具'} ].map(tab => `
                         <div onclick="window.cpActions.switchPetDecoTab('${tab.id}')" class="shrink-0 pb-1 px-1 text-[13px] font-bold transition-all cursor-pointer ${cpState.petDecoTab === tab.id ? 'text-orange-500 border-b-2 border-orange-500' : 'text-gray-400 hover:text-gray-600'}">${tab.n}</div>
                     `).join('')}
                 </div>
 
-                <div class="flex-1 overflow-y-auto p-6 hide-scrollbar bg-[#ffffff]">
+                <div id="pet-deco-scroll" class="flex-1 overflow-y-auto p-6 hide-scrollbar bg-[#ffffff]">
                     <div class="grid grid-cols-2 gap-4">
                         ${(() => {
                             let items = [];
+                            const p3 = (n) => String(n).padStart(3, '0'); 
+                            
                             if (cpState.petDecoTab === 'wallpaper') {
-                                for(let i=1; i<=20; i++) items.push({ id: i, name: `背景 ${i}`, img: `../image/house/${i}.png`, price: i===1?0:50 });
+                                for(let i=1; i<=20; i++) items.push({ pfx: 'bg', id: i, name: `墙纸 ${i}`, img: `./image/house/${i}.png`, price: i===1?0:50 });
                             } else if (cpState.petDecoTab === 'window') {
-                                for(let i=1; i<=8; i++) items.push({ id: i, name: `窗户 ${i}`, img: `../image/house/window${i}.png`, price: i===1?0:30 });
+                                for(let i=1; i<=8; i++) items.push({ pfx: 'window', id: i, name: `窗户 ${i}`, img: `./image/house/window${i}.png`, price: i===1?0:30 });
                             } else if (cpState.petDecoTab === 'shelf') {
-                                for(let i=0; i<=14; i++) items.push({ id: i, name: `爬架 ${i}`, img: `../image/house/shelf0${String(i).padStart(2,'0')}.png`, price: i===0?0:80 });
+                                for(let i=1; i<=14; i++) items.push({ pfx: 'shelf', id: i, name: `落地架 ${i}`, img: `./image/house/shelf${p3(i)}.png`, price: 80 });
+                                for(let i=1; i<=4; i++) items.push({ pfx: 'tile', id: i, name: `墙上爬架 ${i}`, img: `./image/house/tile${p3(i)}.png`, price: 60 });
+                            } else if (cpState.petDecoTab === 'bed') {
+                                for(let i=1; i<=12; i++) items.push({ pfx: 'bed', id: i, name: `猫窝 ${i}`, img: `./image/house/bed${p3(i)}.png`, price: 70 });
+                            } else if (cpState.petDecoTab === 'decor') {
+                                for(let i=1; i<=14; i++) items.push({ pfx: 'plant', id: i, name: `盆栽 ${i}`, img: `./image/house/plant${p3(i)}.png`, price: 40 });
+                                for(let i=1; i<=10; i++) items.push({ pfx: 'frame', id: i, name: `相框 ${i}`, img: `./image/house/frame${p3(i)}.png`, price: 40 });
+                            } else if (cpState.petDecoTab === 'toy') {
+                                for(let i=1; i<=6; i++) items.push({ pfx: 'fish', id: i, name: `咸鱼玩具 ${i}`, img: `./image/house/fish${i}.png`, price: 20 });
+                                for(let i=1; i<=3; i++) items.push({ pfx: 'toy', id: i, name: `逗猫棒 ${i}`, img: `./image/house/toy${p3(i)}.png`, price: 20 });
+                                for(let i=1; i<=12; i++) items.push({ pfx: 'ball', id: i, name: `毛线球 ${i}`, img: `./image/house/ball${p3(i)}.png`, price: 15 });
+                                for(let i=1; i<=4; i++) items.push({ pfx: 'cube', id: i, name: `魔方 ${i}`, img: `./image/house/cube${p3(i)}.png`, price: 25 });
                             }
 
-                            if (items.length === 0) return `<div class="col-span-2 text-center py-20 text-gray-300 text-xs font-bold tracking-widest">这里的道具还在制作中...</div>`;
+                            if (items.length === 0) return `<div class="col-span-2 text-center py-20 text-gray-300 text-xs font-bold tracking-widest">道具进货中...</div>`;
 
                             return items.map(item => {
-                                const itemKey = `${cpState.petDecoTab}_${item.id}`;
+                                const itemKey = `${item.pfx}_${item.id}`;
                                 const isOwned = pet.house.ownedItems.includes(itemKey) || item.price === 0;
-                                const isEquipped = (cpState.petDecoTab === 'wallpaper' && pet.house.currentBackgroundId === item.id) ||
-                                                 (cpState.petDecoTab === 'window' && pet.house.currentWindowId === item.id) ||
-                                                 (cpState.petDecoTab === 'shelf' && pet.house.currentShelfId === item.id);
+                                const isEquipped = 
+                                    (item.pfx === 'bg' && pet.house.currentBackgroundId === item.id) ||
+                                    (item.pfx === 'window' && pet.house.currentWindowId === item.id) ||
+                                    (item.pfx === 'shelf' && pet.house.currentShelfId === item.id) ||
+                                    (item.pfx === 'tile' && pet.house.currentTileId === item.id) ||
+                                    (item.pfx === 'bed' && pet.house.currentBedId === item.id) ||
+                                    (item.pfx === 'plant' && pet.house.currentPlantId === item.id) ||
+                                    (item.pfx === 'frame' && pet.house.currentFrameId === item.id) ||
+                                    (item.pfx === 'fish' && pet.house.currentFishId === item.id) ||
+                                    (item.pfx === 'toy' && pet.house.currentToyId === item.id) ||
+                                    (item.pfx === 'ball' && pet.house.currentBallId === item.id) ||
+                                    (item.pfx === 'cube' && pet.house.currentCubeId === item.id);
+
+                                // 🌟 智能文案逻辑
+                                let btnText = '';
+                                if (isEquipped) {
+                                    btnText = ['bg', 'window'].includes(item.pfx) ? '· 不可卸下' : '· 点击卸下';
+                                } else if (isOwned) {
+                                    btnText = '· 点击装扮';
+                                }
 
                                 return `
-                                    <div class="relative flex flex-col group cursor-pointer" onclick="window.cpActions.applyDecoration('${char.id}', '${cpState.petDecoTab}', ${item.id}, ${item.price})">
+                                    <div class="relative flex flex-col group cursor-pointer" onclick="window.cpActions.applyDecoration('${char.id}', '${item.pfx}', ${item.id}, ${item.price})">
                                         <div class="aspect-square bg-gray-50 rounded-[20px] overflow-hidden border-2 ${isEquipped ? 'border-orange-400' : 'border-transparent'} shadow-sm transition-all active:scale-95">
-                                            <img src="${item.img}" class="w-full h-full object-cover" />
+                                            <img src="${item.img}" class="w-full h-full object-cover" onerror="this.src='./image/house/window1.png'; this.style.opacity='0.1';" />
                                             ${!isOwned ? `
                                                 <div class="absolute inset-0 bg-black/40 flex items-center justify-center rounded-[18px]">
                                                     <div class="bg-white/90 px-2 py-1 rounded-full flex items-center shadow-lg">
@@ -3741,7 +3826,7 @@ export function renderCoupleApp(store) {
                                                 </div>
                                             ` : ''}
                                         </div>
-                                        <span class="mt-2 text-[11px] font-bold text-center ${isEquipped ? 'text-orange-500' : 'text-gray-500'}">${item.name} ${isEquipped ? '· 已装扮' : ''}</span>
+                                        <span class="mt-2 text-[11px] font-bold text-center ${isEquipped ? 'text-orange-500' : 'text-gray-500'}">${item.name} <span class="text-[9px] font-normal opacity-70">${btnText}</span></span>
                                     </div>
                                 `;
                             }).join('');
@@ -3751,6 +3836,9 @@ export function renderCoupleApp(store) {
             </div>
         </div>
       ` : '';
+
+      const p3 = (n) => String(n).padStart(3, '0');
+      const h = pet.house;
 
       // 🌟 新增：拍立得相册弹窗
       const albumModalHtml = cpState.petModalView === 'album' ? `
@@ -3794,22 +3882,28 @@ export function renderCoupleApp(store) {
           </div>
 
           <div class="flex-1 overflow-y-auto hide-scrollbar flex flex-col relative" style="background-image: url('${backgroundUrl}'); background-size: cover; background-position: center bottom;">
-              
               <div class="absolute inset-0 bg-black/10 pointer-events-none z-0"></div>
 
-              ${pet.house.currentWindowId > 0 ? `
-              <div class="absolute top-[25%] left-1/2 -translate-x-1/2 w-[85%] h-36 z-[1] pointer-events-none opacity-95">
-                  <img src="../image/house/window${pet.house.currentWindowId}.png" class="w-full h-full object-contain filter drop-shadow-md" />
-              </div>
-              ` : ''}
+              ${h.currentWindowId > 0 ? `<div class="absolute top-[25%] left-1/2 -translate-x-1/2 w-[85%] h-36 z-[1] pointer-events-none opacity-95"><img src="./image/house/window${h.currentWindowId}.png" class="w-full h-full object-contain filter drop-shadow-md" /></div>` : ''}
+              
+              ${h.currentFrameId > 0 ? `<div class="absolute top-[30%] right-[15%] w-16 h-20 z-[1] pointer-events-none"><img src="./image/house/frame${p3(h.currentFrameId)}.png" class="w-full h-full object-contain filter drop-shadow-md" /></div>` : ''}
 
-              ${pet.house.currentShelfId >= 0 ? `
-              <div class="absolute bottom-[15%] left-[2%] w-36 h-56 z-[2] pointer-events-none">
-                  <img src="../image/house/shelf0${String(pet.house.currentShelfId).padStart(2,'0')}.png" class="w-full h-full object-contain filter drop-shadow-lg" style="image-rendering: pixelated;" />
-              </div>
-              ` : ''}
+              ${h.currentTileId > 0 ? `<div class="absolute top-[50%] right-[20%] w-54 h-54 z-[1] pointer-events-none"><img src="./image/house/tile${p3(h.currentTileId)}.png" class="w-full h-full object-contain filter drop-shadow-md" style="image-rendering: pixelated;"/></div>` : ''}
 
-              <div class="absolute top-36 right-4 z-20 flex flex-col space-y-3">
+
+              ${h.currentShelfId > 0 ? `<div class="absolute bottom-[20%] left-[4%] w-36 h-66 z-[2] pointer-events-none"><img src="./image/house/shelf${p3(h.currentShelfId)}.png" class="w-full h-full object-contain filter drop-shadow-lg" style="object-position: bottom center;" /></div>` : ''}
+              
+              ${h.currentBedId > 0 ? `<div class="absolute bottom-[20%] right-[5%] w-40 h-30 z-[2] pointer-events-none"><img src="./image/house/bed${p3(h.currentBedId)}.png" class="w-full h-full object-contain filter drop-shadow-md" style="image-rendering: pixelated;"/></div>` : ''}
+              
+              ${h.currentPlantId > 0 ? `<div class="absolute bottom-[14%] left-[-4%] w-24 h-36 z-[2] pointer-events-none"><img src="./image/house/plant${p3(h.currentPlantId)}.png" class="w-full h-full object-contain filter drop-shadow-md" /></div>` : ''}
+
+
+              ${h.currentCubeId > 0 ? `<div class="absolute bottom-[-2%] right-[25%] w-14 h-14 z-[3] pointer-events-none"><img src="./image/house/cube${p3(h.currentCubeId)}.png" class="w-full h-full object-contain filter drop-shadow-sm" style="image-rendering: pixelated;"/></div>` : ''}
+              ${h.currentBallId > 0 ? `<div class="absolute bottom-[12%] right-[6%] w-50 h-50 z-[3] pointer-events-none"><img src="./image/house/ball${p3(h.currentBallId)}.png" class="w-full h-full object-contain filter drop-shadow-sm" style="image-rendering: pixelated;"/></div>` : ''}
+              ${h.currentFishId > 0 ? `<div class="absolute bottom-[0%] left-[-6%] w-48 h-24 z-[3] pointer-events-none"><img src="./image/house/fish${h.currentFishId}.png" class="w-full h-full object-contain filter drop-shadow-sm" style="image-rendering: pixelated;"/></div>` : ''}
+              ${h.currentToyId > 0 ? `<div class="absolute bottom-[15%] right-[-6%] w-24 h-24 z-[3] pointer-events-none"><img src="./image/house/toy${p3(h.currentToyId)}.png" class="w-full h-full object-contain filter drop-shadow-sm" style="image-rendering: pixelated;"/></div>` : ''}
+
+              <div class="absolute top-40 right-4 z-20 flex flex-col space-y-3">
                   <div class="cursor-pointer p-2.5 rounded-full bg-white/80 backdrop-blur-md border border-white shadow-lg active:scale-95 transition-all group hover:bg-white flex items-center justify-center" onclick="window.cpActions.openPetRoomDecorationModal('${char.id}')" title="装修">
                       <i data-lucide="layout-dashboard" class="w-4 h-4 text-orange-400 group-hover:rotate-12 transition-transform"></i>
                   </div>
@@ -3831,7 +3925,7 @@ export function renderCoupleApp(store) {
                   </div>
               ` : ''}
 
-              <div class="bg-white/90 backdrop-blur-md m-4 p-4 rounded-[24px] shadow-sm border border-white/50 flex flex-col space-y-4 relative z-10">
+              <div class="bg-white/90 backdrop-blur-md m-4 p-4 rounded-[24px] shadow-sm border border-white/50 flex flex-col space-y-4 relative z-20">
                   <div class="flex items-center justify-between">
                       <span class="text-[11px] font-bold text-gray-500 w-12 shrink-0">饱食度</span>
                       <div class="flex-1 h-2.5 bg-gray-100 rounded-full mx-3 overflow-hidden shadow-inner">
@@ -3857,7 +3951,7 @@ export function renderCoupleApp(store) {
 
               <div class="flex-1 flex flex-col items-center justify-end relative pb-8 z-10 w-full overflow-hidden">
                   
-                  <div class="bg-white/95 backdrop-blur border border-gray-100 px-4 py-2 rounded-2xl rounded-bl-sm shadow-md text-[12px] font-bold text-gray-600 mb-8 absolute bottom-36 z-30 transition-all ${['pet-head','pet-belly','run'].includes(pet.state) ? 'scale-110 text-rose-500 bg-rose-50 border-rose-100' : ''} ${pet.aiReply ? 'ring-2 ring-blue-200' : ''}">
+                  <div class="bg-white/95 backdrop-blur border border-gray-100 px-4 py-2 rounded-2xl rounded-bl-sm shadow-md text-[12px] font-bold text-gray-600 mb-8 absolute bottom-44 z-30 transition-all ${['pet-head','pet-belly','run'].includes(pet.state) ? 'scale-110 text-rose-500 bg-rose-50 border-rose-100' : ''} ${pet.aiReply ? 'ring-2 ring-blue-200' : ''}">
                       ${statusText}
                   </div>
 
@@ -3880,14 +3974,13 @@ export function renderCoupleApp(store) {
                       </div>
                   `}
 
-                  <div class="absolute bottom-4 right-8 z-10 w-12 h-12 flex flex-col items-center group cursor-pointer" onclick="window.cpActions.interactPet('${char.id}', 'eat')">
+                  <div class="absolute bottom-2 right-2 z-10 w-20 h-20 flex flex-col items-center group cursor-pointer" onclick="window.cpActions.interactPet('${char.id}', 'eat')">
                       <img src="${bowlUrl}" class="w-full h-full object-contain filter drop-shadow-md group-active:scale-95 transition-transform" style="image-rendering: pixelated;" />
-                      <div class="w-10 h-1.5 bg-black/10 rounded-[100%] absolute -bottom-1 z-[-1] filter blur-[1px]"></div>
                   </div>
               </div>
           </div>
 
-          <div class="bg-white px-6 py-6 pb-8 border-t border-gray-100 shadow-[0_-10px_30px_rgba(0,0,0,0.03)] flex justify-around relative z-20 shrink-0">
+          <div class="bg-white px-6 py-6 pb-8 border-t border-gray-100 shadow-[0_-10px_30px_rgba(0,0,0,0.03)] flex justify-around relative z-30 shrink-0">
               <div class="flex flex-col items-center cursor-pointer group" onclick="window.cpActions.interactPet('${char.id}', 'eat')">
                   <div class="w-14 h-14 rounded-full bg-orange-50 flex items-center justify-center mb-2 shadow-sm border border-orange-100 group-active:scale-90 transition-transform ${['bath', 'pet-head', 'pet-belly'].includes(pet.state) ? 'opacity-50 grayscale' : ''}">
                       <i data-lucide="beef" class="w-6 h-6 text-orange-400"></i>

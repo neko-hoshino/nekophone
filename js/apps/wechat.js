@@ -11,10 +11,15 @@ const getNowTime = () => {
     return `${year}-${month}-${day} ${time}`;
 };
 
-// 🌟 新增：专门给 UI 渲染用的智能格式化函数 (今天只显示时间，非今天显示完整日期)
-window.formatSmartTime = (ts, fallbackTimeStr) => {
-    if (!ts) return fallbackTimeStr || ''; // 兼容没有 timestamp 的远古旧数据
-    const date = new Date(ts);
+window.formatSmartTime = (ts, fallbackTimeStr, msgId) => {
+    // 🌟 核心修复：如果没有 timestamp，但 msgId 是一个长串纯数字时间戳，就直接征用 msgId！
+    let finalTs = ts;
+    if (!finalTs && typeof msgId === 'number' && msgId > 1000000000000) {
+        finalTs = msgId;
+    }
+    
+    if (!finalTs) return fallbackTimeStr || ''; 
+    const date = new Date(finalTs);
     const now = new Date();
     const isToday = date.getDate() === now.getDate() && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
 
@@ -23,12 +28,12 @@ window.formatSmartTime = (ts, fallbackTimeStr) => {
     const timeStr = `${hours}:${minutes}`;
 
     if (isToday) {
-        return timeStr; // 例：12:35
+        return timeStr; // 今天只显示时分
     } else {
         const year = date.getFullYear();
         const month = (date.getMonth() + 1).toString().padStart(2, '0');
         const day = date.getDate().toString().padStart(2, '0');
-        return `${year}-${month}-${day} ${timeStr}`; // 例：2026-04-01 12:35
+        return `${year}-${month}-${day} ${timeStr}`; // 跨天显示完整日期
     }
 };
 
@@ -360,11 +365,16 @@ window.wxActions = {
   },
   // ================= 🎵 终极语音引擎 (文字与声音解耦版) =================
   playVoiceMsg: (msgId) => {
-      // 1. 找聊天室和消息
+    saveScroll(); // 进入时保存滚动位置  
+    // 1. 找聊天室和消息
       const chat = store.chats.find(c => c.id === wxState.activeChatId || c.charId === wxState.activeChatId);
-      if (!chat) return;
+      if (!chat) {
+        restoreScroll(); return;
+    }
       const msg = chat.messages.find(m => String(m.id) === String(msgId) || String(m.timestamp) === String(msgId));
-      if (!msg) return;
+      if (!msg) {
+        restoreScroll(); return;
+    }
 
       // 🌟 2. 翻转文字的显示状态
       msg.showText = !msg.showText;
@@ -376,6 +386,7 @@ window.wxActions = {
               wxState.playingMsgId = null;
           }
           window.render(); // 刷新 UI，让文字消失
+          restoreScroll();
           return; 
       }
 
@@ -414,9 +425,9 @@ window.wxActions = {
           wxState.playingAudio.src = msg.audioUrl;
           wxState.playingMsgId = String(msgId); 
           window.render(); // 更新小喇叭动画
-          
+          restoreScroll();
           wxState.playingAudio.play().catch(e => window.actions.showToast('播放被拦截，请重试'));
-          wxState.playingAudio.onended = () => { wxState.playingMsgId = null; window.render(); };
+          wxState.playingAudio.onended = () => { wxState.playingMsgId = null; window.render(); restoreScroll();};
           return;
       }
 
@@ -437,9 +448,9 @@ window.wxActions = {
               wxState.playingAudio.src = url;
               wxState.playingMsgId = String(msgId); 
               window.render(); 
-              
+              restoreScroll();
               wxState.playingAudio.play().catch(e => window.actions.showToast('播放失败'));
-              wxState.playingAudio.onended = () => { wxState.playingMsgId = null; window.render(); };
+              wxState.playingAudio.onended = () => { wxState.playingMsgId = null; window.render(); restoreScroll();};
           } else {
               window.actions.showToast('获取语音失败');
           }
@@ -3638,11 +3649,12 @@ export function renderWeChatApp(store) {
                    `;
                  }
 
-                 // 🌟 修复：正则预处理，强制让带引号和括号的句子单独成段落
-                 let preProcessedText = msg.text
-                     .replace(/(『[^』]*』)/g, '\n$1\n')
-                     .replace(/(「[^」]*」)/g, '\n$1\n')
-                     .replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
+                 // 移除 think 标签
+let cleanText = msg.text.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+let preProcessedText = cleanText
+    .replace(/(『[^』]*』)/g, '\n$1\n')
+    .replace(/(「[^」]*」)/g, '\n$1\n')
+    .replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
                  
                  const formattedLines = preProcessedText.split('\n').filter(l=>l.trim()).map(l => {
                      let line = l.trim();
@@ -3671,22 +3683,28 @@ export function renderWeChatApp(store) {
                      </div>
                      `;
                  } else {
-                     html += `
-                     <div class="mc-offline-msg bg-white/15 p-5 rounded-2xl relative flex items-start animate-in fade-in duration-300 mb-8 ${wxState.isMultiSelecting ? 'cursor-pointer' : ''}" 
-                          ${wxState.isMultiSelecting ? `onclick="window.wxActions.toggleSelectMsg(${msg.id})"` : ''}>
-                       ${checkboxHtml}
-                       <div class="mc-offline-bubble flex-1 text-[16px] text-gray-800 flex flex-col leading-loose pointer-events-${wxState.isMultiSelecting ? 'none' : 'auto'}"
-                            onmousedown="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchStart(${msg.id})`}" 
-                            onmouseup="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}" 
-                            onmouseleave="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}" 
-                            ontouchstart="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchStart(${msg.id})`}" 
-                            ontouchend="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}">
-                         <div class="flex items-baseline mb-2"><span class="mc-offline-name font-black text-[13px] mr-2 ${msg.isMe ? 'text-gray-400' : (targetObj?.offlineBg ? 'text-white drop-shadow-md' : 'text-gray-900')} tracking-wider">${msg.sender}</span></div>
-                         <div class="mc-offline-content space-y-3 opacity-95 text-justify ${targetObj?.offlineBg ? 'text-white drop-shadow-md' : ''}">${formattedLines}</div>
-                       </div>
-                       ${menuHtml}
-                     </div>
-                     `;
+                     // 普通消息渲染（替换原有 else 分支中的代码）
+html += `
+<div class="flex justify-center my-4 w-full ${wxState.isMultiSelecting ? 'cursor-pointer' : ''}" 
+     ${wxState.isMultiSelecting ? `onclick="window.wxActions.toggleSelectMsg(${msg.id})"` : ''}>
+    <div class="relative w-full">
+        <div class="flex items-start">
+            ${checkboxHtml}
+            <div class="offline-card bg-white/80 backdrop-blur-md border border-gray-100/50 rounded-[14px] p-5 relative flex flex-col shadow-[0_2px_15px_rgba(0,0,0,0.02)] flex-1"
+                 onmousedown="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchStart(${msg.id})`}" 
+                 onmouseup="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}" 
+                 onmouseleave="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}" 
+                 ontouchstart="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchStart(${msg.id})`}" 
+                 ontouchend="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}"
+                 ontouchmove="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchMove()`}"
+                 onmousemove="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchMove()`}">
+                <div class="mb-3 text-[12px] font-black tracking-widest text-gray-400">${msg.sender}</div>
+                <div class="text-[15px] text-gray-800 leading-relaxed font-serif text-justify">${formattedLines}</div>
+                ${menuHtml}
+            </div>
+        </div>
+    </div>
+</div>`;
                  }
               });
 
@@ -3928,7 +3946,7 @@ export function renderWeChatApp(store) {
           ? `<span class="text-[11px] font-bold text-gray-400 mb-1 ml-1 block">${msg.sender}</span>` : '';
       let timeHtml = '';
       if (msg.time && msg.time !== lastRenderedTime) {
-        timeHtml = `<div class="flex justify-center my-3 animate-in fade-in"><span class="mc-time-tag text-[11px] text-gray-400 font-medium">${window.formatSmartTime(msg.timestamp, msg.time)}</span></div>`;
+        timeHtml = `<div class="flex justify-center my-3 animate-in fade-in"><span class="mc-time-tag text-[11px] text-gray-400 font-medium">${window.formatSmartTime(msg.timestamp, msg.time, msg.id)}</span></div>`;
         lastRenderedTime = msg.time;
       }
       
@@ -5474,7 +5492,8 @@ window.scheduleCloudTask = async (charId) => {
 // ==================== 🌟 终极定向重roll 引擎 (兼容经典退回逻辑) ====================
 
 window.wxActions.rerollReply = (msgId) => {
-    wxState.rerollTargetId = msgId; // 如果是线上 + 号菜单触发，这里就是 undefined，完美兼容！
+  saveScroll();   
+  wxState.rerollTargetId = msgId; // 如果是线上 + 号菜单触发，这里就是 undefined，完美兼容！
     wxState.showRerollModal = true;
     
     // 关掉所有可能碍事的菜单 (修正为正确的状态变量名)
@@ -5486,7 +5505,6 @@ window.wxActions.rerollReply = (msgId) => {
 };
 
 window.wxActions.closeRerollModal = () => {
-    saveScroll();
     wxState.showRerollModal = false;
     if (typeof window.render === 'function') window.render();
     restoreScroll();
@@ -5647,7 +5665,7 @@ if (chat.isGroup) {
     } catch (e) {
         console.error('重roll请求失败', e);
         wxState.typingStatus[chat.charId] = false;
-        if (typeof window.render === 'function') window.render();
+        if (typeof window.render === 'function') window.render(); restoreScroll();
     }
 };
 
@@ -5783,7 +5801,37 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
         let hasSystemAction = false;
         
         if (/\[(语音|视频)?通话(已)?结束\]/.test(remainingText)) remainingText = remainingText.replace(/\[(语音|视频)?通话(已)?结束\][:：]?\s*/g, '').trim();
-        if (/\[(点击收款|接收转账)\]/.test(remainingText)) remainingText = remainingText.replace(/\[(点击收款|接收转账)\][:：]?\s*/g, '').trim();
+        // 🌟 【新增】：AI 收款动作拦截器！
+        if (/\[(?:确认收款|点击收款|收下转账)\]/.test(remainingText)) {
+            // 找到最近的一条还没被领取的、我发出的转账卡片
+            const pendingTransfer = chat.messages.slice().reverse().find(m => m.msgType === 'transfer' && m.transferState === 'pending' && m.isMe);
+            
+            if (pendingTransfer) {
+                // 1. 卡片变绿（变更为已收款状态）
+                pendingTransfer.transferState = 'accepted';
+                const amount = parseFloat(pendingTransfer.transferData.amount);
+                
+                // 2. 扣除我的钱包余额，并生成账单
+                if (typeof store !== 'undefined' && store.wallet) {
+                     store.wallet.balance -= amount;
+                     store.wallet.transactions.push({ type: 'out', amount, title: `转账给对方`, date: new Date().toISOString() });
+                }
+                
+                // 3. 推送灰色的系统提示：“xx 已收款”
+                chat.messages.push({
+                    id: Date.now() + sysMsgOffset++, 
+                    sender: 'system', 
+                    text: `${char.name} 已收款`, 
+                    isMe: false, source: 'wechat', isOffline: false, msgType: 'system', 
+                    time: cloudTime,
+                    timestamp: Date.now() + sysMsgOffset
+                });
+                hasSystemAction = true;
+                if (typeof window.render === 'function' && wxState.view === 'chatRoom') window.render();
+            }
+            // 4. 物理抹除指令，不让这几个丑陋的字眼掉进正常的聊天气泡里
+            remainingText = remainingText.replace(/\[(?:确认收款|点击收款|收下转账)\]/g, '').trim();
+        }
         
         // 🌟 【新增代码】：在解析开始前，全局扫描聊天内容，强行把掉到下一行的照片和定位吸附回上一行！
         remainingText = remainingText.replace(/[\r\n]+\s*(\[附带虚拟照片|\[附带定位)/g, ' $1');
@@ -5847,7 +5895,7 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
             isMe: false,
             source: 'wechat',
             msgType: 'system',
-            time: getNowTime()
+            time: cloudTime
         });
         hasSystemAction = true;
     }

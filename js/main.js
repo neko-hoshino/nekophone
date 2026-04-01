@@ -269,7 +269,7 @@ function render() {
     input[type="file"] { display: none !important; position: absolute !important; width: 0 !important; height: 0 !important; opacity: 0 !important; z-index: -9999 !important; pointer-events: none !important; }
     #wx-input, #publish-moment-text, #moment-comment-input, #edit-msg-textarea, #virtual-input, 
     #transfer-amount, #transfer-note, #edit-persona-prompt, #edit-char-prompt, #global-prompt-input, 
-    textarea { font-size: 16px !important; }
+    input, textarea, select { font-size: 16px !important; }
     #phone-container .mc-avatar { 
        position: relative !important; 
        z-index: 50 !important;
