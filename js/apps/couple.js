@@ -1583,41 +1583,73 @@ if (!window.cpActions) {
         window.render();
     },
 
-    // 🌟 方案二引擎：拍立得相册逻辑
+    // 🌟 核心引擎：提炼出生成今天照片的 API 调用，支持重Roll
+    generateTodayPhoto: async (charId, photoObject) => {
+        const pet = store.coupleSpacesData[charId].pet;
+        const p3 = (n) => String(n).padStart(3, '0');
+        
+        try {
+            const prompt = window.cpActions.buildMasterPrompt(charId, {
+                task: `【系统任务】请结合今天的聊天记录或你的想象，写一段你和宠物猫“雪球”今天发生的趣事作为拍立得相册的配文。\n要求：第一人称口吻，字数40字左右，像随手记录的日记，充满生活气息。直接输出配文，不要输出任何思考过程或报错信息！`
+            });
+            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.85 })
+            });
+            const data = await res.json();
+            
+            // 校验返回，防抽风
+            const reply = data.choices[0].message.content.trim();
+            if (reply.startsWith('<think>') || reply.length < 5) { throw new Error('AI抽风了'); }
+
+            // 随机定格一个猫的动作作为照片画面
+            const imgStates = ['calm', 'sleep', 'pet-head', 'cozy'];
+            photoObject.imgState = imgStates[Math.floor(Math.random() * imgStates.length)];
+            photoObject.text = reply;
+        } catch(e) {
+            photoObject.imgState = 'sleep';
+            photoObject.text = "今天雪球睡了一整天，像个小猪猪。（生成失败，可以点重Roll试试）";
+        }
+        if(window.actions?.saveStore) window.actions.saveStore();
+        if (cpState.petModalView === 'album') window.render(); // 只有弹窗打开时才刷新
+    },
+
+    // 🌟 方案二引擎：拍立得相册逻辑 (已优化)
     openPetAlbum: async (charId) => {
         cpState.petModalView = 'album';
         const pet = store.coupleSpacesData[charId].pet;
         const logicalToday = (typeof getLogicalDateStr === 'function') ? getLogicalDateStr() : new Date().toLocaleDateString('zh-CN');
         
-        // 每天打开相册自动抓拍并生成一张相片
-        const hasToday = pet.album.find(a => a.date === logicalToday);
-        if (!hasToday) {
-            pet.album.unshift({ id: Date.now(), date: logicalToday, imgState: 'loading', text: '正在冲洗今天的拍立得...' });
+        // 1. 如果今天还没照片，先占位并触发生成
+        const todayPhoto = pet.album.find(a => a.date === logicalToday);
+        if (!todayPhoto) {
+            const newPhoto = { id: Date.now(), date: logicalToday, imgState: 'loading', text: '正在冲洗今天的拍立得...' };
+            pet.album.unshift(newPhoto);
             window.render();
-            
-            try {
-                const prompt = window.cpActions.buildMasterPrompt(charId, {
-                    task: `【系统任务】请结合今天的聊天记录或你的想象，写一段你和宠物猫“雪球”今天发生的趣事作为拍立得相册的配文。\n要求：第一人称口吻，字数100字左右，像随手记录的日记，充满生活气息。直接输出配文！`
-                });
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.85 })
-                });
-                const data = await res.json();
-                
-                // 随机定格一个猫的动作作为照片画面
-                const imgStates = ['calm', 'sleep', 'pet-head', 'run', 'cozy', 'pet-belly'];
-                pet.album[0].imgState = imgStates[Math.floor(Math.random() * imgStates.length)];
-                pet.album[0].text = data.choices[0].message.content.trim();
-                if(window.actions?.saveStore) window.actions.saveStore(); window.render();
-            } catch(e) {
-                pet.album[0].imgState = 'sleep';
-                pet.album[0].text = "今天雪球睡了一整天，像个小猪猪。";
-                window.render();
-            }
+            window.cpActions.generateTodayPhoto(charId, newPhoto);
+        } else if (todayPhoto.text.includes('(生成失败')) {
+            // 如果上次失败了，打开时自动重试
+            todayPhoto.imgState = 'loading'; todayPhoto.text = '正在重新冲洗...';
+            window.render();
+            window.cpActions.generateTodayPhoto(charId, todayPhoto);
         } else {
-            window.render();
+            window.render(); // 有照片就直接显示
         }
+    },
+
+    // 🌟 新增：重Roll拍立得
+    rerollTodayPhoto: (charId, photoId) => {
+        const pet = store.coupleSpacesData[charId].pet;
+        const photo = pet.album.find(a => a.id === photoId);
+        if (!photo) return;
+
+        // 设为加载中状态
+        photo.imgState = 'loading';
+        photo.text = '正在重新冲洗...';
+        window.render(); // 刷出加载动画
+
+        // 调用生成引擎
+        window.cpActions.generateTodayPhoto(charId, photo);
     },
     closePetAlbum: () => { cpState.petModalView = null; window.render(); },
     // 🌟 宠物领养与取名大脑
@@ -3841,8 +3873,9 @@ let preProcessedText = cleanText
 
       const p3 = (n) => String(n).padStart(3, '0');
       const h = pet.house;
+      const logicalToday = (typeof getLogicalDateStr === 'function') ? getLogicalDateStr() : new Date().toLocaleDateString('zh-CN');
 
-      // 🌟 新增：拍立得相册弹窗
+      // 🌟 新增：拍立得相册弹窗 (加入了重Roll按钮)
       const albumModalHtml = cpState.petModalView === 'album' ? `
         <div class="absolute inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-5 animate-in fade-in duration-300" onclick="window.cpActions.closePetAlbum()">
             <div class="w-full h-[85%] bg-[#f4f5f7] rounded-[32px] shadow-2xl flex flex-col animate-in zoom-in-95 duration-300" onclick="event.stopPropagation()">
@@ -3850,18 +3883,27 @@ let preProcessedText = cleanText
                     <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="camera" class="w-5 h-5 mr-2 text-blue-500"></i>雪球的拍立得</span>
                     <i data-lucide="x" class="w-6 h-6 text-gray-400 bg-gray-100 rounded-full p-1 cursor-pointer active:scale-90" onclick="window.cpActions.closePetAlbum()"></i>
                 </div>
-                <div class="flex-1 overflow-y-auto p-6 space-y-6 hide-scrollbar relative">
+                <div id="pet-deco-scroll" class="flex-1 overflow-y-auto p-6 space-y-6 hide-scrollbar relative">
                     ${spriteCss} 
                     ${pet.album.length === 0 ? '<div class="text-center text-gray-400 text-xs mt-10">还没有照片哦...</div>' : pet.album.map(a => `
-                        <div class="bg-white p-3 pb-6 rounded-sm shadow-[0_10px_20px_rgba(0,0,0,0.05)] border border-gray-200 transform ${Math.random() > 0.5 ? 'rotate-1' : '-rotate-1'} mx-2">
+                        <div class="bg-white p-3 pb-6 rounded-sm shadow-[0_10px_20px_rgba(0,0,0,0.05)] border border-gray-200 transform ${Math.random() > 0.5 ? 'rotate-1' : '-rotate-1'} mx-2 relative group">
+                            
+                            ${a.date === logicalToday && a.imgState !== 'loading' ? `
+                                <div class="absolute top-4 right-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity" title="重新冲洗这只小猫">
+                                    <div class="w-8 h-8 rounded-full bg-white/90 backdrop-blur-sm shadow-md flex items-center justify-center cursor-pointer active:scale-90 border border-gray-100 text-gray-500 hover:text-orange-500" onclick="window.cpActions.rerollTodayPhoto('${char.id}', ${a.id})">
+                                        <i data-lucide="refresh-cw" class="w-4 h-4"></i>
+                                    </div>
+                                </div>
+                            `: ''}
+
                             <div class="w-full h-44 bg-[#e5e7eb] flex items-center justify-center overflow-hidden relative shadow-inner">
                                 ${a.imgState === 'loading' ? '<i data-lucide="loader-2" class="w-6 h-6 text-gray-400 animate-spin"></i>' : `
                                     <div class="pet-viewport" style="transform: scale(2.5); bottom: -15px;">
-                                        <img src="${spriteUrl}" class="pet-sprite anim-${a.imgState}" />
+                                        <img src="${spriteUrl}" class="pet-sprite anim-${a.imgState}" style="object-position: bottom center;"/>
                                     </div>
                                 `}
                             </div>
-                            <div class="mt-4 px-2 text-[14px] text-gray-700 font-serif leading-relaxed text-justify font-medium">
+                            <div class="mt-4 px-2 text-[14px] text-gray-700 font-serif leading-relaxed text-justify font-medium break-words">
                                 ${a.text}
                             </div>
                             <div class="mt-3 px-2 text-[10px] font-black text-gray-300 tracking-wider font-sans text-right">
@@ -3884,27 +3926,29 @@ let preProcessedText = cleanText
           </div>
 
           <div class="flex-1 overflow-y-auto hide-scrollbar flex flex-col relative" style="background-image: url('${backgroundUrl}'); background-size: cover; background-position: center bottom;">
+              
               <div class="absolute inset-0 bg-black/10 pointer-events-none z-0"></div>
 
+              ${pet.state === 'bath' ? `
+                  <div class="absolute inset-0 bg-blue-900/40 backdrop-blur-md z-[150] flex flex-col items-center justify-center animate-in fade-in">
+                      <i data-lucide="droplets" class="w-16 h-16 text-blue-200 mb-6 animate-bounce"></i>
+                      <div class="w-60 h-6 bg-blue-100/50 rounded-full overflow-hidden shadow-inner relative">
+                         <div class="h-full bg-blue-400 rounded-full" style="animation: loading-bar 3s linear forwards;"></div>
+                      </div>
+                      <span class="text-[16px] font-black text-blue-100 mt-6 tracking-widest drop-shadow-lg">正在努力洗香香，非礼勿视...</span>
+                  </div>
+              ` : ''}
+
               ${h.currentWindowId > 0 ? `<div class="absolute top-[25%] left-1/2 -translate-x-1/2 w-[85%] h-36 z-[1] pointer-events-none opacity-95"><img src="./image/house/window${h.currentWindowId}.png" class="w-full h-full object-contain filter drop-shadow-md" /></div>` : ''}
-              
               ${h.currentFrameId > 0 ? `<div class="absolute top-[30%] right-[15%] w-16 h-20 z-[1] pointer-events-none"><img src="./image/house/frame${p3(h.currentFrameId)}.png" class="w-full h-full object-contain filter drop-shadow-md" /></div>` : ''}
-
               ${h.currentTileId > 0 ? `<div class="absolute top-[50%] right-[20%] w-54 h-54 z-[1] pointer-events-none"><img src="./image/house/tile${p3(h.currentTileId)}.png" class="w-full h-full object-contain filter drop-shadow-md" style="image-rendering: pixelated;"/></div>` : ''}
-
-
               ${h.currentShelfId > 0 ? `<div class="absolute bottom-[20%] left-[4%] w-36 h-66 z-[2] pointer-events-none"><img src="./image/house/shelf${p3(h.currentShelfId)}.png" class="w-full h-full object-contain filter drop-shadow-lg" style="object-position: bottom center;" /></div>` : ''}
-              
               ${h.currentBedId > 0 ? `<div class="absolute bottom-[20%] right-[5%] w-40 h-30 z-[2] pointer-events-none"><img src="./image/house/bed${p3(h.currentBedId)}.png" class="w-full h-full object-contain filter drop-shadow-md" style="image-rendering: pixelated;"/></div>` : ''}
-              
               ${h.currentPlantId > 0 ? `<div class="absolute bottom-[14%] left-[-4%] w-24 h-36 z-[2] pointer-events-none"><img src="./image/house/plant${p3(h.currentPlantId)}.png" class="w-full h-full object-contain filter drop-shadow-md" /></div>` : ''}
-
-
               ${h.currentCubeId > 0 ? `<div class="absolute bottom-[-2%] right-[25%] w-14 h-14 z-[3] pointer-events-none"><img src="./image/house/cube${p3(h.currentCubeId)}.png" class="w-full h-full object-contain filter drop-shadow-sm" style="image-rendering: pixelated;"/></div>` : ''}
               ${h.currentBallId > 0 ? `<div class="absolute bottom-[12%] right-[6%] w-50 h-50 z-[3] pointer-events-none"><img src="./image/house/ball${p3(h.currentBallId)}.png" class="w-full h-full object-contain filter drop-shadow-sm" style="image-rendering: pixelated;"/></div>` : ''}
               ${h.currentFishId > 0 ? `<div class="absolute bottom-[0%] left-[-6%] w-48 h-24 z-[3] pointer-events-none"><img src="./image/house/fish${h.currentFishId}.png" class="w-full h-full object-contain filter drop-shadow-sm" style="image-rendering: pixelated;"/></div>` : ''}
               ${h.currentToyId > 0 ? `<div class="absolute bottom-[15%] right-[-6%] w-24 h-24 z-[3] pointer-events-none"><img src="./image/house/toy${p3(h.currentToyId)}.png" class="w-full h-full object-contain filter drop-shadow-sm" style="image-rendering: pixelated;"/></div>` : ''}
-
               <div class="absolute top-40 right-4 z-20 flex flex-col space-y-3">
                   <div class="cursor-pointer p-2.5 rounded-full bg-white/80 backdrop-blur-md border border-white shadow-lg active:scale-95 transition-all group hover:bg-white flex items-center justify-center" onclick="window.cpActions.openPetRoomDecorationModal('${char.id}')" title="装修">
                       <i data-lucide="layout-dashboard" class="w-4 h-4 text-orange-400 group-hover:rotate-12 transition-transform"></i>
@@ -3953,32 +3997,25 @@ let preProcessedText = cleanText
 
               <div class="flex-1 flex flex-col items-center justify-end relative pb-8 z-10 w-full overflow-hidden">
                   
-                  <div class="bg-white/95 backdrop-blur border border-gray-100 px-4 py-2 rounded-2xl rounded-bl-sm shadow-md text-[12px] font-bold text-gray-600 mb-8 absolute bottom-44 z-30 transition-all ${['pet-head','pet-belly','run'].includes(pet.state) ? 'scale-110 text-rose-500 bg-rose-50 border-rose-100' : ''} ${pet.aiReply ? 'ring-2 ring-blue-200' : ''}">
+                  <div class="bg-white/95 backdrop-blur border border-gray-100 px-4 py-2 rounded-2xl rounded-bl-sm shadow-md text-[12px] font-bold text-gray-600 mb-8 absolute bottom-36 z-30 transition-all ${['pet-head','pet-belly','run'].includes(pet.state) ? 'scale-110 text-rose-500 bg-rose-50 border-rose-100' : ''} ${pet.aiReply ? 'ring-2 ring-blue-200' : ''} ${pet.stickyNote ? 'invisible':''}">
                       ${statusText}
                   </div>
 
                   ${spriteCss}
 
-                  ${pet.state === 'bath' ? `
-                      <div class="absolute inset-0 bg-white/40 backdrop-blur-sm z-[100] flex flex-col items-center justify-center">
-                          <i data-lucide="droplets" class="w-10 h-10 text-blue-400 mb-3 animate-bounce"></i>
-                          <div class="w-40 h-4 bg-blue-100 rounded-full overflow-hidden shadow-inner relative">
-                             <div class="h-full bg-blue-400" style="animation: loading-bar 3s linear forwards;"></div>
-                          </div>
-                          <span class="text-[12px] font-black text-blue-500 mt-3 tracking-widest drop-shadow-sm">正在努力洗香香...</span>
-                      </div>
-                  ` : `
+                  ${pet.state !== 'bath' ? `
                       <div class="${containerClass}">
                           <div class="pet-viewport">
                               <img src="${spriteUrl}" class="pet-sprite anim-${pet.state}" />
                           </div>
                           <div class="w-20 h-2 bg-black/15 rounded-[100%] absolute bottom-1 left-1/2 -translate-x-1/2 z-0 filter blur-[1px]"></div>
                       </div>
-                  `}
 
-                  <div class="absolute bottom-2 right-2 z-10 w-20 h-20 flex flex-col items-center group cursor-pointer" onclick="window.cpActions.interactPet('${char.id}', 'eat')">
+                      <div class="absolute bottom-2 right-2 z-10 w-20 h-20 flex flex-col items-center group cursor-pointer" onclick="window.cpActions.interactPet('${char.id}', 'eat')">
                       <img src="${bowlUrl}" class="w-full h-full object-contain filter drop-shadow-md group-active:scale-95 transition-transform" style="image-rendering: pixelated;" />
                   </div>
+                  ` : ''}
+
               </div>
           </div>
 
