@@ -3715,11 +3715,11 @@ let preProcessedText = cleanText
            }
 
            .pet-viewport {
-               /* 🌟 核心魔法：从 64px 改为 63.95px。 
+               /* 🌟 核心魔法：从 64px 改为 63.9px。 
                   我们强行把这个窗户收窄个 0.01px，在 scale(2.5) 缩放后，
                   这极微小的收窄刚好能挡住右边溢出来的那根邻居帧的线条，
                   而用户肉眼绝对看不出猫变窄了！ */
-               width: 63.95px; height: 64px;
+               width: 63.9px; height: 64px;
                
                overflow: hidden; 
                position: relative;
