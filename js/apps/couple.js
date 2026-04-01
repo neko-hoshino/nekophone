@@ -3715,13 +3715,20 @@ let preProcessedText = cleanText
            }
 
            .pet-viewport {
-               width: 64px; height: 64px;
+               /* 🌟 核心魔法：从 64px 改为 63.99px。 
+                  我们强行把这个窗户收窄个 0.01px，在 scale(2.5) 缩放后，
+                  这极微小的收窄刚好能挡住右边溢出来的那根邻居帧的线条，
+                  而用户肉眼绝对看不出猫变窄了！ */
+               width: 63.99px; height: 64px;
+               
                overflow: hidden; 
                position: relative;
-               transform: scale(2.0); 
+               transform: scale(2.0); /* 保持你的 scale(2.0)，或你调整后的整数比例 */
                transform-origin: bottom center;
                filter: drop-shadow(0px 6px 4px rgba(0,0,0,0.2)); 
+               image-rendering: pixelated; /* 🌟 加上这个，能让手机端在缩放时稍微更遵守格点一点 */
            }
+           
            .pet-sprite {
                position: absolute; top: 0; left: 0;
                max-width: none !important; width: auto !important; height: auto !important;
