@@ -1588,6 +1588,9 @@ if (!window.cpActions) {
         const pet = store.coupleSpacesData[charId].pet;
         const p3 = (n) => String(n).padStart(3, '0');
         
+        // 🌟 标记：宣布 API 开始干活了！
+        cpState.isGeneratingPhoto = true; 
+        
         try {
             const prompt = window.cpActions.buildMasterPrompt(charId, {
                 task: `【系统任务】请结合今天的聊天记录或你的想象，写一段你和宠物猫“雪球”今天发生的趣事作为拍立得相册的配文。\n要求：第一人称口吻，字数40字左右，像随手记录的日记，充满生活气息。直接输出配文，不要输出任何思考过程或报错信息！`
@@ -1609,17 +1612,29 @@ if (!window.cpActions) {
         } catch(e) {
             photoObject.imgState = 'sleep';
             photoObject.text = "今天雪球睡了一整天，像个小猪猪。（生成失败，可以点重Roll试试）";
+        } finally {
+            // 🌟 标记：无论成功还是报错，活都干完了！
+            cpState.isGeneratingPhoto = false; 
         }
+        
         if(window.actions?.saveStore) window.actions.saveStore();
         if (cpState.petModalView === 'album') window.render(); // 只有弹窗打开时才刷新
     },
 
-    // 🌟 方案二引擎：拍立得相册逻辑 (已优化)
+    // 🌟 方案二引擎：拍立得相册逻辑 (加入了僵尸清理机制)
     openPetAlbum: async (charId) => {
         cpState.petModalView = 'album';
         const pet = store.coupleSpacesData[charId].pet;
         const logicalToday = (typeof getLogicalDateStr === 'function') ? getLogicalDateStr() : new Date().toLocaleDateString('zh-CN');
         
+        // 🌟 防卡死清道夫：如果你心急刷新了，这里会把死掉的 loading 揪出来！
+        pet.album.forEach(photo => {
+            if (photo.imgState === 'loading' && !cpState.isGeneratingPhoto) {
+                photo.imgState = 'sleep';
+                photo.text = "冲洗胶卷时遇到了时空乱流...（生成失败，可以点重Roll试试）";
+            }
+        });
+
         // 1. 如果今天还没照片，先占位并触发生成
         const todayPhoto = pet.album.find(a => a.date === logicalToday);
         if (!todayPhoto) {
@@ -1628,7 +1643,7 @@ if (!window.cpActions) {
             window.render();
             window.cpActions.generateTodayPhoto(charId, newPhoto);
         } else if (todayPhoto.text.includes('(生成失败')) {
-            // 如果上次失败了，打开时自动重试
+            // 如果上次失败了（包括刚才被我们揪出来的僵尸），打开相册时它会自动帮你再试一次！
             todayPhoto.imgState = 'loading'; todayPhoto.text = '正在重新冲洗...';
             window.render();
             window.cpActions.generateTodayPhoto(charId, todayPhoto);
@@ -3690,46 +3705,42 @@ let preProcessedText = cleanText
         <style>
            :root { var(--pet-w): 64px; var(--pet-h): 64px; }
            
-           /* 🌟 跑圈专用动画：在极左(15%)和极右(85%)进行完美转身 */
+           /* 🌟 修复点 1：把所有的 translateX(-50%) 全部删掉，防止计算出半个像素导致手机端模糊溢出！ */
            @keyframes run-lap {
-               0%    { left: 50%; bottom: 12%; transform: translateX(-50%) scaleX(1) scale(1); z-index: 10; }
-               25%   { left: 85%; bottom: 18%; transform: translateX(-50%) scaleX(1) scale(0.85); z-index: 5; }
-               25.1% { left: 85%; bottom: 18%; transform: translateX(-50%) scaleX(-1) scale(0.85); z-index: 5; }
-               50%   { left: 50%; bottom: 25%; transform: translateX(-50%) scaleX(-1) scale(0.7); z-index: 2; }
-               75%   { left: 15%; bottom: 18%; transform: translateX(-50%) scaleX(-1) scale(0.85); z-index: 5; }
-               75.1% { left: 15%; bottom: 18%; transform: translateX(-50%) scaleX(1) scale(0.85); z-index: 5; }
-               100%  { left: 50%; bottom: 12%; transform: translateX(-50%) scaleX(1) scale(1); z-index: 10; }
+               0%    { left: 50%; bottom: 12%; transform: scaleX(1) scale(1); z-index: 10; }
+               25%   { left: 85%; bottom: 18%; transform: scaleX(1) scale(0.85); z-index: 5; }
+               25.1% { left: 85%; bottom: 18%; transform: scaleX(-1) scale(0.85); z-index: 5; }
+               50%   { left: 50%; bottom: 25%; transform: scaleX(-1) scale(0.7); z-index: 2; }
+               75%   { left: 15%; bottom: 18%; transform: scaleX(-1) scale(0.85); z-index: 5; }
+               75.1% { left: 15%; bottom: 18%; transform: scaleX(1) scale(0.85); z-index: 5; }
+               100%  { left: 50%; bottom: 12%; transform: scaleX(1) scale(1); z-index: 10; }
            }
 
            .pet-viewport-container {
                position: absolute;
-               /* 默认站立的位置 */
                left: 50%; bottom: 12%; 
-               transform: translateX(-50%);
+               /* 🌟 修复点 2：用传统的 margin-left: -32px; 来代替 translateX，强制浏览器按整数像素对齐！ */
+               margin-left: -32px; 
                transition: left 1s ease-in-out; 
                z-index: 10;
            }
-           /* 当小猫跑动时，挂载这套绕圈动画 */
+           
            .is-running {
                animation: run-lap 8s linear infinite;
            }
 
            .pet-viewport {
-               /* 🌟 核心魔法：从 64px 改为 63.9px。 
-                  我们强行把这个窗户收窄个 0.01px，在 scale(2.5) 缩放后，
-                  这极微小的收窄刚好能挡住右边溢出来的那根邻居帧的线条，
-                  而用户肉眼绝对看不出猫变窄了！ */
-               width: 63.9px; height: 64px;
-               
+               width: 64px; height: 64px;
                overflow: hidden; 
                position: relative;
-               transform: scale(2.0); /* 保持你的 scale(2.0)，或你调整后的整数比例 */
+               transform: scale(2.0); 
                transform-origin: bottom center;
-               filter: drop-shadow(0px 6px 4px rgba(0,0,0,0.2)); 
-               image-rendering: pixelated; /* 🌟 加上这个，能让手机端在缩放时稍微更遵守格点一点 */
+               /* 🌟 修复点 3：把那把破剪刀 clip-path 彻底扔掉，不切了！让电脑端恢复完整！ */
+               image-rendering: pixelated; 
            }
            
            .pet-sprite {
+               /* 🌟 修复点 4：确保左上角死死钉在 0 的位置，绝对不能偏移！ */
                position: absolute; top: 0; left: 0;
                max-width: none !important; width: auto !important; height: auto !important;
                image-rendering: pixelated; 
