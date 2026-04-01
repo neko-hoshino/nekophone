@@ -1350,7 +1350,84 @@ if (!window.cpActions) {
               }
           }
       });
-      if (changed && window.actions?.saveStore) window.actions.saveStore();
+      if (changed) {
+          if (window.actions?.saveStore) window.actions.saveStore();
+          // 🌟 AI 完成打卡时，也检查一下成就是否达标！
+          if (window.cpActions.checkGrowthAchievements) window.cpActions.checkGrowthAchievements(charId);
+      }
+  },
+  // 🌟 共同成长：成就系统检测大脑
+  checkGrowthAchievements: (charId) => {
+      const spaceData = store.coupleSpacesData[charId];
+      if (!spaceData || !spaceData.growth) return;
+
+      const growth = spaceData.growth;
+      growth.claimedAchievements = growth.claimedAchievements || [];
+
+      // 1. 动态计算历史总累计完美打卡天数
+      let totalPerfects = 0;
+      const allDates = Object.keys(growth.records).sort();
+      allDates.forEach(dateStr => {
+          const recordsDay = growth.records[dateStr];
+          const activePlans = growth.plans;
+
+          const myDailyPlans = activePlans.filter(p => p.owner === 'me' && p.type === 'daily');
+          const taDailyPlans = activePlans.filter(p => p.owner === 'ai' && p.type === 'daily');
+
+          const myDailyOk = myDailyPlans.length > 0 && myDailyPlans.every(p => recordsDay[p.id]);
+          const taDailyOk = taDailyPlans.length > 0 && taDailyPlans.every(p => recordsDay[p.id]);
+
+          const bothChecked = activePlans.some(p => p.owner === 'me' && recordsDay[p.id]) && activePlans.some(p => p.owner === 'ai' && recordsDay[p.id]);
+          if (bothChecked && myDailyOk && taDailyOk) totalPerfects++;
+      });
+
+      // 2. 设定里程碑档位
+      const milestones = [
+          { days: 3, desc: "太棒了！你们达成了最初的默契，好的开始是成功的一半。" },
+          { days: 7, desc: "一周的坚持！自律的种子已经发芽，继续保持哦！" },
+          { days: 30, desc: "整整一个月的完美打卡！你们的毅力令人惊叹，爱在坚持中升温。" },
+          { days: 100, desc: "百日里程碑！一百个日夜的互相监督，这份羁绊已经坚不可摧！" }
+      ];
+
+      // 3. 拦截并颁发成就
+      let newlyClaimed = false;
+      milestones.forEach(ms => {
+          if (totalPerfects >= ms.days && !growth.claimedAchievements.includes(ms.days)) {
+              growth.claimedAchievements.push(ms.days);
+              newlyClaimed = true;
+
+              const chat = store.chats.find(c => c.charId === charId);
+              if (chat) {
+                  // 发送华丽的成就卡片！(发送者定为 system)
+                  chat.messages.push({
+                      id: Date.now(),
+                      sender: 'system',
+                      isMe: false,
+                      msgType: 'growth_achievement_card',
+                      cardData: { days: ms.days, desc: ms.desc },
+                      timestamp: Date.now()
+                  });
+
+                  // 发送隐身消息，呼叫大模型秒回祝贺你！
+                  chat.messages.push({
+                      id: Date.now() + 1,
+                      sender: 'system',
+                      isMe: true,
+                      isHidden: true,
+                      msgType: 'text',
+                      text: `(系统最高指令：系统刚刚颁发了“共同成长累计完美打卡 ${ms.days} 天”的成就奖章！请你立刻以伴侣身份，发一条微信消息庆祝这个里程碑。表达你的开心、成就感，并狠狠地夸奖用户。字数40字以内，直接输出正文，绝不可输出系统标签！)`,
+                      timestamp: Date.now() + 1
+                  });
+
+                  // 触发微信即时通讯回复引擎！
+                  if (window.wxActions && window.wxActions.getReply) {
+                      window.wxActions.getReply(true, charId, `(系统最高指令：系统刚刚颁发了“共同成长累计完美打卡 ${ms.days} 天”的成就奖章！请你立刻以伴侣身份，发一条微信消息庆祝这个里程碑。表达你的开心、成就感，并狠狠地夸奖用户。字数40字以内，直接输出正文，绝不可输出系统标签！)`);
+                  }
+              }
+          }
+      });
+
+      if (newlyClaimed && window.actions?.saveStore) window.actions.saveStore();
   },
 
   toggleGrowthTask: (charId, planId) => {
@@ -1386,6 +1463,10 @@ if (!window.cpActions) {
 
       spaceData.growth.records[logicalToday][planId] = true;
       if (window.actions?.saveStore) window.actions.saveStore();
+      
+      // 🌟 每次打卡后，检查一下有没有解锁成就！
+      if (window.cpActions.checkGrowthAchievements) window.cpActions.checkGrowthAchievements(charId);
+      
       window.render();
   },
   toggleGrowthCalendar: () => {
@@ -1588,7 +1669,6 @@ if (!window.cpActions) {
         const pet = store.coupleSpacesData[charId].pet;
         const p3 = (n) => String(n).padStart(3, '0');
         
-        // 🌟 标记：宣布 API 开始干活了！
         cpState.isGeneratingPhoto = true; 
         
         try {
@@ -1597,28 +1677,39 @@ if (!window.cpActions) {
             });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.85 })
+                // 🌟 修复点 1：把 role 改成了 'user'！这是解决 99% 的 API 莫名其妙拒收的关键！
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: prompt }], temperature: 0.85 })
             });
+            
+            // 🌟 修复点 2：拦截 HTTP 错误，把真实的报错信息挖出来！
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error?.message || `网络状态码 ${res.status}`);
+            }
+
             const data = await res.json();
             
-            // 校验返回，防抽风
-            const reply = data.choices[0].message.content.trim();
-            if (reply.startsWith('<think>') || reply.length < 5) { throw new Error('AI抽风了'); }
+            // 🌟 修复点 3：防止 API 没返回 choices 导致代码崩溃
+            if (!data.choices || !data.choices[0]) {
+                throw new Error('API没有返回正确的格式');
+            }
 
-            // 随机定格一个猫的动作作为照片画面
+            const reply = data.choices[0].message.content.trim();
+            if (reply.startsWith('<think>') || reply.length < 5) { throw new Error('AI 回复抽风了'); }
+
             const imgStates = ['calm', 'sleep', 'pet-head', 'cozy'];
             photoObject.imgState = imgStates[Math.floor(Math.random() * imgStates.length)];
             photoObject.text = reply;
         } catch(e) {
             photoObject.imgState = 'sleep';
-            photoObject.text = "今天雪球睡了一整天，像个小猪猪。（生成失败，可以点重Roll试试）";
+            // 🌟 修复点 4：把真实的死因（e.message）直接写在照片上，让 Bug 无处遁形！
+            photoObject.text = `冲洗失败啦！原因：${e.message}。（生成失败，可以点重Roll试试）`;
         } finally {
-            // 🌟 标记：无论成功还是报错，活都干完了！
             cpState.isGeneratingPhoto = false; 
         }
         
         if(window.actions?.saveStore) window.actions.saveStore();
-        if (cpState.petModalView === 'album') window.render(); // 只有弹窗打开时才刷新
+        if (cpState.petModalView === 'album') window.render(); 
     },
 
     // 🌟 方案二引擎：拍立得相册逻辑 (加入了僵尸清理机制)
@@ -4109,7 +4200,7 @@ if (!window.petAiRunning) {
 if (!window.cpBootScanStarted) {
     window.cpBootScanStarted = true;
     
-    // 🧠 独立的记忆提取器（不依赖情侣App是否打开）
+    // 🧠 独立的记忆提取器
     const getBgContext = (charId) => {
         const char = store.contacts.find(c => c.id === charId);
         const chat = store.chats.find(c => c.charId === charId);
@@ -4121,7 +4212,7 @@ if (!window.cpBootScanStarted) {
         return { char, chat, boundP, promptStr };
     };
 
-    // 🌟 提问箱巡逻员
+    // 🌟 引擎一：提问箱巡逻员
     const doQuestionScan = async () => {
         if (!store.coupleSpaces || !store.apiConfig?.apiKey) return;
         for (const charId of store.coupleSpaces) {
@@ -4131,7 +4222,6 @@ if (!window.cpBootScanStarted) {
             if (spaceData.enableAiQuestions !== true) continue;
             
             const targetFreq = spaceData.aiQuestionFreq || 1;
-            // 严谨对比时间
             const logicalToday = (typeof getLogicalDateStr === 'function') ? getLogicalDateStr() : new Date().toLocaleDateString('zh-CN');
             const todayCount = spaceData.questions.filter(q => q.asker === 'ai' && ((typeof getLogicalDateStr === 'function') ? getLogicalDateStr(new Date(q.timestamp)) : new Date(q.timestamp).toLocaleDateString('zh-CN')) === logicalToday).length;
             
@@ -4139,7 +4229,6 @@ if (!window.cpBootScanStarted) {
                 const hasUnanswered = spaceData.questions.some(q => q.asker === 'ai' && !q.answer);
                 if (hasUnanswered) continue;
                 
-                // 🌟 防连发并发锁：如果正在请求中，直接跳过！
                 if (spaceData.isFetchingAIQ) continue;
                 spaceData.isFetchingAIQ = true;
                 
@@ -4149,97 +4238,183 @@ if (!window.cpBootScanStarted) {
                     const last30 = msgs.map(m => `${m.isMe ? ctx.boundP.name : ctx.char.name}: ${m.text}`).join('\n');
                     const historyPrompt = last30 ? `\n【最近30回合聊天记录】\n${last30}` : '';
                     
-                    // 🌟 防重复机制：提取历史问过的问题
                     const askedHistory = spaceData.questions.filter(q => q.asker === 'ai').map(q => q.text).slice(-100).join('、');
                     const avoidPrompt = askedHistory ? `\n❗【绝对禁止重复】：你之前已经问过以下问题，绝不允许再问类似的问题：${askedHistory}` : '';
                     
                     const taskMsg = `【系统任务】你现在在情侣提问箱。请向用户提出1个想问但平时不敢或不好意思提出的，有一定深度的问题。${avoidPrompt}\n你可以针对最近的聊天记录提问，也可以针对记忆中的事件提问，或者问一些哲学、生活习惯问题。\n❗要求：语言极度精简自然，字数严格在30字以内！直接输出问题正文，绝不要带任何前缀！`;
-            const prompt = window.cpActions.buildMasterPrompt(charId, {
-                history: historyPrompt,
-                task: taskMsg,
-                recentText: historyPrompt,
-                scenario: 'questions'
-            });
+                    
+                    const prompt = window.cpActions?.buildMasterPrompt ? window.cpActions.buildMasterPrompt(charId, {
+                        history: historyPrompt,
+                        task: taskMsg,
+                        recentText: historyPrompt,
+                        scenario: 'questions'
+                    }) : taskMsg;
+
                     const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                        body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.9 })
+                        body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: prompt }], temperature: 0.9 })
                     });
+                    
+                    if (!res.ok) {
+                        const errData = await res.json().catch(() => ({}));
+                        throw new Error(errData.error?.message || `网络状态码 ${res.status}`);
+                    }
+
                     const data = await res.json();
+                    if (!data.choices || !data.choices[0]) throw new Error('API 返回数据为空');
+
                     const questionText = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+                    if (questionText.startsWith('<think>')) throw new Error('AI 回复抽风了');
                     
                     spaceData.questions.unshift({ id: 'Q_' + Date.now(), asker: 'ai', text: questionText, answer: null, timestamp: Date.now() });
+                    if (typeof window.actions !== 'undefined' && window.actions.saveStore) window.actions.saveStore();
                     if (typeof window.render === 'function') window.render();
+                    
+                    console.log(`[CoupleApp] 巡逻员：成功为角色生成提问！`);
                 } catch(e) {
-                    console.error('[CoupleApp] 提问箱静默出题失败:', e);
+                    console.warn(`[CoupleApp] 提问箱静默出题失败:`, e.message);
                 } finally {
-                    spaceData.isFetchingAIQ = false; // 🌟 请求结束，解锁
+                    spaceData.isFetchingAIQ = false; 
                 }
+                
+                await new Promise(resolve => setTimeout(resolve, 2000));
             }
         }
     };
-    
-    // 🌟 将其暴露给外部动作调用
     if (!window.cpActions) window.cpActions = {};
     window.cpActions.doQuestionScan = doQuestionScan;
 
-    // 🌟 日记本巡逻员 (带终极并发死锁)
+    // 🌟 引擎二：日记本巡逻员
     const doDiaryScan = async () => {
         if (!store.coupleSpaces || !store.apiConfig?.apiKey || !store.diaryConfig?.enabled) return;
         
         const now = new Date();
         const currentStr = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
-        if (currentStr < store.diaryConfig.time) return; // 还没到写日记的点
+        if (currentStr < store.diaryConfig.time) return; 
 
-        // 🌟 死锁开启：防止一分钟内重复触发
         if (store.isFetchingDiaryScan) return;
         store.isFetchingDiaryScan = true;
 
         try {
-            const logicalToday = getLogicalDateStr();
+            const logicalToday = (typeof getLogicalDateStr === 'function') ? getLogicalDateStr() : new Date().toLocaleDateString('zh-CN');
             for (const charId of store.coupleSpaces) {
                 store.diaries = store.diaries || [];
                 const hasDiary = store.diaries.find(d => d.charId === charId && d.date === logicalToday);
-                if (hasDiary) continue; // 今天写过了
+                if (hasDiary) continue; 
 
                 try {
-                    // 替换掉原来的 promptStr 组装
-          const historyStr = getTodayChatHistory(charId, logicalToday);
-          const taskMsg = `【系统任务】今天即将结束，请你结合今天的聊天记录、人设和记忆，写一篇今天的私密日记。\n要求：\n1. 第一人称口吻，真实自然的情感表达。\n2. 总结今天的互动，或者表达对用户的思念/感受。\n3. 要求：字数 150-300字，支持 ~~阴暗面~~ 和 **高光** 语法。直接输出正文！`;
-          
-          const prompt = window.cpActions.buildMasterPrompt(charId, {
-              history: historyStr,
-              task: taskMsg,
-              recentText: historyStr,
-              scenario: 'diary'
-          });
+                    const historyStr = typeof getTodayChatHistory === 'function' ? getTodayChatHistory(charId, logicalToday) : '';
+                    const taskMsg = `【系统任务】今天即将结束，请你结合今天的聊天记录、人设和记忆，写一篇今天的私密日记。\n要求：\n1. 第一人称口吻，真实自然的情感表达。\n2. 总结今天的互动，或者表达对用户的思念/感受。\n3. 要求：字数 150-300字，支持 ~~阴暗面~~ 和 **高光** 语法。直接输出正文！`;
+                    
+                    const prompt = window.cpActions?.buildMasterPrompt ? window.cpActions.buildMasterPrompt(charId, {
+                        history: historyStr,
+                        task: taskMsg,
+                        recentText: historyStr,
+                        scenario: 'diary'
+                    }) : taskMsg;
+
                     const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                         method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                        body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+                        body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
                     });
+                    
+                    if (!res.ok) throw new Error(`日记 API 状态码 ${res.status}`);
                     const data = await res.json();
                     
                     store.diaries.push({ id: Date.now(), charId: charId, date: logicalToday, content: data.choices[0].message.content.trim(), comments: [] });
                     if (typeof window.actions !== 'undefined' && window.actions.saveStore) window.actions.saveStore();
                     if (typeof window.render === 'function') window.render();
-                } catch(e) { console.error('静默写日记单角色失败', e); }
+                    
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                } catch(e) { console.error('静默写日记单角色失败', e.message); }
             }
         } finally {
-            // 🌟 死锁释放：无论成功还是报错，最后必定释放锁！
             store.isFetchingDiaryScan = false;
+        }
+    };
+
+    // 🌟 引擎三：共同成长打卡巡逻员 (全新加入！)
+    const doGrowthScan = async () => {
+        if (!store.coupleSpaces) return;
+
+        const now = new Date();
+        const hour = now.getHours();
+        
+        // 🌟 规定巡逻时间：晚上 8 点 (20) 到 凌晨 1 点之前 (0)
+        // (注：因为 getLogicalDateStr 已经把 0:00-0:59 算作了昨天，所以 0 点依然在逻辑的“当天”末尾)
+        if (!(hour >= 20 || hour === 0)) return;
+
+        if (store.isFetchingGrowthScan) return;
+        store.isFetchingGrowthScan = true;
+
+        try {
+            const logicalToday = (typeof getLogicalDateStr === 'function') ? getLogicalDateStr() : new Date().toLocaleDateString('zh-CN');
+
+            for (const charId of store.coupleSpaces) {
+                const spaceData = store.coupleSpacesData[charId];
+                if (!spaceData || !spaceData.growth) continue;
+
+                // 🌟 防止夺命连环 Call：每天只提醒一次
+                if (spaceData.growth.lastRemindDate === logicalToday) continue;
+
+                const activePlans = spaceData.growth.plans || [];
+                const myDaily = activePlans.filter(p => p.owner === 'me' && p.type === 'daily');
+
+                // 🌟 没有每日计划的用户，巡逻员直接放过
+                if (myDaily.length === 0) continue;
+
+                const todayRecords = spaceData.growth.records[logicalToday] || {};
+                const allDone = myDaily.every(p => todayRecords[p.id]);
+
+                // 🌟 如果有未完成的计划，立刻发牌警告！
+                if (!allDone) {
+                    const chat = store.chats.find(c => c.charId === charId);
+                    if (chat) {
+                        // 1. 发送一条醒目的 UI 系统卡片
+                        chat.messages.push({
+                            id: Date.now(),
+                            sender: 'system',
+                            isMe: false,
+                            msgType: 'system',
+                            text: `✨ 【自律小助手】\n今天即将结束，你的“共同成长”日常计划还有未完成的项哦，快去打卡吧！`,
+                            timestamp: Date.now()
+                        });
+
+                        // 🌟 2. 完美替换：直接调用即时通讯引擎 getReply！
+                        // 传入 true 代表这是系统强行触发的，不需要用户真的发消息
+                        if (window.wxActions && window.wxActions.getReply) {
+                            window.wxActions.getReply(true, charId, '(系统最高指令：发现用户今天的自律打卡计划还没完成。请以你的设定和真实口吻，发一条微信消息催促或鼓励用户去【情侣空间】的共同成长里完成打卡。⚠️警告：要自然地融入平时的聊天风格，字数40字以内，直接输出正文，绝不可输出系统标签！)');
+                        }
+
+                        // 3. 记录已提醒，今天不会再被骂了
+                        spaceData.growth.lastRemindDate = logicalToday;
+                        
+                        if (window.actions && window.actions.saveStore) window.actions.saveStore();
+                        if (typeof window.render === 'function') window.render();
+                        console.log(`[CoupleApp] 打卡巡逻员：已向微信主程序发射催促指令！`);
+                    }
+                }
+            }
+        } catch (e) {
+            console.error('自律打卡巡逻员出错', e);
+        } finally {
+            store.isFetchingGrowthScan = false;
         }
     };
 
     // 🌟 心脏起搏器 (永远在后台跳动)
     const bootPulse = () => {
         if (store && store.contacts && store.contacts.length > 0) {
-            console.log('[CoupleApp] ⚡ 数据库就绪，双引擎巡逻大脑已启动！');
+            console.log('[CoupleApp] ⚡ 数据库就绪，三引擎巡逻大脑已启动！');
             doQuestionScan(); 
             doDiaryScan();    
+            doGrowthScan(); // 🌟 启动时立刻查一次岗
             
-            // 🌟 致命Bug修复：把提问箱也扔进每分钟的循环里！
+            // 每分钟的心跳大循环
             setInterval(() => {
                 doDiaryScan();
                 doQuestionScan();
+                doGrowthScan(); // 🌟 每分钟定时查岗
             }, 60000);
         } else {
             setTimeout(bootPulse, 1000);

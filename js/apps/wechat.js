@@ -4212,6 +4212,60 @@ html += `
                     </div>
                     `;
                 }
+      } else if (msg.msgType === 'growth_achievement_card') {
+                    const cd = msg.cardData || {};
+                    
+                    maxWidthClass = 'max-w-[280px] w-full';
+                    bubbleClass = 'bg-transparent shadow-none p-0 border-0'; 
+                    bubbleStyle = ''; 
+                    
+                    // 🌟 动态计算勋章级别和颜色
+                    let iconHtml = '<i data-lucide="medal" class="w-6 h-6 text-orange-500 fill-orange-200"></i>';
+                    let bgGradient = 'from-orange-50 to-amber-50 border-orange-100';
+                    let textColor = 'text-orange-500';
+                    let titleText = '共同成长 · 成就达成';
+
+                    // 100天的最高规格排面！
+                    if (cd.days >= 100) {
+                        iconHtml = '<i data-lucide="crown" class="w-6 h-6 text-yellow-600 fill-yellow-300"></i>';
+                        bgGradient = 'from-yellow-50 to-amber-100 border-yellow-200';
+                        textColor = 'text-yellow-600';
+                        titleText = '共同成长 · 百日里程碑';
+                    }
+
+                    // 🌟 卡片本身强制居中，营造“系统全局播报”的史诗感
+                    contentHtml = `
+                    <div class="relative z-10 w-full flex justify-center mt-2 mb-2">
+                      <div class="bg-gradient-to-br ${bgGradient} border rounded-[24px] p-5 shadow-lg flex flex-col items-center w-full relative overflow-hidden">
+                        
+                        <div class="absolute -right-4 -top-4 w-16 h-16 bg-white/40 rounded-full blur-xl pointer-events-none"></div>
+
+                        <div class="flex items-center justify-center space-x-2 w-full mb-3 relative z-10">
+                            <div class="w-10 h-10 bg-white rounded-full flex items-center justify-center shrink-0 shadow-sm border border-white/50">
+                                ${iconHtml}
+                            </div>
+                            <div class="flex flex-col text-left">
+                                <span class="text-[14px] font-black text-gray-800 tracking-wide">${titleText}</span>
+                                <span class="text-[10px] font-black text-gray-400 tracking-widest font-serif">ACHIEVEMENT UNLOCKED</span>
+                            </div>
+                        </div>
+
+                        <div class="h-px w-full bg-black/5 my-3 relative z-10"></div>
+
+                        <div class="flex flex-col items-center w-full relative z-10">
+                            <span class="text-[12px] font-bold text-gray-500 mb-1">累计完美打卡</span>
+                            <div class="flex items-baseline mb-2">
+                                <span class="text-[46px] font-black ${textColor} tracking-tighter leading-none drop-shadow-sm font-serif">${cd.days}</span>
+                                <span class="text-[15px] font-bold ${textColor} ml-1">天</span>
+                            </div>
+                            <span class="text-[12px] font-medium text-gray-600 text-center px-1 leading-relaxed">
+                                ${cd.desc || '你们的坚持让爱与自律共同生长！'}
+                            </span>
+                        </div>
+
+                      </div>
+                    </div>
+                    `;
       } else if (msg.msgType === 'emoji') {
         maxWidthClass = 'max-w-[25%]';
         bubbleClass = 'bg-transparent shadow-none'; 
