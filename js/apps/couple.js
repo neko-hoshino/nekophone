@@ -3730,7 +3730,7 @@ let preProcessedText = cleanText
            }
 
            .pet-viewport {
-               width: 64px; height: 64px;
+               width: 63px; height: 64px;
                overflow: hidden; 
                position: relative;
                transform: scale(2.0); 
