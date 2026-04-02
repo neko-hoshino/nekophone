@@ -227,7 +227,7 @@ ${logText}`;
             body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: `请从以下总结中提取2个核心名词作为触发关键词，用英文逗号分隔，不要输出多余符号。\n${summary}` }], temperature: 0.3 })
         });
         const kwData = await kwRes.json();
-        kws = kwData.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+        kws = window.cpActions.cleanAI(kwData.choices[0].message.content).replace(/^["']|["']$/g, '');
     }
     
     // 🌟 在存入 store 之前，给内容打上时间戳
@@ -284,7 +284,7 @@ const wxState = {
   forwardMsgIds: [],      // 记录要转发的消息ID
   showExtractMemoryModal: false,
   extractMemoryStep: 1, // 1=选择轮数和类型，2=编辑保存结果
-  extractMemoryConfig: { msgCount: 20, type: 'fragment', keywords: '' },
+  extractMemoryConfig: { roundCount: 20, type: 'fragment', keywords: '' },
   extractMemoryContent: '', // 存放 AI 总结好的话
   isExtracting: false, // 是否正在请求大模型
   showNewChatModal: false,
@@ -1333,10 +1333,9 @@ window.wxActions = {
     restoreScroll();
   },
   updateExtractConfig: (key, val) => {
-    wxState.extractMemoryConfig[key] = key === 'msgCount' ? parseInt(val) : val;
-    // 🌟 修复卡顿：如果是拖动拉条，绝不触发全局重绘！
-    if (key !== 'msgCount') window.render();
-  },
+    wxState.extractMemoryConfig[key] = key === 'roundCount' ? parseInt(val) : val;
+    if (key !== 'roundCount') window.render();
+},
   startExtractMemory: async () => {
     if (!store.apiConfig || !store.apiConfig.apiKey) return window.actions.showToast('请先配置 API Key');
     wxState.isExtracting = true;
@@ -1344,10 +1343,41 @@ window.wxActions = {
     try {
         const chat = store.chats.find(c => c.charId === wxState.activeChatId);
         const char = store.contacts.find(c => c.id === wxState.activeChatId);
-        // 过滤掉系统消息，只取真实的对话
-        const validMsgs = chat.messages.filter(m => !m.isHidden && !(m.msgType || '').includes('system'));
-        const msgCount = wxState.extractMemoryConfig.msgCount;
-        const msgs = validMsgs.slice(-msgCount);
+        
+        // 过滤隐藏消息和系统消息（不过滤线下，如需过滤可添加 .filter(m => !m.isOffline)）
+        let validMsgs = chat.messages.filter(m => !m.isHidden && !(m.msgType || '').includes('system'));
+        
+        const roundCount = wxState.extractMemoryConfig.roundCount;
+        
+        // 按回合提取：倒序遍历，每遇到一条用户消息就算一个回合的开始，收集该用户消息及其后的AI回复（直到下一条用户消息之前）
+        const selectedMsgs = [];
+        let rounds = 0;
+        let tempMsgs = []; // 临时存储当前回合的消息（按时间正序）
+        
+        for (let i = validMsgs.length - 1; i >= 0; i--) {
+            const msg = validMsgs[i];
+            tempMsgs.unshift(msg); // 往前插入，保持正序
+            
+            if (msg.isMe) {
+                // 遇到用户消息，完成一个回合
+                rounds++;
+                // 将当前回合的所有消息（从该用户消息到结尾）添加到 selectedMsgs 前面
+                selectedMsgs.unshift(...tempMsgs);
+                tempMsgs = [];
+                if (rounds >= roundCount) break;
+            }
+        }
+        // 如果循环结束但还有未加入的 tempMsgs（可能只有AI消息没有用户消息），忽略
+        
+        if (selectedMsgs.length === 0) {
+            wxState.isExtracting = false;
+            window.actions.showToast('没有足够的对话回合');
+            window.render();
+            return;
+        }
+        
+        // 后续逻辑不变，使用 selectedMsgs 替代原来的 msgs
+        const msgs = selectedMsgs;
 
         // 🌟 修复：动态获取绑定的马甲名字，并还原多媒体消息的描述
         const pId = chat.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
@@ -1391,7 +1421,7 @@ window.wxActions = {
             body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: kwPrompt }], temperature: 0.3 })
         });
         const kwData = await resKw.json();
-        wxState.extractMemoryConfig.keywords = kwData.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+        wxState.extractMemoryConfig.keywords = window.cpActions.cleanAI(kwData.choices[0].message.content).replace(/^["']|["']$/g, '');
       }
       window.render();
     } catch (e) {
@@ -2943,18 +2973,20 @@ export function renderWeChatApp(store) {
                  <div class="flex flex-col"><span class="text-[15px] font-medium text-gray-800">附带历史记忆条数</span><span class="text-[10px] text-gray-500">1-100，耗费Token</span></div>
                  <div class="flex items-center"><input type="number" id="set-context-limit" value="${targetObj.contextLimit || 30}" class="w-12 text-center outline-none bg-gray-50 p-1.5 rounded-lg text-[15px] font-medium text-black" /><span class="ml-2 text-[13px] text-gray-500">回合</span></div>
                </div>
-               <div class="flex justify-between items-center border-t border-gray-100 pt-4">
-                 <div class="flex flex-col">
-                   <span class="text-[15px] font-medium text-gray-800">发朋友圈频率</span>
-                   <span class="text-[10px] text-gray-400">后台自动发布动态间隔</span>
-                 </div>
-                 <select id="chat-auto-moment-select" class="bg-gray-50 text-center outline-none p-1.5 rounded-lg text-[14px] font-medium text-black border border-transparent focus:border-gray-200">
-                     <option value="0" ${!targetObj.autoMomentFreq ? 'selected' : ''}>不自动发</option>
-                     <option value="2" ${targetObj.autoMomentFreq === 2 ? 'selected' : ''}>每 2 小时</option>
-                     <option value="4" ${targetObj.autoMomentFreq === 4 ? 'selected' : ''}>每 4 小时</option>
-                     <option value="8" ${targetObj.autoMomentFreq === 8 ? 'selected' : ''}>每 8 小时</option>
-                 </select>
-               </div>
+               ${!chatData.isGroup ? `
+<div class="flex justify-between items-center border-t border-gray-100 pt-4">
+  <div class="flex flex-col">
+    <span class="text-[15px] font-medium text-gray-800">发朋友圈频率</span>
+    <span class="text-[10px] text-gray-400">后台自动发布动态间隔</span>
+  </div>
+  <select id="chat-auto-moment-select" class="bg-gray-50 text-center outline-none p-1.5 rounded-lg text-[14px] font-medium text-black border border-transparent focus:border-gray-200">
+      <option value="0" ${!targetObj.autoMomentFreq ? 'selected' : ''}>不自动发</option>
+      <option value="2" ${targetObj.autoMomentFreq === 2 ? 'selected' : ''}>每 2 小时</option>
+      <option value="4" ${targetObj.autoMomentFreq === 4 ? 'selected' : ''}>每 4 小时</option>
+      <option value="8" ${targetObj.autoMomentFreq === 8 ? 'selected' : ''}>每 8 小时</option>
+  </select>
+</div>
+` : ''}
             </div>
 
             <div class="bg-white rounded-[16px] p-4 space-y-3 shadow-sm border border-gray-100 flex flex-col mb-6">
@@ -3571,6 +3603,7 @@ export function renderWeChatApp(store) {
   // 🍺 场景 2：线下酒馆模式 
   if (wxState.view === 'offlineStory') {
     const offlineMsgs = chatData.messages.filter(m => m.isOffline && !m.isHidden);
+    const displayCount = wxState.displayCount || 50;
     // 🌟 智能读取群聊/单聊的背景、名称和设置载体
     const targetObj = chatData.isGroup ? chatData : char;
     const titleName = chatData.isGroup ? chatData.groupName : char?.name;
@@ -3586,148 +3619,125 @@ export function renderWeChatApp(store) {
           ${targetObj?.offlineCSS || ''}
         </style>
 
-        <div class="mc-offline-topbar bg-white/90 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 z-10 sticky top-0 shadow-sm transition-all ${wxState.isMultiSelecting ? 'bg-[#fcfcfc]' : ''}">
-          ${wxState.isMultiSelecting ? `
-                     <div class="cursor-pointer text-gray-600 w-1/4 text-[15px]" onclick="window.wxActions.cancelMultiSelect()">取消</div>
-                     <span class="flex-1 text-center font-bold text-gray-800 text-[16px] mc-select-count">已选择 ${wxState.selectedMsgIds.length} 项</span>
-                     <div class="w-1/4 flex justify-end items-center pr-1">
-                        <div class="cursor-pointer active:scale-90 p-2 bg-red-50 hover:bg-red-100 rounded-full text-red-500 transition-colors shadow-sm" onclick="window.wxActions.deleteSelected()">
-                           <i data-lucide="trash-2" style="width: 20px; height: 20px;"></i>
-                        </div>
-                     </div>
-                  ` : `
-             <div class="flex items-center cursor-pointer text-gray-600 w-1/4 active:opacity-50" onclick="window.wxActions.exitOffline()"><i data-lucide="chevron-down" style="width:28px; height:28px;"></i></div>
-             <span class="flex-1 text-center font-bold text-[16px] tracking-widest text-gray-800 transition-colors ${(wxState.typingStatus && wxState.typingStatus[chatData.charId]) ? 'animate-pulse text-gray-400' : ''}">${(wxState.typingStatus && wxState.typingStatus[chatData.charId]) ? '正在构思...' : `线下 · ${titleName}`}</span>
-             <div class="w-1/4 flex justify-end">
-                <i data-lucide="settings" class="text-gray-600 cursor-pointer active:scale-90 transition-transform" style="width: 24px; height: 24px;" onclick="window.wxActions.openOfflineSettings()"></i>
-             </div>
-          `}
-        </div>
+        <div class="mc-offline-topbar bg-white/90 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 z-10 sticky top-0 shadow-sm">
+    <div class="flex items-center cursor-pointer text-gray-600 w-1/4 active:opacity-50" onclick="window.wxActions.exitOffline()">
+        <i data-lucide="chevron-down" style="width:28px; height:28px;"></i>
+    </div>
+    <span class="flex-1 text-center font-bold text-[16px] tracking-widest text-gray-800 transition-colors ${(wxState.typingStatus && wxState.typingStatus[chatData.charId]) ? 'animate-pulse text-gray-400' : ''}">
+        ${(wxState.typingStatus && wxState.typingStatus[chatData.charId]) ? '正在构思...' : `线下 · ${titleName}`}
+    </span>
+    <div class="w-1/4 flex justify-end">
+        <i data-lucide="settings" class="text-gray-600 cursor-pointer active:scale-90 transition-transform" style="width: 24px; height: 24px;" onclick="window.wxActions.openOfflineSettings()"></i>
+    </div>
+</div>
         
-        <div id="offline-scroll" class="mc-offline-scroll flex-1 p-5 overflow-y-auto hide-scrollbar flex flex-col pb-6 ${targetObj?.offlineBg ? 'bg-black/10 backdrop-blur-[2px]' : 'bg-[#fcfcfc]'}" ontouchmove="window.wxActions.handleTouchMove()" onclick="window.wxActions.closeMenuIfOpen()" ontouchstart="window.wxActions.closeMenuIfOpen()">
+        <div id="offline-scroll" class="mc-offline-scroll flex-1 p-5 overflow-y-auto hide-scrollbar flex flex-col pb-6 ${targetObj?.offlineBg ? 'bg-black/10 backdrop-blur-[2px]' : 'bg-[#fcfcfc]'}">
           <div class="text-center text-xs text-gray-400 italic mb-8 tracking-widest pointer-events-none">—— 故事开始 ——</div>
           ${(() => {
               let html = '';
-              
-              // 🌟 核心时空断层算法：寻找最后一条“线上聊天”的边界点
-              let lastOnlineMsgId = 0;
-              for (let i = chatData.messages.length - 1; i >= 0; i--) {
-                  if (!chatData.messages[i].isOffline) {
-                      lastOnlineMsgId = chatData.messages[i].id;
-                      break;
-                  }
-              }
+if (offlineMsgs.length > displayCount) {
+    html += `<div class="flex justify-center my-3"><div class="text-[11px] font-bold tracking-widest text-gray-600 bg-black/5 px-4 py-1.5 rounded-full cursor-pointer active:scale-90 transition-transform" onclick="window.wxActions.loadMoreHistory()">点击加载更多剧情</div></div>`;
+}
+const slicedOfflineMsgs = offlineMsgs.slice(-displayCount);
 
-              // 🌟 核心切片：根据 displayCount 截断线下剧情，并在顶部加上加载按钮！
-              const displayCount = wxState.displayCount || 50;
-              if (offlineMsgs.length > displayCount) {
-                  html += `<div class="flex justify-center my-3"><div class="text-[11px] font-bold tracking-widest text-gray-600 bg-black/5 px-4 py-1.5 rounded-full cursor-pointer active:scale-90 transition-transform" onclick="window.wxActions.loadMoreHistory()">点击加载更多剧情</div></div>`;
-              }
-              const slicedOfflineMsgs = offlineMsgs.slice(-displayCount);
+// 1. 找到最后一条线上消息的 id
+let lastOnlineMsgId = 0;
+for (let i = chatData.messages.length - 1; i >= 0; i--) {
+    if (!chatData.messages[i].isOffline) {
+        lastOnlineMsgId = chatData.messages[i].id;
+        break;
+    }
+}
 
-              slicedOfflineMsgs.forEach((msg, index) => {
-                 // 如果这条线下消息发生在最后一次线上聊天之前，它就是被封存的历史！
-                 const isHistory = msg.id < lastOnlineMsgId;
-                 
-                 // 🌟 插入历史记录分割线（在当前剧情的第一句话之前插入）
-                 if (!isHistory && index > 0 && slicedOfflineMsgs[index - 1].id < lastOnlineMsgId) {
-                    html += `<div class="text-center text-xs text-gray-400 italic mb-8 mt-4 tracking-widest pointer-events-none">—— 以上为历史记录 ——</div>`;
-                 }
+// 2. 找到最后一条线上消息在 slicedOfflineMsgs 中的索引
+let lastOnlineMsgIndex = -1;
+for (let i = 0; i < slicedOfflineMsgs.length; i++) {
+    if (!slicedOfflineMsgs[i].isOffline) {
+        lastOnlineMsgIndex = i;
+    }
+}
 
-                 const isSelected = wxState.selectedMsgIds?.includes(msg.id);
-                 const checkboxHtml = wxState.isMultiSelecting ? `<div class="mr-4 flex-shrink-0 mt-1"><div class="mc-checkbox-${msg.id} w-[22px] h-[22px] rounded-full border ${isSelected ? 'bg-gray-800 border-gray-800' : 'border-gray-300 bg-white'} flex items-center justify-center transition-colors shadow-sm">${isSelected ? `<i data-lucide="check" class="text-white" style="width:14px; height:14px;"></i>` : ''}</div></div>` : '';
+let lastWasHistory = false;
 
-                 let menuHtml = '';
-                 if (wxState.activeMenuMsgId === msg.id) {
-                   menuHtml = `
-                     <div class="absolute z-[100] top-full left-1/2 -translate-x-1/2 mt-2 bg-[#2c2c2c] text-white rounded-[12px] px-1 py-0.5 flex items-center shadow-2xl animate-in zoom-in-95 duration-150 whitespace-nowrap border border-white/10" onclick="event.stopPropagation()" ontouchstart="event.stopPropagation()">
-                       ${(!msg.isMe && !isHistory) ? `<div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.rerollReply(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.rerollReply(${msg.id})"><i data-lucide="refresh-cw" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">重roll</span></div>` : ''}
-                       <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.openEditMessageModal(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.openEditMessageModal(${msg.id})"><i data-lucide="edit" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">编辑</span></div>
-                       <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.startMultiSelect(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.startMultiSelect(${msg.id})"><i data-lucide="check-square" class="w-[18px] h-[18px] mb-1 text-gray-300"></i><span class="text-[10px] text-gray-300 scale-90">多选</span></div>
-                       <div class="flex flex-col items-center justify-center w-[46px] py-2 cursor-pointer hover:bg-white/10 rounded-lg transition-colors" onclick="window.wxActions.deleteMessage(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.deleteMessage(${msg.id})"><i data-lucide="trash-2" class="w-[18px] h-[18px] mb-1 text-red-400"></i><span class="text-[10px] text-red-400 scale-90">删除</span></div>
-                     </div>
-                   `;
-                 }
+slicedOfflineMsgs.forEach((msg, idx) => {
+    const isHistory = msg.id < lastOnlineMsgId;
 
-                 // 移除 think 标签
+    // 插入历史记录分割线（仅当从历史切换到非历史时）
+    if (!isHistory && lastWasHistory) {
+        html += `<div class="text-center text-xs text-gray-400 italic mb-8 mt-4 tracking-widest pointer-events-none">—— 以上为历史记录 ——</div>`;
+    }
+    lastWasHistory = isHistory;
+
+    // 系统消息保持原样（灰条居中）
+    if (msg.msgType === 'system' || msg.msgType === 'recall_system') {
+        html += `
+        <div class="mc-offline-sysmsg flex items-center justify-center py-2 mb-6 animate-in fade-in duration-300">
+            <span class="text-[12px] text-gray-400 font-bold tracking-widest bg-gray-100/80 backdrop-blur-sm px-4 py-1.5 rounded-full">${msg.text.replace(/\[|\]/g, '')}</span>
+        </div>`;
+        return;
+    }
+
+    // ---------- 普通消息卡片 ----------
+    // 移除 think 标签
 let cleanText = msg.text.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
 let preProcessedText = cleanText
     .replace(/(『[^』]*』)/g, '\n$1\n')
     .replace(/(「[^」]*」)/g, '\n$1\n')
     .replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
-                 
-                 const formattedLines = preProcessedText.split('\n').filter(l=>l.trim()).map(l => {
-                     let line = l.trim();
-                     if (line.startsWith('『') && line.endsWith('』')) {
-                         return `<p class="mc-offline-dialogue my-2.5 leading-relaxed">${line}</p>`;
-                     } else if (line.startsWith('（') && line.endsWith('）')) {
-                         // 🌟 极致美学：用 slice(1, -1) 物理切除前后的括号，只把纯净的心声文字渲染出来！
-                         const pureThought = line.slice(1, -1);
-                         return `<p class="mc-offline-thought my-2.5 leading-relaxed">${pureThought}</p>`;
-                     } else {
-                         return `<p class="mc-offline-desc my-1.5 leading-relaxed">${line}</p>`;
-                     }
-                 }).join('');
 
-                 if (msg.msgType === 'system' || msg.msgType === 'recall_system') {
-                     html += `
-                     <div class="mc-offline-sysmsg relative flex items-center justify-center py-2 mb-6 animate-in fade-in duration-300 ${wxState.isMultiSelecting ? 'cursor-pointer' : ''}" ${wxState.isMultiSelecting ? `onclick="window.wxActions.toggleSelectMsg(${msg.id})"` : ''}>
-                        ${checkboxHtml}
-                        <span class="text-[12px] text-gray-400 font-bold tracking-widest bg-gray-100/80 backdrop-blur-sm px-4 py-1.5 rounded-full pointer-events-${wxState.isMultiSelecting ? 'none' : 'auto'}" 
-                              onmousedown="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchStart(${msg.id})`}" 
-                              onmouseup="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}" 
-                              onmouseleave="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}" 
-                              ontouchstart="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchStart(${msg.id})`}" 
-                              ontouchend="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}">${msg.text.replace(/\[|\]/g, '')}</span>
-                        ${menuHtml}
-                     </div>
-                     `;
-                 } else {
-                     // 普通消息渲染（替换原有 else 分支中的代码）
+    const formattedLines = preProcessedText.split('\n').filter(l=>l.trim()).map(l => {
+        let line = l.trim();
+        if (line.startsWith('『') && line.endsWith('』')) {
+            return `<p class="offline-dialogue my-2.5 leading-relaxed" style="color: ${targetObj?.offlineDialogueColor || '#d4b856'};">${line}</p>`;
+        } else if (line.startsWith('（') && line.endsWith('）')) {
+            const pureThought = line.slice(1, -1);
+            return `<p class="offline-thought my-2.5 leading-relaxed" style="color: ${targetObj?.offlineThoughtColor || '#9ca3af'};">${pureThought}</p>`;
+        } else {
+            return `<p class="offline-desc my-1.5 leading-relaxed" style="color: ${targetObj?.offlineBg ? '#fff' : '#374151'};">${line}</p>`;
+        }
+    }).join('');
+
+    const showReroll = !msg.isMe && !isHistory;
+    const actionIcons = `
+    <div class="absolute bottom-3 right-4 flex items-center space-x-3.5 opacity-80 transition-opacity">
+        ${showReroll ? `<i data-lucide="refresh-cw" class="w-4 h-4 cursor-pointer active:scale-90 text-gray-500" onclick="window.wxActions.rerollReply(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.rerollReply(${msg.id})" title="重roll"></i>` : ''}
+        <i data-lucide="edit-3" class="w-4 h-4 cursor-pointer active:scale-90 text-gray-500" onclick="window.wxActions.openEditMessageModal(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.openEditMessageModal(${msg.id})" title="编辑"></i>
+        <i data-lucide="trash-2" class="w-4 h-4 cursor-pointer active:scale-90 text-red-400" onclick="window.wxActions.deleteMessage(${msg.id})" ontouchend="event.preventDefault(); window.wxActions.deleteMessage(${msg.id})" title="删除"></i>
+    </div>`;
+
+    // 生成时间戳显示（与线上格式一致）
+const timestampDisplay = window.formatSmartTime(msg.timestamp, msg.time, msg.id);
+const timestampHtml = `<div class="text-[10px] text-gray-400/70 mt-2 text-left">${timestampDisplay}</div>`;
+
 html += `
-<div class="flex justify-center my-4 w-full ${wxState.isMultiSelecting ? 'cursor-pointer' : ''}" 
-     ${wxState.isMultiSelecting ? `onclick="window.wxActions.toggleSelectMsg(${msg.id})"` : ''}>
-    <div class="relative w-full">
-        <div class="flex items-start">
-            ${checkboxHtml}
-            <div class="offline-card bg-white/80 backdrop-blur-md border border-gray-100/50 rounded-[14px] p-5 relative flex flex-col shadow-[0_2px_15px_rgba(0,0,0,0.02)] flex-1"
-                 onmousedown="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchStart(${msg.id})`}" 
-                 onmouseup="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}" 
-                 onmouseleave="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}" 
-                 ontouchstart="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchStart(${msg.id})`}" 
-                 ontouchend="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchEnd()`}"
-                 ontouchmove="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchMove()`}"
-                 onmousemove="${wxState.isMultiSelecting ? '' : `window.wxActions.handleTouchMove()`}">
-                <div class="mb-3 text-[12px] font-black tracking-widest text-gray-400">${msg.sender}</div>
-                <div class="text-[15px] text-gray-800 leading-relaxed font-serif text-justify">${formattedLines}</div>
-                ${menuHtml}
-            </div>
-        </div>
+<div class="flex justify-center my-4 w-full">
+    <div class="offline-card w-full bg-white/80 backdrop-blur-md border border-gray-100/50 rounded-[14px] p-5 relative flex flex-col shadow-[0_2px_15px_rgba(0,0,0,0.02)]">
+        <div class="mb-3 text-[12px] font-black tracking-widest text-gray-400">${msg.sender}</div>
+        <div class="text-[15px] text-gray-800 leading-relaxed font-serif text-justify pb-6">${formattedLines}</div>
+        ${actionIcons}
+        ${timestampHtml}
     </div>
 </div>`;
-                 }
-              });
+});
 
-              // 如果当前所有的线下消息全部都是历史记录，把分割线补在最底部！
-              if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length - 1].id < lastOnlineMsgId) {
-                  html += `<div class="text-center text-xs text-gray-400 italic mb-8 mt-4 tracking-widest pointer-events-none">—— 以上为历史记录 ——</div>`;
-              }
+// 如果最后一条消息是历史，补一条结尾分割线
+if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length - 1].id < lastOnlineMsgId) {
+    html += `<div class="text-center text-xs text-gray-400 italic mb-8 mt-4 tracking-widest pointer-events-none">—— 以上为历史记录 ——</div>`;
+}
               
               return html;
           })()}
         </div>
         
-        ${wxState.isMultiSelecting ? '' : `
-          <div class="mc-offline-bottombar bg-white px-4 py-3 pb-8 border-t border-gray-100 flex flex-col shadow-[0_-5px_20px_rgba(0,0,0,0.03)] z-20 relative">
-            <div class="mc-offline-input-wrapper relative w-full bg-gray-50 border border-gray-200 rounded-[16px] p-1 flex items-end transition-all focus-within:border-gray-400 focus-within:bg-white shadow-inner">
-                <textarea id="offline-input" placeholder="描写你的动作或对话..." class="flex-1 min-h-[80px] max-h-[150px] bg-transparent text-gray-800 p-3 outline-none text-[15px] resize-none placeholder-gray-400 font-serif leading-relaxed hide-scrollbar"></textarea>
-                <div class="flex flex-col items-center justify-end pb-2 pr-2 space-y-4 shrink-0">
-                    <button onclick="window.wxActions.continueOffline()" class="mc-offline-btn-continue w-9 h-9 flex items-center justify-center text-gray-400 hover:text-gray-600 active:scale-90 transition-all" title="让AI接着往下写"><i data-lucide="feather" style="width:20px;"></i></button>
-                    <button onmousedown="event.preventDefault();" onclick="window.wxActions.sendMessage()" class="mc-offline-btn-send w-9 h-9 flex items-center justify-center text-gray-800 active:scale-90 transition-all hover:text-black"><i data-lucide="send" style="width:22px; margin-left: 2px;"></i></button>
-                </div>
-            </div>
-          </div>
-        `}
+        <div class="mc-offline-bottombar bg-white px-4 py-3 pb-8 border-t border-gray-100 flex flex-col shadow-[0_-5px_20px_rgba(0,0,0,0.03)] z-20 relative">
+    <div class="mc-offline-input-wrapper relative w-full bg-gray-50 border border-gray-200 rounded-[16px] p-1 flex items-end transition-all focus-within:border-gray-400 focus-within:bg-white shadow-inner">
+        <textarea id="offline-input" placeholder="描写你的动作或对话..." class="flex-1 min-h-[80px] max-h-[150px] bg-transparent text-gray-800 p-3 outline-none text-[15px] resize-none placeholder-gray-400 font-serif leading-relaxed hide-scrollbar"></textarea>
+        <div class="flex flex-col items-center justify-end pb-2 pr-2 space-y-4 shrink-0">
+            <button onclick="window.wxActions.continueOffline()" class="mc-offline-btn-continue w-9 h-9 flex items-center justify-center text-gray-400 hover:text-gray-600 active:scale-90 transition-all" title="让AI接着往下写"><i data-lucide="feather" style="width:20px;"></i></button>
+            <button onmousedown="event.preventDefault();" onclick="window.wxActions.sendMessage()" class="mc-offline-btn-send w-9 h-9 flex items-center justify-center text-gray-800 active:scale-90 transition-all hover:text-black"><i data-lucide="send" style="width:22px; margin-left: 2px;"></i></button>
+        </div>
+    </div>
+</div>
 
         ${wxState.showOfflineSettingsModal ? `
           <div class="mc-modal-overlay absolute inset-0 z-[80] bg-black/40 flex items-center justify-center animate-in fade-in backdrop-blur-sm p-4 pb-8" onclick="window.wxActions.closeOfflineSettings()">
@@ -4656,9 +4666,9 @@ html += `
                     <div>
                        <div class="flex justify-between items-end mb-2 pl-1">
                          <span class="text-[12px] font-black text-gray-400 uppercase tracking-widest">总结过去多少条聊天？</span>
-                         <span id="extract-msg-count-display" class="text-[16px] font-black text-[#07c160] font-mono">${wxState.extractMemoryConfig.msgCount} 条</span>
+                         <span id="extract-msg-count-display" class="text-[16px] font-black text-[#07c160] font-mono">${wxState.extractMemoryConfig.roundCount || 20} 回合</span>
                        </div>
-                       <input type="range" min="2" max="100" value="${wxState.extractMemoryConfig.msgCount}" class="w-full accent-[#07c160] h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer" oninput="document.getElementById('extract-msg-count-display').innerText = this.value + ' 条'; window.wxActions.updateExtractConfig('msgCount', this.value)" />
+                       <input type="range" min="1" max="100" value="${wxState.extractMemoryConfig.roundCount|| 20}" class="w-full accent-[#07c160] h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer" oninput="document.getElementById('extract-msg-count-display').innerText = this.value + ' 回合'; window.wxActions.updateExtractConfig('roundCount', this.value)" />
                     </div>
                     <button class="w-full bg-[#07c160] text-white font-bold py-3.5 rounded-[14px] flex items-center justify-center active:scale-95 transition-transform shadow-[0_4px_15px_rgba(7,193,96,0.3)] mt-2" onclick="window.wxActions.startExtractMemory()">
                       ${wxState.isExtracting ? '<i data-lucide="loader-2" class="animate-spin mr-2 w-5 h-5"></i>飞速阅读中...' : '<i data-lucide="sparkles" class="mr-2 w-5 h-5"></i>开始一键提取'}
@@ -5351,56 +5361,49 @@ const planCloudBrain = async (delayMinutes, char, llmMessages, routingId, recurs
 
 window.planCloudBrain = planCloudBrain; // 🌟 挂载到全局，供设置面板的空包弹调用
 
-// 🌟 终极时空巡逻员：双线程并发引擎，聊天与朋友圈互不抢占！
-window.scheduleCloudTask = async (charId) => {
-    // 🌟 新增防御拦截：如果没有云端密钥，巡逻员原地休息！
+// 🌟 进化版：支持 forceSystemPrompt（物理隐形指令）
+window.scheduleCloudTask = async (charId, forceSystemPrompt = null) => {
     if (!localStorage.getItem('neko_server_pwd')) return;
 
+    // 修复：如果被锁挡住了，重试时也要把指令带上
     if (window.isSyncingMailbox) {
-        // 🌟 如果信箱正在工作，巡逻员等 1 秒再来
-        setTimeout(() => window.scheduleCloudTask(charId), 1000);
+        setTimeout(() => window.scheduleCloudTask(charId, forceSystemPrompt), 1000);
         return;
     }
+
     const chat = store.chats.find(c => c.charId === charId);
     if (!chat) return;
 
-    // 🌟 获取正确的马甲名字
     const charObj = store.contacts.find(c => c.id === chat.charId);
     const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
     const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
     
-    let speakerChar = null;
-    if (chat.isGroup) {
-         const avail = chat.memberIds;
-         if(avail.length > 0) speakerChar = store.contacts.find(c => c.id === avail[Math.floor(Math.random() * avail.length)]);
-    } else { speakerChar = store.contacts.find(c => c.id === charId); }
+    let speakerChar = chat.isGroup ? 
+        store.contacts.find(c => c.id === chat.memberIds[Math.floor(Math.random() * chat.memberIds.length)]) : 
+        store.contacts.find(c => c.id === charId);
     if (!speakerChar) return;
 
     const targetObj = chat.isGroup ? chat : speakerChar;
 
-    // 🌟 核心防御：如果主动聊天和朋友圈都没开，直接退出，绝不浪费资源！
-    if (!targetObj.autoMsgEnabled && (!targetObj.autoMomentFreq || targetObj.autoMomentFreq === 0)) return;
+    // 🌟 核心拦截升级：如果有 forceSystemPrompt，就算开关没开也强行唤醒！
+    if (!targetObj.autoMsgEnabled && (!targetObj.autoMomentFreq || targetObj.autoMomentFreq === 0) && !forceSystemPrompt) return;
 
     try {
-            const { buildLLMPayload } = await import('../utils/llm.js');
-            let groupInfo = null;
-            if (chat.isGroup) {
-              const allNames = chat.memberIds.map(id => store.contacts.find(c => c.id === id)?.name).filter(Boolean).join('、');
-              groupInfo = { id: chat.charId, name: chat.groupName, allNames: allNames, notice: chat.groupNotice || '' };
-            }
+        const { buildLLMPayload } = await import('../utils/llm.js');
+        let groupInfo = chat.isGroup ? { id: chat.charId, name: chat.groupName, allNames: chat.memberIds.map(id => store.contacts.find(c => c.id === id)?.name).join('、'), notice: chat.groupNotice || '' } : null;
+        
+        // 🌟 终极净化：剔除了导致崩溃的 senderName...
+        let baseHistory = chat.messages.map(msg => {
+            let content = msg.text || '';
+            if (msg.msgType === 'voice') content = `[语音]: ${content.replace(/^\[语音\][:：]?\s*/, '')}`;
+            else if (msg.msgType === 'virtual_image') content = `[虚拟照片]: ${msg.virtualImageText || content.replace(/^\[虚拟照片\][:：]?\s*/, '') || '一张照片'}`;
+            else if (msg.msgType === 'location') content = `[发送定位]: ${content.replace(/^\[(?:发送)?定位\][:：]?\s*/, '') || '未知位置'}`;
+            else if (msg.msgType === 'transfer') content = `[发起转账] 金额：${msg.transferData?.amount || '未知'}，备注：${msg.transferData?.note || '无'}`;
+            else if (msg.msgType === 'real_image') content = `[真实照片]`;
+            else if (msg.msgType === 'emoji') content = `[表情包]: ${content.replace(/^\[表情包\][:：]?\s*/, '')}`;
             
-            // 🌟 终极净化：剔除了导致崩溃的 senderName，并保留 baseHistory 变量名！
-            let baseHistory = chat.messages.map(msg => {
-                let content = msg.text || '';
-                if (msg.msgType === 'voice') content = `[语音]: ${content.replace(/^\[语音\][:：]?\s*/, '')}`;
-                else if (msg.msgType === 'virtual_image') content = `[虚拟照片]: ${msg.virtualImageText || content.replace(/^\[虚拟照片\][:：]?\s*/, '') || '一张照片'}`;
-                else if (msg.msgType === 'location') content = `[发送定位]: ${content.replace(/^\[(?:发送)?定位\][:：]?\s*/, '') || '未知位置'}`;
-                else if (msg.msgType === 'transfer') content = `[发起转账] 金额：${msg.transferData?.amount || '未知'}，备注：${msg.transferData?.note || '无'}`;
-                else if (msg.msgType === 'real_image') content = `[真实照片]`;
-                else if (msg.msgType === 'emoji') content = `[表情包]: ${content.replace(/^\[表情包\][:：]?\s*/, '')}`;
-                
-                return { ...msg, text: content };
-            });
+            return { ...msg, text: content };
+        });
 
         let turnsCount = 0; let lastSender = null; let startIndex = 0;
         const limit = targetObj.contextLimit || 30; 
@@ -5413,14 +5416,33 @@ window.scheduleCloudTask = async (charId) => {
         const nowTime = Date.now();
 
         // =================================================================
+        // 🧵 线程 C：特权任务快车道 (指令只在内存里，不入库！)
+        // =================================================================
+        if (forceSystemPrompt) {
+            let systemHistory = JSON.parse(JSON.stringify(baseHistory));
+            // 🌟 绝招：只在给 AI 发送的临时数组里塞指令！
+            systemHistory.push({
+                id: Date.now(), sender: boundPersona.name,
+                text: forceSystemPrompt,
+                isMe: true, isHidden: true, msgType: 'text'
+            });
+            
+            const systemMsgs = await buildLLMPayload(speakerChar.id, systemHistory, false, false, groupInfo, null);
+            const forceTaskId = 'FORCE|' + chat.charId + '|' + speakerChar.id + '|' + Date.now();
+            
+            // 🚀 3秒后让 AI 回复，然后直接退出，不跑下面的普通逻辑
+            planCloudBrain(0.05, speakerChar, systemMsgs, forceTaskId, 0, 0);
+            return; 
+        }
+
+        // =================================================================
         // 🧵 线程 A：主动搭话 (以最新消息为基准 + 防连发 + 支持云端递归)
         // =================================================================
         if (targetObj.autoMsgEnabled) {
-            let chatDelayMin = targetObj.autoMsgInterval || 30; 
-            
-            // 1. 获取最新一条消息的时间戳（排除隐藏系统消息）
-            const validMsgs = baseHistory.filter(m => !m.isHidden && !m.isOffline);
-            const lastMsgTime = validMsgs.length > 0 ? validMsgs[validMsgs.length - 1].id : nowTime;
+    let chatDelayMin = targetObj.autoMsgInterval || 30; 
+    // 1. 获取最新一条消息的时间戳（排除隐藏系统消息，但包括线下和通话）
+    const validMsgs = baseHistory.filter(m => !m.isHidden);
+    const lastMsgTime = validMsgs.length > 0 ? validMsgs[validMsgs.length - 1].id : nowTime;
             
             // 2. 理论触发时间 = 最新消息时间 + 频率
             let targetTime = lastMsgTime + chatDelayMin * 60000;
@@ -5538,8 +5560,7 @@ window.scheduleCloudTask = async (charId) => {
             
             // 🚀 发射 MOMENT 闹钟！(朋友圈不需要云端递归，只触发一次)
             planCloudBrain(momentDelayMinutes, speakerChar, momentMsgs, 'MOMENT|' + chat.charId + '|' + speakerChar.id + '|0', 0, 0).catch(e => console.error('朋友圈启动失败:', e));
-        }
-
+        }   
     } catch (e) { console.error('时空巡逻员崩溃:', e); }
 };
 
@@ -5677,7 +5698,7 @@ if (chat.isGroup) {
             tempHistory.push({
                 id: Date.now(),
                 sender: 'system', 
-                text: `(系统最高指令：你的上一条回复不符合要求。请严格按照以下修改要求重新生成回复：“${requirement}”。\n⚠️绝对警告：这条系统要求角色看不见！❗绝对不能把这条系统要求当做用户对角色说的话！你必须直接输出角色的台词！严禁回复“好的”、“明白”、“我这就修改”等任何废话！)`,
+                text: `(系统最高指令：你的上一条回复不符合要求。请严格按照以下修改要求重新生成回复：“${requirement}”。\n⚠️绝对警告：这条系统要求角色看不见！你必须直接输出角色的台词！严禁回复“好的”、“明白”、“我这就修改”等任何废话！❗绝对不能把这条系统要求当做用户对角色说的话来回复！)`,
                 isMe: true,
                 isHidden: true, 
                 msgType: 'text'
@@ -5759,9 +5780,10 @@ window.syncCloudMailbox = async () => {
 const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : getNowTime();
         
         // 🌟 史诗级修复：剥离 AUTO| 和 ALARM| 前缀，防止找不到聊天室导致消息被无情吞噬！
+        // 🌟 史诗级修复：剥离所有前缀，支持 AUTO、MOMENT、ALARM 和 FORCE！
         let rawCharId = msg.charId;
         let isAutoTask = false;
-        let isMomentTask = false; // 🌟 新增判定
+        let isMomentTask = false; 
         
         if (rawCharId.startsWith('AUTO|')) { 
             rawCharId = rawCharId.substring(5); 
@@ -5772,6 +5794,9 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
             isMomentTask = true; 
         }
         if (rawCharId.startsWith('ALARM|')) rawCharId = rawCharId.substring(6);
+        
+        // 🌟 新增：剥离 FORCE 前缀 (6个字符)
+        if (rawCharId.startsWith('FORCE|')) rawCharId = rawCharId.substring(6);
         
         const parts = rawCharId.split('|');
         const chatId = parts[0];
@@ -5856,6 +5881,32 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
         
         if (/\[(语音|视频)?通话(已)?结束\]/.test(remainingText)) remainingText = remainingText.replace(/\[(语音|视频)?通话(已)?结束\][:：]?\s*/g, '').trim();
         // 🌟 【新增】：AI 收款动作拦截器！
+
+        // 🌟 新增：退回转账处理
+if (/\[(?:退回转账|退还转账)\]/.test(remainingText)) {
+    // 找到最近一条尚未处理的、用户发给 AI 的转账卡片（pending 状态）
+    const pendingTransfer = chat.messages.slice().reverse().find(m => m.msgType === 'transfer' && m.transferState === 'pending' && m.isMe);
+    
+    if (pendingTransfer) {
+        // 将转账卡片状态改为已退回
+        pendingTransfer.transferState = 'returned';
+        
+        // 推送系统消息：“xx 已退回了转账”
+        chat.messages.push({
+            id: Date.now() + sysMsgOffset++, 
+            sender: 'system', 
+            text: `${char.name} 已退回了转账`, 
+            isMe: false, source: 'wechat', isOffline: false, msgType: 'system', 
+            time: cloudTime,
+            timestamp: Date.now() + sysMsgOffset
+        });
+        hasSystemAction = true;
+        if (typeof window.render === 'function' && wxState.view === 'chatRoom') window.render();
+    }
+    // 从剩余文本中移除该指令
+    remainingText = remainingText.replace(/\[(?:退回转账|退还转账)\]/g, '').trim();
+}
+
         if (/\[(?:确认收款|点击收款|收下转账)\]/.test(remainingText)) {
             // 找到最近的一条还没被领取的、我发出的转账卡片
             const pendingTransfer = chat.messages.slice().reverse().find(m => m.msgType === 'transfer' && m.transferState === 'pending' && m.isMe);

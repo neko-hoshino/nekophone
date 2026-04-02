@@ -7,6 +7,7 @@ import { renderWorldbookApp } from './apps/worldbook.js';
 import { renderMemoryApp } from './apps/memory.js';
 import { renderAppearanceApp } from './apps/appearance.js';
 import { renderCoupleApp } from './apps/couple.js';
+import { renderForumApp } from './apps/forum.js';
 
 // 🌟 核心：全局注入 iOS 开关样式，所有 App 均可白嫖！
 if (!document.getElementById('global-ios-switch-css')) {
@@ -294,6 +295,7 @@ function render() {
   else if (store.currentApp === 'memory') appHtml = renderMemoryApp(store);
   else if (store.currentApp === 'appearance') appHtml = renderAppearanceApp(store);
   else if (store.currentApp === 'couple') appHtml = renderCoupleApp(store);
+  else if (store.currentApp === 'forum') appHtml = renderForumApp(store);
   else appHtml = `
       <div class="w-full h-full bg-white flex flex-col items-center justify-center text-gray-400">
         <i data-lucide="hammer" class="w-12 h-12 mb-4 text-gray-300"></i>

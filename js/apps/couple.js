@@ -49,8 +49,14 @@ if (!store.diaries) store.diaries = [];
 
 if (!window.cpActions) {
   window.cpActions = {
+    // 🧠 AI 思考链净化器
+    cleanAI: (text) => {
+        if (!text) return '';
+        return text.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+    },
+    
     // 🌟 终极 Prompt 组装流水线 (与 llm.js 底层 1:1 对齐)
-  buildMasterPrompt: (charId, options = {}) => {
+    buildMasterPrompt: (charId, options = {}) => {
       const { char, chat, boundP } = window.cpActions.getQContext(charId);
       
       const { 
@@ -140,17 +146,10 @@ if (!window.cpActions) {
                 timestamp: Date.now()
             });
 
-            // 2. 发送大模型隐身指令
-            chat.messages.push({
-                id: Date.now() + 1,
-                sender: 'system',
-                isMe: true, 
-                isHidden: true, 
-                msgType: 'text',
-                text: `(系统最高指令：用户向你发送了情侣空间开通邀请。请回复[接受邀请]，并表达你的开心与期待。❗[接受邀请]必须单独成行！必须严格按格式输出！禁止去除中括号！)`,
-                timestamp: Date.now() + 1
-            });
-            if (typeof window.scheduleCloudTask === 'function') window.scheduleCloudTask(charId);
+            // 删掉之前的 push 隐身消息
+        if (typeof window.scheduleCloudTask === 'function') {
+            window.scheduleCloudTask(charId, "(系统指令：用户发送了情侣空间邀请。请回复[接受邀请]，并表达期待！[接受邀请]须单独成行。)");
+        }
             
             // 🌟 注入神级反馈：加上这行绝美的 Toast！
             if (window.actions && window.actions.showToast) {
@@ -265,7 +264,7 @@ if (!window.cpActions) {
           });
           const data = await res.json();
           const targetQ = store.coupleSpacesData[charId].questions.find(q => q.id === qId);
-          if (targetQ) targetQ.answer = data.choices[0].message.content.trim();
+          if (targetQ) targetQ.answer = window.cpActions.cleanAI(data.choices[0].message.content);
           window.render();
       } catch(e) {
           if (window.actions.showToast) window.actions.showToast('网络波动，TA没能回答');
@@ -310,7 +309,7 @@ if (!window.cpActions) {
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
           });
           const data = await res.json();
-          targetQ.reaction = data.choices[0].message.content.trim();
+          targetQ.reaction = window.cpActions.cleanAI(data.choices[0].message.content);
           window.render();
       } catch(e) {
           targetQ.reaction = "（TA 似乎在忙，轻轻摸了摸你的头...）";
@@ -334,7 +333,7 @@ if (!window.cpActions) {
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
           });
           const data = await res.json();
-          targetQ.reaction = data.choices[0].message.content.trim();
+          targetQ.reaction = window.cpActions.cleanAI(data.choices[0].message.content);
           window.render();
       } catch(e) {
           targetQ.reaction = "（TA 似乎在忙，轻轻摸了摸你的头...）";
@@ -450,7 +449,7 @@ if (!window.cpActions) {
           });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) }) });
             const data = await res.json();
-            d.comments[idx].text = data.choices[0].message.content.trim();
+            d.comments[idx].text = window.cpActions.cleanAI(data.choices[0].message.content);
         } catch (e) {
             window.actions.showToast('重写失败');
         } finally {
@@ -512,7 +511,7 @@ if (!window.cpActions) {
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
           });
           const data = await res.json();
-          const content = data.choices[0].message.content.trim();
+          const content = window.cpActions.cleanAI(data.choices[0].message.content);
           
           // ❗闭包死锁：严格使用传入的 targetCharId，无论此时用户切到了哪个界面！
           store.diaries = store.diaries || [];
@@ -567,7 +566,7 @@ if (!window.cpActions) {
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
             });
             const data = await res.json();
-            const replyContent = data.choices[0].message.content.trim();
+            const replyContent = window.cpActions.cleanAI(data.choices[0].message.content);
             
             d.comments.push({ sender: char.id, text: replyContent, time: new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'}) });
         } catch (e) {
@@ -610,7 +609,7 @@ if (!window.cpActions) {
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
             });
             const data = await res.json();
-            let content = data.choices[0].message.content.trim();
+            let content = window.cpActions.cleanAI(data.choices[0].message.content);
             // 物理刮除可能带有的大模型 markdown
             content = content.replace(/```json/gi, '').replace(/```/g, '').trim(); 
             cpState.locData = JSON.parse(content);
@@ -669,7 +668,7 @@ if (!window.cpActions) {
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: temp })
           });
           const data = await res.json();
-          let jsonStr = data.choices[0].message.content.trim();
+          let jsonStr = window.cpActions.cleanAI(data.choices[0].message.content);
           const match = jsonStr.match(/\{[\s\S]*\}/); // 暴力提取 JSON
           if (!match) throw new Error("JSON 解析失败");
           
@@ -751,7 +750,7 @@ if (!window.cpActions) {
           // 🌟 替换 Loading 气泡为真正的文字气泡
           const targetIdx = spaceData.tacitChat.findIndex(m => m.id === loadingId);
           if (targetIdx !== -1) {
-              spaceData.tacitChat[targetIdx] = { id: Date.now(), sender: 'ai', isMe: false, msgType: 'text', text: data.choices[0].message.content.trim() };
+              spaceData.tacitChat[targetIdx] = { id: Date.now(), sender: 'ai', isMe: false, msgType: 'text', text: window.cpActions.cleanAI(data.choices[0].message.content) };
           }
           window.render();
           setTimeout(() => { const el = document.getElementById('cp-tacit-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
@@ -884,7 +883,7 @@ if (!window.cpActions) {
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.3 })
           });
           const data = await res.json();
-          let summary = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '').replace(/【?\[?碎片\]?】?/g, '').trim();
+          let summary = window.cpActions.cleanAI(data.choices[0].message.content).replace(/^["']|["']$/g, '').replace(/【?\[?碎片\]?】?/g, '').trim();
 
           // 提取2个触发关键词
           const kwRes = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -892,7 +891,7 @@ if (!window.cpActions) {
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: `请从以下总结中提取2个核心名词作为触发关键词，用英文逗号分隔，不要输出多余符号。\n${summary}` }], temperature: 0.3 })
           });
           const kwData = await kwRes.json();
-          const kws = kwData.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+          const kws = kwwindow.cpActions.cleanAI(data.choices[0].message.content).replace(/^["']|["']$/g, '');
 
           // 存入主线全局记忆库
           const dateStr = new Date().toLocaleDateString('zh-CN');
@@ -981,7 +980,7 @@ if (!window.cpActions) {
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: temp })
           });
           const data = await res.json();
-          target.messages.push({ id: Date.now(), sender: 'ai', isMe: false, text: data.choices[0].message.content.trim() });
+          target.messages.push({ id: Date.now(), sender: 'ai', isMe: false, text: window.cpActions.cleanAI(data.choices[0].message.content) });
       } catch(e) {
           if (window.actions?.showToast) window.actions.showToast('TA 走神了，没写出来');
       } finally {
@@ -1087,7 +1086,7 @@ if (!window.cpActions) {
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: temp })
           });
           const data = await res.json();
-          let jsonStr = data.choices[0].message.content.trim();
+          let jsonStr = window.cpActions.cleanAI(data.choices[0].message.content);
           const match = jsonStr.match(/\{[\s\S]*\}/); 
           if (!match) throw new Error("JSON Parsing Failed");
           
@@ -1153,7 +1152,7 @@ if (!window.cpActions) {
           const data = await res.json();
           const targetIdx = spaceData.todChat.findIndex(m => m.id === loadingId);
           if (targetIdx !== -1) {
-              spaceData.todChat[targetIdx] = { id: Date.now(), sender: 'ai', text: data.choices[0].message.content.trim() };
+              spaceData.todChat[targetIdx] = { id: Date.now(), sender: 'ai', text: window.cpActions.cleanAI(data.choices[0].message.content) };
           }
       } catch(e) {
           spaceData.todChat = spaceData.todChat.filter(m => m.id !== loadingId);
@@ -1207,7 +1206,7 @@ if (!window.cpActions) {
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: temp })
           });
           const data = await res.json();
-          tod.messages.push({ id: Date.now(), sender: 'ai', text: data.choices[0].message.content.trim() });
+          tod.messages.push({ id: Date.now(), sender: 'ai', text: window.cpActions.cleanAI(data.choices[0].message.content) });
       } catch(e) { } finally {
           tod.isTyping = false;
           if(window.actions?.saveStore) window.actions.saveStore(); window.render();
@@ -1298,7 +1297,7 @@ if (!window.cpActions) {
                   body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.85 })
               });
               const data = await res.json();
-              const jsonStr = data.choices[0].message.content.trim().replace(/^```[a-z]*\n?/gi, '').replace(/```$/g, '').trim();
+              const jsonStr = window.cpActions.cleanAI(data.choices[0].message.content).replace(/^```[a-z]*\n?/gi, '').replace(/```$/g, '').trim();
               const tasks = JSON.parse(jsonStr);
               if (Array.isArray(tasks)) {
                   tasks.forEach(t => {
@@ -1397,33 +1396,20 @@ if (!window.cpActions) {
               newlyClaimed = true;
 
               const chat = store.chats.find(c => c.charId === charId);
-              if (chat) {
-                  // 发送华丽的成就卡片！(发送者定为 system)
+                  if (chat) {
+                  // 1. 发送成就卡片 (这是唯一会被存进数据库、被消息列表看到的内容)
                   chat.messages.push({
-                      id: Date.now(),
-                      sender: 'system',
-                      isMe: false,
-                      msgType: 'growth_achievement_card',
+                      id: Date.now(), sender: 'system', isMe: false, msgType: 'growth_achievement_card',
                       cardData: { days: ms.days, desc: ms.desc },
+                      text: `[成就解锁：累计完美打卡 ${ms.days} 天]`, // 列表预览会显示这个，很高级！
                       timestamp: Date.now()
                   });
 
-                  // 发送隐身消息，呼叫大模型秒回祝贺你！
-                  chat.messages.push({
-                      id: Date.now() + 1,
-                      sender: 'system',
-                      isMe: true,
-                      isHidden: true,
-                      msgType: 'text',
-                      text: `(系统最高指令：系统刚刚颁发了“共同成长累计完美打卡 ${ms.days} 天”的成就奖章！请你立刻以伴侣身份，发一条微信消息庆祝这个里程碑。表达你的开心、成就感，并狠狠地夸奖用户。字数40字以内，直接输出正文，绝不可输出系统标签！)`,
-                      timestamp: Date.now() + 1
-                  });
-
-                  // 触发微信即时通讯回复引擎！
-                  if (window.wxActions && window.wxActions.getReply) {
-                      window.wxActions.getReply(true, charId, `(系统最高指令：系统刚刚颁发了“共同成长累计完美打卡 ${ms.days} 天”的成就奖章！请你立刻以伴侣身份，发一条微信消息庆祝这个里程碑。表达你的开心、成就感，并狠狠地夸奖用户。字数40字以内，直接输出正文，绝不可输出系统标签！)`);
+                  // 2. 调用大脑，把指令偷偷塞过去！
+                  if (typeof window.scheduleCloudTask === 'function') {
+                      window.scheduleCloudTask(charId, `(系统指令：用户达成了打卡 ${ms.days} 天成就，请发消息热烈庆祝！字数40字内。)`);
                   }
-              }
+                  }
           }
       });
 
@@ -1529,7 +1515,7 @@ if (!window.cpActions) {
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.8 })
           });
           const data = await res.json();
-          const jsonStr = data.choices[0].message.content.trim().replace(/^```[a-z]*\n?/gi, '').replace(/```$/g, '').trim();
+          const jsonStr = window.cpActions.cleanAI(data.choices[0].message.content).replace(/^```[a-z]*\n?/gi, '').replace(/```$/g, '').trim();
           cpState.aiGeneratedPlans = JSON.parse(jsonStr);
       } catch(e) { window.actions?.showToast('生成失败，请重试'); } 
       finally { cpState.isGeneratingGrowth = false; window.render(); }
@@ -1614,7 +1600,7 @@ if (!window.cpActions) {
         const pet = store.coupleSpacesData[charId].pet;
         pet.stickyNote = "正在加载便利贴..."; window.render();
         try {
-            const actionDesc = type === 'eat' ? '给雪球加满了猫粮，喂了它' : '给雪球洗了个香喷喷的澡，清理了屋子';
+            const actionDesc = type === 'eat' ? `给${pet.name}加满了猫粮，喂了它` : `给${pet.name}洗了个香喷喷的澡，清理了屋子`;
             const prompt = window.cpActions.buildMasterPrompt(charId, {
                 task: `【系统任务】你刚刚趁用户不在，${actionDesc}。请你在墙上留一张黄色实体便利贴告诉用户。\n要求：字数在30字以内，语气自然、宠溺或带点邀功/玩笑，像真实的同居情侣留言。直接输出便利贴内容！`
             });
@@ -1623,9 +1609,9 @@ if (!window.cpActions) {
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.85 })
             });
             const data = await res.json();
-            pet.stickyNote = data.choices[0].message.content.trim();
+            pet.stickyNote = window.cpActions.cleanAI(data.choices[0].message.content);
             window.render();
-        } catch(e) { pet.stickyNote = "我刚来给雪球弄好啦，乖乖按时吃饭！"; window.render(); }
+        } catch(e) { pet.stickyNote = `我刚来给${pet.name}弄好啦，乖乖按时吃饭！`; window.render(); }
     },
     removeStickyNote: (charId) => {
         store.coupleSpacesData[charId].pet.stickyNote = null;
@@ -1634,27 +1620,33 @@ if (!window.cpActions) {
 
     // 🌟 方案三引擎：传话筒逻辑
     leavePetMessage: (charId) => {
-        const msg = prompt("想让雪球帮我带什么话给 TA？");
-        if (!msg) return;
+        // 🌟 修复关键：必须先把猫（pet）找出来，才能在下面用它的名字！
         const pet = store.coupleSpacesData[charId].pet;
+        
+        const msg = prompt(`想让${pet.name}帮我带什么话给 TA？`);
+        if (!msg) return;
+        
         pet.userMessage = msg;
         pet.aiReply = null; 
         if(window.actions?.saveStore) window.actions.saveStore(); window.render();
-        window.actions?.showToast("雪球记住啦，等TA回信吧~");
+        
+        // 🌟 这里也顺手替换好啦
+        window.actions?.showToast(`${pet.name}记住啦，等TA回信吧~`);
+        
         window.cpActions.generatePetReply(charId, msg);
     },
     generatePetReply: async (charId, userMsg) => {
         const pet = store.coupleSpacesData[charId].pet;
         try {
             const prompt = window.cpActions.buildMasterPrompt(charId, {
-                task: `【系统任务】用户让你们共同的宠物猫“雪球”给你带了一句话：“${userMsg}”。\n请你简短地回复用户，这句话将会由雪球顶在头上转达给用户。\n要求：字数在20字以内，自然的生活化口吻。直接输出回复内容！`
+                task: `【系统任务】用户让你们共同的宠物猫“${pet.name}”给你带了一句话：“${userMsg}”。\n请你简短地回复用户，这句话将会由${pet.name}顶在头上转达给用户。\n要求：字数在20字以内，自然的生活化口吻。直接输出回复内容！`
             });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: 0.85 })
             });
             const data = await res.json();
-            pet.aiReply = data.choices[0].message.content.trim();
+            pet.aiReply = window.cpActions.cleanAI(data.choices[0].message.content);
             if (cpState.view === 'petRoom') window.render();
         } catch(e) { pet.aiReply = "好滴，我知道啦！"; }
     },
@@ -1673,7 +1665,7 @@ if (!window.cpActions) {
         
         try {
             const prompt = window.cpActions.buildMasterPrompt(charId, {
-                task: `【系统任务】请结合今天的聊天记录或你的想象，写一段你和宠物猫“雪球”今天发生的趣事作为拍立得相册的配文。\n要求：第一人称口吻，字数40字左右，像随手记录的日记，充满生活气息。直接输出配文，不要输出任何思考过程或报错信息！`
+                task: `【系统任务】请结合今天的聊天记录或你的想象，写一段你和宠物猫“${pet.name}”今天发生的趣事作为拍立得相册的配文。\n要求：第一人称口吻，字数40字左右，像随手记录的日记，充满生活气息。直接输出配文，不要输出任何思考过程或报错信息！`
             });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
@@ -1694,7 +1686,7 @@ if (!window.cpActions) {
                 throw new Error('API没有返回正确的格式');
             }
 
-            const reply = data.choices[0].message.content.trim();
+            const reply = window.cpActions.cleanAI(data.choices[0].message.content);
             if (reply.startsWith('<think>') || reply.length < 5) { throw new Error('AI 回复抽风了'); }
 
             const imgStates = ['calm', 'sleep', 'pet-head', 'cozy'];
@@ -1777,7 +1769,7 @@ if (!window.cpActions) {
     },
     confirmAdoptCat: (charId) => {
         const input = document.getElementById('pet-name-input');
-        const petName = (input && input.value.trim() !== '') ? input.value.trim() : '雪球';
+        const petName = (input && input.value.trim() !== '') ? input.value.trim() : '${pet.name}';
         
         // 映射用户挑选的皮肤
         const catFiles = ['AllCats.png', 'AllCatsBlack.png', 'AllCatsGrey.png', 'AllCatsGreyWhite.png', 'AllCatsOrange.png', 'AllCatsWhite.png'];
@@ -3719,7 +3711,7 @@ let preProcessedText = cleanText
                   <span class="text-[18px] font-extrabold text-gray-800 mb-2">给小猫起个名字吧</span>
                   <span class="text-[12px] font-bold text-gray-400 mb-6 text-center">以后这就是我们共同的赛博小宝贝啦</span>
                   
-                  <input id="pet-name-input" type="text" class="w-full bg-gray-50 border border-gray-100 rounded-[16px] px-4 py-3.5 outline-none text-[15px] font-black text-center text-gray-800 focus:bg-white focus:border-orange-300 transition-all mb-6 shadow-inner" placeholder="例如：雪球 / 咪咪" value="雪球" maxlength="10">
+                  <input id="pet-name-input" type="text" class="w-full bg-gray-50 border border-gray-100 rounded-[16px] px-4 py-3.5 outline-none text-[15px] font-black text-center text-gray-800 focus:bg-white focus:border-orange-300 transition-all mb-6 shadow-inner" placeholder="例如：${pet.name} / 咪咪" value="${pet.name}" maxlength="10">
                   
                   <div class="flex space-x-3 w-full">
                       <button onclick="window.cpActions.closeNameAdoptCat()" class="flex-1 py-3.5 bg-gray-100 text-gray-600 font-bold rounded-[16px] active:scale-95 transition-transform">返回重选</button>
@@ -3989,7 +3981,7 @@ let preProcessedText = cleanText
         <div class="absolute inset-0 bg-black/60 backdrop-blur-sm z-[200] flex items-center justify-center p-5 animate-in fade-in duration-300" onclick="window.cpActions.closePetAlbum()">
             <div class="w-full h-[85%] bg-[#f4f5f7] rounded-[32px] shadow-2xl flex flex-col animate-in zoom-in-95 duration-300" onclick="event.stopPropagation()">
                 <div class="px-6 py-5 border-b border-gray-200 flex justify-between items-center bg-white rounded-t-[32px] shrink-0">
-                    <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="camera" class="w-5 h-5 mr-2 text-blue-500"></i>雪球的拍立得</span>
+                    <span class="font-black text-gray-800 text-[16px] flex items-center"><i data-lucide="camera" class="w-5 h-5 mr-2 text-blue-500"></i>${pet.name}的拍立得</span>
                     <i data-lucide="x" class="w-6 h-6 text-gray-400 bg-gray-100 rounded-full p-1 cursor-pointer active:scale-90" onclick="window.cpActions.closePetAlbum()"></i>
                 </div>
                 <div id="pet-deco-scroll" class="flex-1 overflow-y-auto p-6 space-y-6 hide-scrollbar relative">
@@ -4263,7 +4255,7 @@ if (!window.cpBootScanStarted) {
                     const data = await res.json();
                     if (!data.choices || !data.choices[0]) throw new Error('API 返回数据为空');
 
-                    const questionText = data.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+                    const questionText = window.cpActions.cleanAI(data.choices[0].message.content).replace(/^["']|["']$/g, '');
                     if (questionText.startsWith('<think>')) throw new Error('AI 回复抽风了');
                     
                     spaceData.questions.unshift({ id: 'Q_' + Date.now(), asker: 'ai', text: questionText, answer: null, timestamp: Date.now() });
@@ -4273,6 +4265,11 @@ if (!window.cpBootScanStarted) {
                     console.log(`[CoupleApp] 巡逻员：成功为角色生成提问！`);
                 } catch(e) {
                     console.warn(`[CoupleApp] 提问箱静默出题失败:`, e.message);
+                    
+                    // 🌟 新增：手机端可视化报错！一旦 API 失败，直接在屏幕上弹窗告诉你原因！
+                    if (typeof window.actions !== 'undefined' && window.actions.showToast) {
+                        window.actions.showToast(`提问箱 API 失败: ${e.message}`);
+                    }
                 } finally {
                     spaceData.isFetchingAIQ = false; 
                 }
@@ -4321,7 +4318,7 @@ if (!window.cpBootScanStarted) {
                     if (!res.ok) throw new Error(`日记 API 状态码 ${res.status}`);
                     const data = await res.json();
                     
-                    store.diaries.push({ id: Date.now(), charId: charId, date: logicalToday, content: data.choices[0].message.content.trim(), comments: [] });
+                    store.diaries.push({ id: Date.now(), charId: charId, date: logicalToday, content: window.cpActions.cleanAI(data.choices[0].message.content), comments: [] });
                     if (typeof window.actions !== 'undefined' && window.actions.saveStore) window.actions.saveStore();
                     if (typeof window.render === 'function') window.render();
                     
@@ -4370,20 +4367,16 @@ if (!window.cpBootScanStarted) {
                 if (!allDone) {
                     const chat = store.chats.find(c => c.charId === charId);
                     if (chat) {
-                        // 1. 发送一条醒目的 UI 系统卡片
+                        // 1. 发送提示卡片
                         chat.messages.push({
-                            id: Date.now(),
-                            sender: 'system',
-                            isMe: false,
-                            msgType: 'system',
-                            text: `✨ 【自律小助手】\n今天即将结束，你的“共同成长”日常计划还有未完成的项哦，快去打卡吧！`,
+                            id: Date.now(), sender: 'system', isMe: false, msgType: 'system',
+                            text: `✨ 【自律小助手】有计划待完成哦！`,
                             timestamp: Date.now()
                         });
 
-                        // 🌟 2. 完美替换：直接调用即时通讯引擎 getReply！
-                        // 传入 true 代表这是系统强行触发的，不需要用户真的发消息
-                        if (window.wxActions && window.wxActions.getReply) {
-                            window.wxActions.getReply(true, charId, '(系统最高指令：发现用户今天的自律打卡计划还没完成。请以你的设定和真实口吻，发一条微信消息催促或鼓励用户去【情侣空间】的共同成长里完成打卡。⚠️警告：要自然地融入平时的聊天风格，字数40字以内，直接输出正文，绝不可输出系统标签！)');
+                        // 2. 偷偷塞指令
+                        if (typeof window.scheduleCloudTask === 'function') {
+                            window.scheduleCloudTask(charId, `(系统指令：用户今天没打卡，请用你的语气催促一下。字数40字内。)`);
                         }
 
                         // 3. 记录已提醒，今天不会再被骂了
@@ -4406,15 +4399,27 @@ if (!window.cpBootScanStarted) {
     const bootPulse = () => {
         if (store && store.contacts && store.contacts.length > 0) {
             console.log('[CoupleApp] ⚡ 数据库就绪，三引擎巡逻大脑已启动！');
+            
+            // 🌟 【暴力破拆僵尸锁】：每次启动时，强制把所有残留的锁砸烂，防止刷新造成的永久死锁！
+            store.isFetchingDiaryScan = false;
+            store.isFetchingGrowthScan = false;
+            if (store.coupleSpacesData) {
+                for (const key in store.coupleSpacesData) {
+                    if (store.coupleSpacesData[key]) {
+                        store.coupleSpacesData[key].isFetchingAIQ = false;
+                    }
+                }
+            }
+
             doQuestionScan(); 
             doDiaryScan();    
-            doGrowthScan(); // 🌟 启动时立刻查一次岗
+            doGrowthScan(); 
             
             // 每分钟的心跳大循环
             setInterval(() => {
                 doDiaryScan();
                 doQuestionScan();
-                doGrowthScan(); // 🌟 每分钟定时查岗
+                doGrowthScan(); 
             }, 60000);
         } else {
             setTimeout(bootPulse, 1000);
