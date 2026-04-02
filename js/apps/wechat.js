@@ -3686,16 +3686,17 @@ let preProcessedText = cleanText
     .replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
 
     const formattedLines = preProcessedText.split('\n').filter(l=>l.trim()).map(l => {
-        let line = l.trim();
-        if (line.startsWith('『') && line.endsWith('』')) {
-            return `<p class="offline-dialogue my-2.5 leading-relaxed" style="color: ${targetObj?.offlineDialogueColor || '#d4b856'};">${line}</p>`;
-        } else if (line.startsWith('（') && line.endsWith('）')) {
-            const pureThought = line.slice(1, -1);
-            return `<p class="offline-thought my-2.5 leading-relaxed" style="color: ${targetObj?.offlineThoughtColor || '#9ca3af'};">${pureThought}</p>`;
-        } else {
-            return `<p class="offline-desc my-1.5 leading-relaxed" style="color: ${targetObj?.offlineBg ? '#fff' : '#374151'};">${line}</p>`;
-        }
-    }).join('');
+    let line = l.trim();
+    if (line.startsWith('『') && line.endsWith('』')) {
+        return `<p class="offline-dialogue my-2.5 leading-relaxed" style="color: ${targetObj?.offlineDialogueColor || '#d4b856'};">${line}</p>`;
+    } else if (line.startsWith('（') && line.endsWith('）')) {
+        const pureThought = line.slice(1, -1);
+        return `<p class="offline-thought my-2.5 leading-relaxed" style="color: ${targetObj?.offlineThoughtColor || '#9ca3af'};">${pureThought}</p>`;
+    } else {
+        // 固定使用深灰色，不再根据背景图变白
+        return `<p class="offline-desc my-1.5 leading-relaxed" style="color: #374151;">${line}</p>`;
+    }
+}).join('');
 
     const showReroll = !msg.isMe && !isHistory;
     const actionIcons = `
@@ -4133,6 +4134,33 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
           </div>
           <div class="border-t border-gray-100 mx-3 py-1.5 flex justify-between items-center text-[10px] text-gray-400"><span>聊天记录</span></div>
         `;
+      } else if (msg.msgType === 'forum_post_card') {
+            // 🌟 完美融入架构：给论坛转发卡片专门设计的绝美 UI！
+            maxWidthClass = 'max-w-[250px]';
+            bubbleClass = 'bg-transparent shadow-none p-0 m-0 border-0'; 
+            bubbleStyle = ''; 
+            const cd = msg.cardData || {};
+            
+            contentHtml = `
+            <div class="w-[230px] bg-white rounded-[14px] border border-gray-200 p-3.5 shadow-sm select-none flex flex-col active:bg-gray-50 cursor-pointer transition-colors" 
+                 onclick="window.actions.setCurrentApp('forum'); setTimeout(()=> { if(window.forumActions) { window.forumState.mainTab='home'; window.forumActions.openPostDetail(${cd.postId}); } }, 100);">
+                
+                <div class="flex items-center space-x-1.5 text-gray-500 mb-2.5">
+                    <i data-lucide="compass" class="w-4 h-4 text-red-500 shrink-0"></i>
+                    <span class="text-[11px] font-bold tracking-wide">笔记分享</span>
+                </div>
+                
+                <div class="text-[15px] font-black text-gray-900 mb-1.5 leading-snug line-clamp-2">${cd.title}</div>
+                <div class="text-[13px] font-medium text-gray-500 line-clamp-2 leading-relaxed mb-3">${cd.contentSnippet}</div>
+                
+                <div class="border-t border-gray-100 pt-2.5 flex items-center">
+                    <div class="w-4 h-4 rounded-full bg-gray-100 flex items-center justify-center mr-1.5 overflow-hidden shrink-0">
+                        <i data-lucide="user" class="w-3 h-3 text-gray-400"></i>
+                    </div>
+                    <span class="text-[10px] text-gray-400 font-bold truncate">来自 @${cd.author}</span>
+                </div>
+            </div>
+            `;
       } else if (msg.msgType === 'invite_card') {
             // 🌟 完美融入架构：利用底层气泡包装器，只需指定宽度和透明底色！头像和时间会自动对齐！
             maxWidthClass = 'max-w-[240px]';

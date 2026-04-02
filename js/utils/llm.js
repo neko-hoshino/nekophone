@@ -232,6 +232,43 @@ ${emojiRule}
     else if (m.msgType === 'real_image' && m.imageUrl) {
         msgContent = [{ type: "text", text: m.text }, { type: "image_url", image_url: { url: m.imageUrl } }];
     }
+    // 🌟 💡 论坛帖子卡片透视引擎：自动抓取完整原帖喂给 AI
+    else if (m.msgType === 'forum_post_card' && m.cardData && m.cardData.postId) {
+        // 从全局数据库中找到那篇原帖
+        const post = (store.forumPosts || []).find(p => p.id === m.cardData.postId);
+        
+        if (post) {
+            let postDetail = `【论坛笔记详情】\n标题：${post.title || '无标题'}\n作者：${post.author}\n正文：${post.content || '无正文'}\n`;
+            
+            // 解析多媒体附件
+            if (post.mediaList && post.mediaList.length > 0) {
+                const mediaStrs = post.mediaList.map(media => {
+                    if (media.type === 'real_image') return '[真实图片]';
+                    if (media.type === 'virtual_image') return `[虚拟照片：${media.desc || ''}]`;
+                    if (media.type === 'virtual_video') return `[虚拟视频：${media.desc || ''}]`;
+                    return '';
+                }).filter(Boolean);
+                postDetail += `附带媒体：${mediaStrs.join(', ')}\n`;
+            }
+            
+            // 解析投票结果
+            if (post.poll) {
+                const pollStrs = post.poll.options.map((opt, i) => `${opt} (${post.poll.votes[i]}票)`);
+                postDetail += `附带投票调查：${post.poll.question || '参与投票'}\n当前投票结果：${pollStrs.join('，')}\n`;
+            }
+            
+            // 组装给 AI 的最终话语
+            if (m.isMe) { 
+                msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] [用户 ${myName} 向你分享了一篇帖子，内容如下]：\n${postDetail}`; 
+            } else { 
+                msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] [向你分享了一篇帖子，内容如下]：\n${postDetail}`; 
+            }
+        } else {
+            // 防御：如果原帖被删除了
+            if (m.isMe) { msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] [用户 ${myName} 分享了一篇帖子，但该帖子已失效/被删除]`; }
+            else { msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] [分享了一篇已失效的帖子]`; }
+        }
+    }
     // 💡 处理普通文本
     else {
       if (m.isMe) { msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] [用户 ${myName} 说]：${m.text}`; }
