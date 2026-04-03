@@ -1959,6 +1959,7 @@ if (!window.cpActions) {
 
         if (actionType === 'eat') {
             pet.foodLevel = 100;
+            pet.hunger = 100;
             window.cpActions.updatePetStats(charId);
             window.render();
             if (window.actions?.showToast) window.actions.showToast('哗啦啦... 猫粮倒满啦！');

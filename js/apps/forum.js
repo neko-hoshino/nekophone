@@ -16,13 +16,44 @@ window.forumState = {
     showForumSettingsModal: false,
     editingForumDraft: null, 
     settingsScrollTop: 0,
+    detailScrollTop: 0, 
     replyingToCommentId: null, 
-    
     followPageSize: 10,
     
-    draft: {
-        title: '', text: '', mediaList: [], topic: '', poll: null 
-    }
+    // 🌟 私信与盲盒系统状态
+    messageTab: 'contacts', // 'contacts' (联系人) | 'discover' (匹配盲盒)
+    strangers: [],          // 存放刷出来的盲盒
+    activeStrangerId: null, // 当前查看的盲盒详细
+    isGeneratingStrangers: false,
+    isGeneratingProfile: false,
+    activeForumChatId: null, 
+    isRefreshingContacts: false, 
+    isReplyingForumChat: false,
+
+    draft: { title: '', text: '', mediaList: [], topic: '', poll: null }
+};
+
+// 🌟 盲盒基础骨架词库 (终极扩容版)
+const strangerBanks = {
+    orientations: [
+        'BG', 'GB', 'BL', 'GL', '泛性恋', '智性恋', '柏拉图式', '无性恋', '双性恋', 'BDSM', 'ABO', '哨向'
+    ],
+    relationships: [
+        '青梅竹马', '死对头', '天降系', '久别重逢', '年上爹系', '年下小狗', '前任', '人机恋',
+        '危险的甲方', '合租室友', '契约恋人', '强取豪夺', '破镜重圆', '救赎与被救赎', 
+        '替身白月光', '伪骨科', '网恋奔现', '假戏真做', '蓄谋已久', '欢喜冤家', '相爱相杀', '金主与雀鸟', '先婚后爱', '人夫', '有妇之夫', '母子', '父女', '兄妹', '姐弟',
+        '师生', '师徒', '同学', '同事', '邻居', '网友', '素未谋面', '一夜情', '被迫同居', '假扮情侣', '暗恋多年', '失忆后重逢', '跨国恋人', '时空错位', '灵魂交换', '前世今生'
+    ],
+    jobs: [
+        '重案组法医', '白帽黑客', '财阀继承人', '地下乐队贝斯手', '心理医生', '赛车手', '午夜电台主播', '异国雇佣兵', '纹身师', '犯罪心理学教授', , '学霸', '体育生', '艺术家', '技术宅', '社交达人', '职场精英', '学渣', '网红主播', '图书管理员', '咖啡师', '酒吧调酒师', '健身教练', '瑜伽老师', '宠物美容师',
+        '顶级刑辩律师', '颓废画家', '天文台研究员', '殡仪馆入殓师', '深夜调酒师', '急诊科主刀医生', '神秘学塔罗占卜师', '卧底探员', '破产前总裁', '战地摄影师', 
+        '独立游戏开发者', '地下拳击手', '夜店老板', '流浪诗人', '黑帮老大', '特种兵退役军人', '跨国间谍', '失业的前科技公司高管', '神秘的图书管理员', '未来世界的时间警察', '末世幸存者', '虚拟偶像', 'AI人格', '异世界冒险者', '仿生人'
+    ],
+    personas: [
+        '疯批', '傲娇', '高岭之花', '病娇', '清冷腹黑', '社恐', '白切黑', '毒舌', 
+        '斯文败类', '顶级绿茶', '钓系高手', '厌世脸', '偏执狂', '爹系控制狂', 
+        '笨蛋美人', '温柔冷血', '暴躁老哥/老姐', '缺爱小可怜', '禁欲系', '伪善者', '直球', '逗比', '天然呆'
+    ]
 };
 
 const formatForumTime = (ts) => {
@@ -50,7 +81,8 @@ export const renderForumApp = (store) => {
 
     if (!store.forumProfile) store.forumProfile = { name: '', signature: '这里是我的个性签名，很高兴认识世界。', avatar: '', bgUrl: '' };
     if (!store.forumPosts) store.forumPosts = []; 
-    if (!store.forumBookmarks) store.forumBookmarks = []; 
+    if (!store.forumBookmarks) store.forumBookmarks = [];
+    if (!store.forumChats) store.forumChats = []; 
     
     if (!store.forums || store.forums.length === 0) {
         store.forums = [{ id: 'default', name: 'little univers', topic: '综合闲聊日常', userPersonaId: store.personas?.[0]?.id || null, includedCharIds: store.contacts?.map(c => c.id) || [], mountedWorldbookIds: [] }];
@@ -61,29 +93,36 @@ export const renderForumApp = (store) => {
     const profile = store.forumProfile;
     const forumPersona = store.personas?.find(p => p.id === activeForum.userPersonaId) || store.personas?.[0] || { name: 'User', avatar: '' };
     const displayName = profile.name || forumPersona.name;
-    const displayAvatar = profile.avatar || forumPersona.avatar || 'https://api.dicebear.com/7.x/lorelei/svg?seed=Eve';
+    const displayAvatar = profile.avatar || forumPersona.avatar || 'https://api.dicebear.com/7.x/notionists-neutral/svg?seed=Eve&backgroundColor=ffffff';
 
-    // 🌟 在这里更改路人头像的风格！把 lorelei 换成你喜欢的库名
+    // 🌟 修复1：判定如果是当前用户（displayName），就渲染用户的真实头像
     const getCommentAvatar = (author) => {
+        if (author === displayName) return displayAvatar.length > 10 ? `<img src="${displayAvatar}" class="w-full h-full object-cover">` : displayAvatar;
         const char = store.contacts?.find(c => c.name === author);
         if (char && char.avatar) return char.avatar.length > 10 ? `<img src="${char.avatar}" class="w-full h-full object-cover">` : char.avatar; 
-        return `<img src="https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(author)}&backgroundColor=ffffff" class="w-full h-full object-cover border border-gray-100">`;
+        return `<img src="https://api.dicebear.com/7.x/notionists-neutral/svg?seed=${encodeURIComponent(author)}&backgroundColor=ffffff" class="w-full h-full object-cover border border-gray-100">`;
     };
 
-    const scrollToDetailBottom = () => { setTimeout(() => { const el = document.getElementById('forum-detail-scroll'); if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); }, 100); };
+    // 🌟 专门用于用户发评论或AI对线时的拉到底部动作
+    const scrollToDetailBottom = () => { setTimeout(() => { const el = document.getElementById('forum-detail-scroll'); if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); }, 150); };
 
     // ==========================================
-    // 🧠 AI 全量刷帖引擎 
+    // 🧠 AI 全量刷帖引擎
     // ==========================================
     const generateAIPosts = async (targetForumId) => {
+        if (window.forumState.isRefreshingPosts) return; 
         const forum = store.forums.find(f => f.id === targetForumId);
         if (!forum || !store.apiConfig?.apiKey) return;
 
-        store.forumPosts = store.forumPosts.filter(p => {
-            if (p.forumId !== targetForumId) return true; 
-            if (p.type === 'discover' && !p.isMine && !store.forumBookmarks.includes(p.id)) return false; 
-            return true;
+        window.forumState.isRefreshingPosts = true;
+        window.render();
+        if (window.actions?.showToast) window.actions.showToast('正在全网搜罗新帖...');
+
+        // 🌟 修复3：先给所有发现页帖子打上隐藏标记，然后彻底删除那些没用的路人旧贴释放内存！
+        store.forumPosts.forEach(p => {
+            if (p.forumId === targetForumId && p.type === 'discover') p.hiddenFromDiscover = true;
         });
+        store.forumPosts = store.forumPosts.filter(p => !p.hiddenFromDiscover || p.isMine || store.forumBookmarks.includes(p.id));
 
         try {
             const globalWb = (store.worldbooks || []).filter(w => w.type === 'global' && w.enabled).map(w => w.content).join('\n');
@@ -106,22 +145,12 @@ ${charProfiles || '无'}
 要求：
 1. 其中 ${validContacts.length} 篇由上述“已知角色”发布（每人必须发1篇，"type"填"follow"）。
 2. 另外 10 篇由“随机路人”（自拟真实网名）发布（"type"填"discover"）。
-3. 这批帖子中必须混合出现【纯文字帖】、【附带虚拟照片】、【附带虚拟视频】、【投票调查贴】！
+3. 必须混合出现【纯文字帖】、【附带虚拟照片】、【附带虚拟视频】、【投票调查贴】！
 4. 绝不要输出思考过程，直接输出纯 JSON 数组！
-5. 每篇帖子的正文(content)必须不少于100字！极其符合人设和频道主题！
+5. 每篇正文(content)必须不少于100字！极其符合人设和频道主题！
+6. ⚠️当前系统用户叫“${displayName}”，不要以这个名字发帖。
 
-格式：
-[
-  {
-     "author": "名字",
-     "type": "follow" (角色) 或 "discover" (路人),
-     "title": "帖子标题 (投票贴须加【投票】前缀)",
-     "content": "正文内容不少于100字...",
-     "mediaList": [ {"type": "virtual_image"或"virtual_video", "desc": "描述"} ],
-     "topic": "话题标签",
-     "poll": { "question": "问题", "options": ["选项1", "选项2"] }
-  }
-]`;
+格式：[ { "author": "名字", "type": "follow" 或 "discover", "title": "标题", "content": "正文不少于100字", "mediaList": [ {"type": "virtual_image"或"virtual_video", "desc": "描述"} ], "topic": "话题", "poll": { "question": "问题", "options": ["选项1", "选项2"] } } ]`;
 
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
@@ -132,12 +161,14 @@ ${charProfiles || '无'}
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
             reply = reply.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
 
-            const parsedPosts = JSON.parse(reply);
+            let parsedPosts = JSON.parse(reply);
+            if (parsedPosts.posts) parsedPosts = parsedPosts.posts; // 容错处理
+
             if (Array.isArray(parsedPosts)) {
                 let baseTime = Date.now();
                 const newPosts = parsedPosts.map((p, i) => {
                     const char = store.contacts?.find(c => c.name === p.author);
-                    const avatarUrl = (char && char.avatar) ? char.avatar : `https://api.dicebear.com/7.x/lorelei/svg?seed=${encodeURIComponent(p.author)}&backgroundColor=ffffff`;
+                    const avatarUrl = (char && char.avatar) ? char.avatar : `https://api.dicebear.com/7.x/notionists-neutral/svg?seed=${encodeURIComponent(p.author)}&backgroundColor=ffffff`;
                     
                     const post = {
                         ...p,
@@ -156,26 +187,29 @@ ${charProfiles || '无'}
                         post.poll.hasVoted = false;
                     } else post.poll = null;
                     if (!Array.isArray(post.mediaList)) post.mediaList = [];
-                    
                     return post;
                 });
 
                 store.forumPosts.unshift(...newPosts);
                 if (window.actions?.saveStore) window.actions.saveStore();
-                if (window.actions?.showToast) window.actions.showToast(`🎉 频道 [${forum.name}] 刷新了 ${newPosts.length} 条新帖！`);
+                if (window.actions?.showToast) window.actions.showToast(`频道刷新了 ${newPosts.length} 条新帖！`);
             }
         } catch (e) {
-            if (window.actions?.showToast) window.actions.showToast('刷新帖子失败');
+            if (window.actions?.showToast) window.actions.showToast('刷新帖子格式错误，请重试');
         } finally { window.forumState.isRefreshingPosts = false; window.render(); }
     };
 
     // ==========================================
-    // 🧠 AI 评论生成引擎
+    // 🧠 AI 评论生成引擎 (加入强力并发锁与报错机制)
     // ==========================================
     const generateAIReactions = async (postId, isAppend = false) => {
+        if (window.forumState.isLoadingComments) return; // 🌟 核心防御：正在加载时，完全无视新的请求！
+        
         const post = store.forumPosts.find(p => p.id === postId);
         if (!post || !store.apiConfig?.apiKey) return;
-        window.forumState.isLoadingComments = true; window.render();
+        
+        window.forumState.isLoadingComments = true; 
+        window.render();
 
         try {
             const charProfiles = (store.contacts || []).map(c => `名字：${c.name}\n设定：${c.prompt}`).join('\n\n');
@@ -183,12 +217,18 @@ ${charProfiles || '无'}
             const globalWb = store.worldbook || '';
             const forumWb = store.forumWorldbook || '';
 
-            let postInfo = `【发帖人】${post.author}\n【标题】${post.title}\n【正文】${post.content}\n`;
+            const nextFloor = (post.comments && post.comments.length > 0) ? Math.max(...post.comments.map(c => c.floor || 0)) + 1 : 1;
+            const authorTag = post.author === displayName ? '(★当前用户本体)' : '(发帖人)';
+            
+            let postInfo = `【发帖人】${post.author} ${authorTag}\n【标题】${post.title}\n【正文】${post.content}\n`;
             if (post.mediaList && post.mediaList.length > 0) postInfo += `【附件】${post.mediaList.map(m => m.type + (m.desc ? ':'+m.desc : '')).join('; ')}\n`;
 
             let existingCommentsText = '';
             if (post.comments && post.comments.length > 0) {
-                existingCommentsText = post.comments.map(c => `[${c.author}] ${c.replyTo ? '回复@'+c.replyTo+'：' : '评论：'}${c.content}`).join('\n');
+                existingCommentsText = post.comments.map(c => {
+                    const cAuthorTag = c.author === displayName ? '(★当前用户本体)' : '';
+                    return `[${c.floor||0}楼] [${c.author}${cAuthorTag}] ${c.replyTo ? '回复@'+c.replyTo+'：' : '评论：'}${c.content}`;
+                }).join('\n');
             }
 
             const prompt = `你是一个真实社交平台的模拟引擎。
@@ -203,25 +243,32 @@ ${postInfo}
 ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsText}\n` : ''}
 
 【任务】
-为这篇帖子${isAppend ? '补充生成 10 条全新的评论。' : '生成 10 条不同用户的评论。'}
-1. 可包含已知角色（每人最多1条）。剩下由随机路人（自拟网名）发布。
-2. 如果上方提供了已有评论，新评论必须针对这些评论进行部分点评、反驳或互怼！
-3. 绝不要输出思考过程，直接输出 JSON 数组！绝对不要生成头像！
-格式：[ { "author": "网名或角色名", "content": "评论内容" } ]`;
+为这篇帖子${isAppend ? `补充生成 10 条全新的评论，从第 ${nextFloor} 楼开始递增。` : `生成 10 条不同用户的评论，从第 1 楼开始递增。`}
+1. 可包含已知角色（每人最多1条）。剩下由随机路人发布。
+2. 🌟如果上方提供了【已有评论记录】，新评论必须针对前面的评论进行部分点评、反驳或提及！（如：同意2楼）
+3. ⚠️绝对不要把路人错认成当前用户(${displayName})！
+4. 绝不要输出思考过程，直接输出 JSON 数组！
+
+格式：[ { "floor": 楼层数字, "author": "网名或角色名", "content": "评论内容" } ]`;
 
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: prompt }], temperature: 0.88 })
             });
 
+            if (!res.ok) throw new Error(`API HTTP Error`);
             const data = await res.json();
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
             reply = reply.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
 
-            const comments = JSON.parse(reply);
+            let comments = JSON.parse(reply);
+            if (comments.comments) comments = comments.comments; // 🌟 强力容错
+
             if (Array.isArray(comments)) {
                 let baseTime = Date.now();
-                const newComments = comments.map((c, i) => ({ ...c, id: baseTime + i, timestamp: baseTime - Math.floor(Math.random() * 10000) }));
+                const newComments = comments.map((c, i) => ({ 
+                    ...c, id: baseTime + i, timestamp: baseTime + (i * 1000), floor: c.floor || (nextFloor + i)
+                }));
                 if (!post.comments) post.comments = [];
                 if (isAppend) post.comments.push(...newComments);
                 else { post.comments = newComments; post.likes = Math.floor(Math.random() * 50) + 15; }
@@ -234,14 +281,24 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
                     }
                 }
                 if (window.actions?.saveStore) window.actions.saveStore();
+            } else {
+                throw new Error("AI没有返回标准的数组格式");
             }
-        } catch (e) {} finally { window.forumState.isLoadingComments = false; window.render(); scrollToDetailBottom(); }
+        } catch (e) {
+            if (window.actions?.showToast) window.actions.showToast('加载评论失败，请再试一次'); // 🌟 明确报错提醒
+        } finally { 
+            window.forumState.isLoadingComments = false; 
+            window.render(); 
+        }
     };
 
+    // ==========================================
+    // 🧠 AI 针对用户对线引擎
+    // ==========================================
     const generateAICommentReply = async (postId, targetComment, userReplyText) => {
         const post = store.forumPosts.find(p => p.id === postId);
         if (!post || !store.apiConfig?.apiKey) return;
-        window.forumState.isLoadingComments = true; window.render(); scrollToDetailBottom();
+        // 注意：不锁死主评论加载锁，允许并发回复
         
         try {
             const globalP = store.globalPrompt || '';
@@ -252,7 +309,7 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
                 ? `用户(${displayName})刚才在你的帖子里评论了你：${userReplyText}` 
                 : `你在帖子下评论说：${targetComment.content}\n用户(${displayName})刚才回复你：${userReplyText}`;
 
-            const prompt = `你是一个社交平台的模拟引擎。\n【论坛主题】${activeForum.topic || '综合闲聊日常'}\n【用户人设】名字：${displayName}\n全局性格：${globalP}\n${targetContext}\n【帖子内容】标题：${post.title||'无'} 正文：${post.content}\n【对话上下文】\n${actionContext}\n\n【任务】\n给出你对用户的回复！符合身份，50字内口语化。不包含<think>，只输出纯文本！`;
+            const prompt = `你是一个社交平台的模拟引擎。\n【论坛主题】${activeForum.topic || '综合闲聊日常'}\n【当前对话用户】名字：${displayName}\n全局性格：${globalP}\n\n${targetContext}\n【帖子内容】标题：${post.title||'无'} 正文：${post.content}\n【对话上下文】\n${actionContext}\n\n【任务】\n给出你对用户的直接回复！符合身份，50字内口语化。不包含<think>，只输出纯文本！`;
 
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
@@ -261,22 +318,235 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
 
             const data = await res.json();
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+            const nextFloor = (post.comments && post.comments.length > 0) ? Math.max(...post.comments.map(c => c.floor || 0)) + 1 : 1;
 
-            post.comments.push({ id: Date.now(), timestamp: Date.now(), author: targetComment.author, content: reply, replyTo: displayName });
+            post.comments.push({ id: Date.now(), timestamp: Date.now(), floor: nextFloor, author: targetComment.author, content: reply, replyTo: displayName });
             if (window.actions?.saveStore) window.actions.saveStore();
-        } catch (e) {} finally { window.forumState.isLoadingComments = false; window.render(); scrollToDetailBottom(); }
+        } catch (e) {
+            if (window.actions?.showToast) window.actions.showToast('对方没理你，回复失败');
+        } finally { 
+            window.render(); 
+            scrollToDetailBottom(); 
+        }
+    };
+    // ==========================================
+    // 🧠 AI 论坛私信引擎 (一次性打包输出版，彻底告别 429！)
+    // ==========================================
+    const generateContactsReactions = async () => {
+        if (window.forumState.isRefreshingContacts) return;
+        
+        // 获取最新的一篇帖子
+        const myPosts = store.forumPosts.filter(p => p.isMine);
+        const myBookmarks = store.forumBookmarks.map(id => store.forumPosts.find(p => p.id === id)).filter(Boolean);
+        const allRecent = [...myPosts, ...myBookmarks].sort((a, b) => b.timestamp - a.timestamp);
+        const latestPost = allRecent[0];
+        
+        if (!latestPost) return window.actions?.showToast('你还没有发帖或收藏任何内容哦~');
+        
+        const contacts = store.contacts || [];
+        if (contacts.length === 0) return window.actions?.showToast('通讯录还没有人哦，去匹配几个吧！');
+
+        window.forumState.isRefreshingContacts = true; window.render();
+        if (window.actions?.showToast) window.actions.showToast('正在刷新私信，请稍候...');
+
+        try {
+            const globalWb = (store.worldbooks || []).filter(w => w.type === 'global' && w.enabled).map(w => w.content).join('\n');
+            
+            // 🌟 核心：将所有联系人的核心记忆和专属用户设定打包压缩！
+            const contactsProfiles = contacts.map(char => {
+                const coreMemories = (store.memories || []).filter(m => m.charId === char.id && m.type === 'core').map(m => m.content).join('；');
+                const boundPersona = store.personas?.find(p => p.id === char.boundPersonaId) || store.personas?.[0] || { name: displayName, prompt: '' };
+                return `【角色名称】：${char.name}\n【他的设定】：${char.prompt}\n【他的专属核心记忆】：${coreMemories}\n【与他对话的用户设定(名字:${boundPersona.name})】：${boundPersona.prompt}`;
+            }).join('\n\n---\n\n');
+
+            const isMineStr = latestPost.isMine ? '发布' : '收藏';
+            const postContext = `用户最近${isMineStr}了这篇帖子：\n【标题】${latestPost.title||'无'}\n【正文】${latestPost.content}`;
+            
+            // 🌟 核心：命令 AI 以 JSON 数组形式一次性吐出所有人的反应
+            const prompt = `你是一个社交平台的模拟引擎。\n【全局世界书】${globalWb}\n\n【任务】\n${postContext}\n\n你需要同时扮演以下多个角色，主动发一条私信给用户，对这篇帖子发表看法、吐槽或关心。
+要求：
+1. 必须为列表中的【每一个角色】生成一条专属回复！
+2. 每个角色的回复必须严格符合其人设和核心记忆，且必须针对他绑定的【用户设定】来调整语气。
+3. 50字以内，高度口语化。
+4. 绝不要输出思考过程，直接输出纯 JSON 数组！
+
+【需要扮演的角色列表】
+${contactsProfiles}
+
+格式要求（必须是严格的JSON数组）：
+[
+  { "author": "角色名", "reply": "私信内容" }
+]`;
+
+            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: prompt }], temperature: 0.85 })
+            });
+            
+            if (!res.ok) throw new Error(`API HTTP Error: ${res.status}`);
+            
+            const data = await res.json();
+            let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+            reply = reply.replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+            
+            let reactions = JSON.parse(reply);
+            if (reactions.reactions) reactions = reactions.reactions; // 强力容错
+            
+            if (Array.isArray(reactions)) {
+                // 🌟 瞬间将所有人的回复分发到各自的单聊记录中
+                reactions.forEach(reaction => {
+                    const char = contacts.find(c => c.name === reaction.author);
+                    if (char) {
+                        let fChat = store.forumChats.find(c => c.charId === char.id);
+                        if (!fChat) { fChat = { charId: char.id, messages: [] }; store.forumChats.push(fChat); }
+                        fChat.messages.push({ id: Date.now() + Math.random(), sender: char.name, isMe: false, text: reaction.reply, timestamp: Date.now() });
+                    }
+                });
+                
+                if (window.actions?.saveStore) window.actions.saveStore();
+                if (window.actions?.showToast) window.actions.showToast('私信刷新成功！');
+            } else {
+                throw new Error("JSON 格式不正确");
+            }
+        } catch (e) {
+            console.error("获取反应失败:", e);
+            if (window.actions?.showToast) window.actions.showToast('私信刷新失败，请重试');
+        } finally { 
+            window.forumState.isRefreshingContacts = false; 
+            window.render(); 
+        }
+    };
+
+    const generateForumChatReply = async (charId) => {
+        if (window.forumState.isReplyingForumChat) return;
+        const char = store.contacts.find(c => c.id === charId);
+        const fChat = store.forumChats.find(c => c.charId === charId);
+        if (!char || !fChat || fChat.messages.length === 0) return;
+
+        window.forumState.isReplyingForumChat = true; window.render();
+
+        try {
+            const globalWb = (store.worldbooks || []).filter(w => w.type === 'global' && w.enabled).map(w => w.content).join('\n');
+            const coreMemories = (store.memories || []).filter(m => m.charId === charId && m.type === 'core').map(m => m.content).join('；');
+            const boundPersona = store.personas?.find(p => p.id === char.boundPersonaId) || store.personas?.[0] || { name: displayName, prompt: '' };
+            
+            const historyStr = fChat.messages.slice(-10).map(m => `[${m.isMe ? boundPersona.name : char.name}]: ${m.text}`).join('\n');
+
+            const prompt = `你是一个社交平台的模拟引擎。\n【全局世界书】${globalWb}\n【你的设定】名字：${char.name}\n设定：${char.prompt}\n核心记忆：${coreMemories}\n【当前对话用户设定】名字：${boundPersona.name}\n设定：${boundPersona.prompt}\n\n【最近聊天记录】\n${historyStr}\n\n【任务】\n给出你对用户的回复！符合身份，50字内，单行纯文本，不包含<think>！`;
+
+            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: prompt }], temperature: 0.85 })
+            });
+            const data = await res.json();
+            const reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+            
+            fChat.messages.push({ id: Date.now(), sender: char.name, isMe: false, text: reply, timestamp: Date.now() });
+            if (window.actions?.saveStore) window.actions.saveStore();
+        } catch (e) {
+            if (window.actions?.showToast) window.actions.showToast('消息发送失败');
+        } finally { 
+            window.forumState.isReplyingForumChat = false; window.render(); 
+            setTimeout(() => { const el = document.getElementById('forum-chat-scroll'); if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); }, 100); 
+        }
+    };
+    // ==========================================
+    // 🧠 AI 陌生人盲盒系统 (生成列表与深度人设)
+    // ==========================================
+    const generateStrangers = async () => {
+        if (state.isGeneratingStrangers) return;
+        window.forumState.isGeneratingStrangers = true; window.render();
+        
+        try {
+            // 从词库随机抽3组骨架
+            let combos = '';
+            for(let i=0; i<3; i++) {
+                const ori = strangerBanks.orientations[Math.floor(Math.random()*strangerBanks.orientations.length)];
+                const rel = strangerBanks.relationships[Math.floor(Math.random()*strangerBanks.relationships.length)];
+                const job = strangerBanks.jobs[Math.floor(Math.random()*strangerBanks.jobs.length)];
+                const per = strangerBanks.personas[Math.floor(Math.random()*strangerBanks.personas.length)];
+                combos += `人物${i+1}基础：[${ori}] [与用户的关系:${rel}] [职业:${job}] [性格:${per}]\n`;
+            }
+
+            const prompt = `你是一个盲盒交友APP的模拟器。请根据以下3组基础设定，为每个角色生成【1个化名】、【2个带有强烈反差感/怪癖的补充Tag】、【1句极具张力的开场白搭讪词(Hook)】。
+基础设定：
+${combos}
+任务：
+1. 搭讪词必须立刻让人产生好奇心或心跳加速，严禁俗套的“你好”。
+2. 补充Tag必须展现不为人知的一面，要有反差感、独特性。
+3. 绝不输出思考过程，只输出严格的 JSON 数组！
+格式：[{"baseTags": ["保留传给你的4个基础词"], "mutatedTags": ["变异词1", "变异词2"], "name": "化名", "hook": "搭讪词"}]`;
+
+            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: prompt }], temperature: 0.9 })
+            });
+
+            const data = await res.json();
+            let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+            
+            const parsed = JSON.parse(reply);
+            window.forumState.strangers = parsed.map((s, i) => ({
+                id: 'stranger_' + Date.now() + i,
+                ...s,
+                avatar: `https://api.dicebear.com/7.x/notionists-neutral/svg?seed=${encodeURIComponent(s.name)}&backgroundColor=ffffff`,
+                profile: null // 初始为空，点击后再生成深度资料
+            }));
+        } catch (e) {
+            if (window.actions?.showToast) window.actions.showToast('盲盒加载失败，请重试');
+        } finally { window.forumState.isGeneratingStrangers = false; window.render(); }
+    };
+
+    const generateStrangerProfile = async (strangerId) => {
+        const stranger = window.forumState.strangers.find(s => s.id === strangerId);
+        if (!stranger) return;
+        
+        window.forumState.isGeneratingProfile = true; window.render();
+
+        try {
+            const prompt = `你正在为一个沉浸式模拟系统生成人物档案。
+【已知标签】：${stranger.baseTags.join(', ')}，${stranger.mutatedTags.join(', ')}
+【第一句话】：${stranger.hook}
+
+请严格按以下 JSON 结构输出。每个字段的值必须是【纯文本字符串】，绝对禁止嵌套数组或对象：
+{
+  "realName": "真实姓名",
+  "identity": "年龄与职业细节",
+  "appearance": "容貌(Face/Body)、气味(Scent)与穿搭(Attire)",
+  "behavior": "说话风格(Speech style)、口头禅与怪癖(Tics)",
+  "social": "社交网络(Anchors)与仇敌(Enemies)",
+  "background": "出身(Origin)、童年(Childhood)与人生拐点(Turning Point)",
+  "secret": "内心冲突(Conflict)与不为人知的秘密(Secret)",
+  "optional_flaws": "失去的事物(Lost)或身心缺陷(Pain/flaws)，若无填无",
+  "nsfw_kinks": "性向(Orientation)、偏好(Kinks/Zones)与底线(Bottom line)"
+}`;
+
+            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: prompt }], temperature: 0.8 })
+            });
+
+            const data = await res.json();
+            let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+            
+            // 🌟 强力纠错：处理 AI 意外生成的非字符串字段
+            const rawProfile = JSON.parse(reply);
+            const sanitized = {};
+            Object.keys(rawProfile).forEach(key => {
+                const val = rawProfile[key];
+                sanitized[key] = (typeof val === 'object') ? JSON.stringify(val).replace(/[\[\]"{}]/g, '') : String(val);
+            });
+            
+            stranger.profile = sanitized;
+        } catch (e) {
+            console.error("档案生成失败:", e);
+            if (window.actions?.showToast) window.actions.showToast('档案生成失败，请重试');
+        } finally { window.forumState.isRefreshingPosts = false; window.forumState.isGeneratingProfile = false; window.render(); }
     };
 
     window.forumActions = {
         goBack: () => { window.actions.setCurrentApp(null); },
-        
-        refreshPosts: (forumId) => {
-            if (window.forumState.isRefreshingPosts) return window.actions?.showToast('正在拉取最新帖子，请稍候...');
-            window.forumState.isRefreshingPosts = true;
-            window.render();
-            if (window.actions?.showToast) window.actions.showToast('正在拉取最新帖子，请稍候...');
-            generateAIPosts(forumId);
-        },
+        refreshPosts: (forumId) => generateAIPosts(forumId),
         
         deletePost: (postId) => {
             if (confirm("确定要删除这条帖子吗？")) {
@@ -297,33 +567,23 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
                 window.render();
             }
         },
-        
-        // 🌟 频道删除逻辑
         deleteForum: (forumId) => {
-            if (forumId === 'default') return window.actions?.showToast('默认频道不可删除哦！');
-            if (confirm("确定要删除这个频道吗？里面的所有帖子和数据都将被永久清空！")) {
+            if (forumId === 'default') return window.actions?.showToast('默认频道不可删除');
+            if (confirm("确定要删除这个频道吗？所有数据都将被永久清空！")) {
                 store.forums = store.forums.filter(f => f.id !== forumId);
                 store.forumPosts = store.forumPosts.filter(p => p.forumId !== forumId);
-                // 同步清理已失效的收藏贴
-                const validPostIds = store.forumPosts.map(p => p.id);
-                store.forumBookmarks = store.forumBookmarks.filter(id => validPostIds.includes(id));
-                
-                if (window.forumState.activeForumId === forumId) {
-                    window.forumState.activeForumId = 'default';
-                    window.forumState.mainTab = 'home';
-                }
-                if (window.actions?.saveStore) window.actions.saveStore();
-                window.render();
+                const validIds = store.forumPosts.map(p => p.id);
+                store.forumBookmarks = store.forumBookmarks.filter(id => validIds.includes(id));
+                if (window.forumState.activeForumId === forumId) { window.forumState.activeForumId = 'default'; window.forumState.mainTab = 'home'; }
+                if (window.actions?.saveStore) window.actions.saveStore(); window.render();
             }
         },
 
         loadMoreFollow: () => { window.forumState.followPageSize += 10; window.render(); },
-
         toggleSidebar: () => { window.forumState.showSidebar = !window.forumState.showSidebar; window.render(); },
         switchForum: (forumId) => { window.forumState.activeForumId = forumId; window.forumState.showSidebar = false; window.forumState.mainTab = 'home'; window.render(); },
         openForumSettings: (forumId) => {
-            const isNew = forumId === null;
-            if (isNew) window.forumState.editingForumDraft = { id: null, name: '', topic: '', userPersonaId: store.personas?.[0]?.id || null, includedCharIds: store.contacts?.map(c => c.id) || [], mountedWorldbookIds: [] };
+            if (forumId === null) window.forumState.editingForumDraft = { id: null, name: '', topic: '', userPersonaId: store.personas?.[0]?.id || null, includedCharIds: store.contacts?.map(c => c.id) || [], mountedWorldbookIds: [] };
             else window.forumState.editingForumDraft = JSON.parse(JSON.stringify(store.forums.find(x => x.id === forumId)));
             window.forumState.showForumSettingsModal = true; window.render();
         },
@@ -333,8 +593,7 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
             if (!d.name.trim()) return window.actions?.showToast('频道名字不能为空哦！');
             if (d.id === null) { d.id = 'forum_' + Date.now(); store.forums.push(d); window.forumState.activeForumId = d.id; }
             else { const idx = store.forums.findIndex(x => x.id === d.id); if (idx > -1) store.forums[idx] = d; }
-            if (window.actions?.saveStore) window.actions.saveStore();
-            window.forumActions.closeForumSettings();
+            if (window.actions?.saveStore) window.actions.saveStore(); window.forumActions.closeForumSettings();
         },
         updateDraftField: (field, val) => { window.forumState.editingForumDraft[field] = val; },
         toggleDraftArray: (field, val) => {
@@ -349,56 +608,118 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
         switchMainTab: (tab) => { window.forumState.mainTab = tab; window.render(); },
         switchHomeSubTab: (tab) => { window.forumState.homeSubTab = tab; window.render(); },
         switchMeSubTab: (tab) => { window.forumState.meSubTab = tab; window.render(); },
-        openPrivateMessages: () => { window.actions?.showToast('进入私信列表...'); },
-        saveName: (val) => { store.forumProfile.name = val.trim(); if (window.actions?.saveStore) window.actions.saveStore(); },
-        saveSignature: (val) => { store.forumProfile.signature = val.trim(); if (window.actions?.saveStore) window.actions.saveStore(); },
-        uploadAvatar: (e) => { const file = e.target.files[0]; if (!file) return; if (window.actions?.compressImage) { window.actions.compressImage(file, (b) => { store.forumProfile.avatar = b; window.render(); }, true); } },
-        uploadBg: (e) => { const file = e.target.files[0]; if (!file) return; if (window.actions?.compressImage) { window.actions.compressImage(file, (b) => { store.forumProfile.bgUrl = b; window.render(); }, false); } },
-
+        // 🌟 私信与盲盒动作
+        openPrivateMessages: () => { 
+            window.forumState.view = 'messages'; 
+            window.forumState.messageTab = 'contacts'; 
+            window.render(); 
+        },
+        closePrivateMessages: () => { window.forumState.view = 'list'; window.render(); },
+        // 🌟 论坛独立单聊动作
+        refreshContactsReactions: () => generateContactsReactions(),
+        openForumChat: (charId) => { window.forumState.activeForumChatId = charId; window.forumState.view = 'forum_chat'; window.render(); setTimeout(() => { const el = document.getElementById('forum-chat-scroll'); if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'auto' }); }, 50); },
+        closeForumChat: () => { window.forumState.view = 'messages'; window.forumState.activeForumChatId = null; window.render(); },
+        sendForumChatMsg: (charId) => {
+            const input = document.getElementById(`forum-chat-input`);
+            if (!input || !input.value.trim()) return;
+            const text = input.value.trim();
+            let fChat = store.forumChats.find(c => c.charId === charId);
+            if (!fChat) { fChat = { charId, messages: [] }; store.forumChats.push(fChat); }
+            fChat.messages.push({ id: Date.now(), sender: displayName, isMe: true, text, timestamp: Date.now() });
+            input.value = '';
+            if (window.actions?.saveStore) window.actions.saveStore();
+            window.render();
+            setTimeout(() => { const el = document.getElementById('forum-chat-scroll'); if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); }, 100);
+        },
+        getForumChatReply: (charId) => { generateForumChatReply(charId); },
+        switchMessageTab: (tab) => { 
+            window.forumState.messageTab = tab; 
+            window.render(); 
+            // 🌟 拔除自动触发引线，不再强迫系统自动生成，完全由用户手动点击触发
+        },
+        refreshStrangers: () => { generateStrangers(); },
+        openStrangerDetail: (id) => { 
+            window.forumState.activeStrangerId = id; window.forumState.view = 'stranger_detail'; window.render();
+            generateStrangerProfile(id); // 触发深度解析
+        },
+        // 🌟 重 Roll 动作：清除当前 profile 并重新调用生成
+        rerollStrangerProfile: (id) => {
+            const stranger = window.forumState.strangers.find(s => s.id === id);
+            if (stranger) {
+                stranger.profile = null;
+                window.forumActions.openStrangerDetail(id);
+            }
+        },
+        closeStrangerDetail: () => { window.forumState.view = 'messages'; window.forumState.activeStrangerId = null; window.render(); },
+        rejectStranger: (id) => {
+            window.forumState.strangers = window.forumState.strangers.filter(s => s.id !== id);
+            window.forumActions.closeStrangerDetail();
+        },
+        acceptStranger: (id) => {
+            const stranger = window.forumState.strangers.find(s => s.id === id);
+            if (!stranger || !stranger.profile) return;
+            
+            const p = stranger.profile;
+            // 🌟 将深度信息拼装为提示词
+            const fullPrompt = `【表象设定】\n真实姓名：${p.realName}\n身份：${p.identity}\n外貌：${p.appearance}\n行为习惯：${p.behavior}\n人际社交：${p.social}\n\n【深度机密】\n过往经历：${p.background}\n内心创伤与秘密：${p.secret}\n缺失与瑕疵：${p.optional_flaws}\n亲密关系偏好：${p.nsfw_kinks}`;
+            
+            const newCharId = 'char_' + Date.now();
+            
+            // 🌟 核心：以真名（p.realName）存入微信通讯录！
+            store.contacts.push({ id: newCharId, name: p.realName, avatar: stranger.avatar, prompt: fullPrompt });
+            
+            // 🌟 核心：用真名作为 sender 创建聊天室并发第一句话
+            store.chats.push({
+                charId: newCharId, isGroup: false,
+                messages: [{ id: Date.now(), sender: p.realName, isMe: false, msgType: 'text', text: stranger.hook, timestamp: Date.now() }]
+            });
+            
+            if (window.actions?.saveStore) window.actions.saveStore();
+            window.forumState.strangers = window.forumState.strangers.filter(s => s.id !== id);
+            window.forumActions.closeStrangerDetail();
+            window.actions.setCurrentApp('wechat');
+        },
         openPostDetail: (id) => { 
             window.forumState.activePostId = id; window.forumState.view = 'detail'; window.forumState.replyingToCommentId = null; window.render(); 
             const post = store.forumPosts.find(p => p.id === id);
-            if (post && (!post.comments || post.comments.length === 0)) generateAIReactions(post.id, false); 
+            // 🌟 加上并发锁判断！如果正在加载，绝不再发请求！
+            if (post && (!post.comments || post.comments.length === 0) && !window.forumState.isLoadingComments) {
+                generateAIReactions(post.id, false); 
+            }
         },
         closePostDetail: () => { window.forumState.view = 'list'; window.forumState.activePostId = null; window.render(); },
         loadMoreComments: (id) => { generateAIReactions(id, true); },
         
         openReplyInput: (commentId) => {
-            window.forumState.replyingToCommentId = window.forumState.replyingToCommentId === commentId ? null : commentId;
-            window.render();
-            if (window.forumState.replyingToCommentId) {
-                setTimeout(() => { const el = document.getElementById(`forum-reply-input-${commentId}`); if (el) el.focus(); }, 50);
-            }
+            window.forumState.replyingToCommentId = window.forumState.replyingToCommentId === commentId ? null : commentId; window.render();
+            if (window.forumState.replyingToCommentId) setTimeout(() => { const el = document.getElementById(`forum-reply-input-${commentId}`); if (el) el.focus(); }, 50);
         },
         submitReply: (postId, commentId) => {
             const input = document.getElementById(`forum-reply-input-${commentId}`);
             if (!input || !input.value.trim()) return;
             const replyText = input.value.trim();
-
             const post = store.forumPosts.find(p => p.id === postId);
             if (!post) return;
             const target = post.comments.find(c => c.id === commentId);
             if (!target) return;
 
-            post.comments.push({ id: Date.now(), timestamp: Date.now(), author: displayName, content: replyText, replyTo: target.author });
-            window.forumState.replyingToCommentId = null;
-            window.render(); scrollToDetailBottom();
+            const nextFloor = (post.comments && post.comments.length > 0) ? Math.max(...post.comments.map(c => c.floor || 0)) + 1 : 1;
+            post.comments.push({ id: Date.now(), timestamp: Date.now(), floor: nextFloor, author: displayName, content: replyText, replyTo: target.author });
+            window.forumState.replyingToCommentId = null; window.render(); scrollToDetailBottom();
             generateAICommentReply(postId, target, replyText);
         },
         commentOnPost: (postId) => {
             const input = document.getElementById(`forum-post-comment-input-${postId}`);
             if (!input || !input.value.trim()) return;
             const replyText = input.value.trim();
-
             const post = store.forumPosts.find(p => p.id === postId);
             if (!post) return;
 
-            post.comments.push({ id: Date.now(), timestamp: Date.now(), author: displayName, content: replyText.trim() });
-            window.render(); scrollToDetailBottom();
+            const nextFloor = (post.comments && post.comments.length > 0) ? Math.max(...post.comments.map(c => c.floor || 0)) + 1 : 1;
+            post.comments.push({ id: Date.now(), timestamp: Date.now(), floor: nextFloor, author: displayName, content: replyText });
+            input.value = ''; window.render(); scrollToDetailBottom();
             
-            if (!post.isMine) {
-                generateAICommentReply(postId, { author: post.author, content: post.title || post.content, isPost: true }, replyText.trim());
-            }
+            if (!post.isMine) generateAICommentReply(postId, { author: post.author, content: post.title || post.content, isPost: true }, replyText);
         },
 
         votePoll: (postId, optIdx) => {
@@ -407,7 +728,6 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
             post.poll.votes[optIdx]++; post.poll.totalVotes++; post.poll.hasVoted = true;
             if (window.actions?.saveStore) window.actions.saveStore(); window.render();
         },
-
         toggleBookmark: (postId) => {
             const idx = store.forumBookmarks.indexOf(postId);
             if (idx > -1) store.forumBookmarks.splice(idx, 1); else store.forumBookmarks.unshift(postId);
@@ -431,7 +751,6 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
             }
             window.forumState.shareModalPostId = null; window.render();
         },
-
         openPostModal: () => { window.forumState.showPostModal = true; window.render(); },
         closePostModal: () => { window.forumState.showPostModal = false; window.render(); },
         uploadRealImages: (e) => {
@@ -450,7 +769,6 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
         updatePollOption: (idx, val) => { window.forumState.draft.poll.options[idx] = val; },
         updateTitle: (val) => { window.forumState.draft.title = val; },
         updateText: (val) => { window.forumState.draft.text = val; },
-
         submitPost: () => {
             const draft = window.forumState.draft;
             if (!draft.title && !draft.text && draft.mediaList.length === 0) return window.actions?.showToast('写点什么再发布吧~');
@@ -476,7 +794,7 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
             window.forumState.homeSubTab = 'discover';
             window.render();
             
-            if (window.actions?.showToast) window.actions.showToast('笔记发布成功！网友正在火速赶来...');
+            if (window.actions?.showToast) window.actions.showToast('帖子发布成功！网友正在火速赶来...');
             generateAIReactions(newPost.id, false);
         }
     };
@@ -535,7 +853,8 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
             let loadMoreHtml = '';
 
             if (state.homeSubTab === 'discover') {
-                let allDiscover = currentForumPosts.filter(p => p.type === 'discover' && !p.isMine);
+                // 🌟 修复2：不再粗暴屏蔽自己的帖子，而是屏蔽被打上“隐藏标记”的旧帖子！
+                let allDiscover = currentForumPosts.filter(p => p.type === 'discover' && !p.hiddenFromDiscover);
                 postsToRender = allDiscover.filter(p => !store.forumBookmarks.includes(p.id));
             } else {
                 const allFollow = currentForumPosts.filter(p => p.type === 'follow');
@@ -620,7 +939,7 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
         `;
     } 
     // ==========================================
-    // 📖 渲染：帖子详情页 (折叠回复、原位评论、纸飞机统一)
+    // 📖 渲染：帖子详情页 
     // ==========================================
     else if (state.view === 'detail') {
         const post = store.forumPosts.find(p => p.id === state.activePostId);
@@ -628,13 +947,21 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
             let fullMediaHtml = '';
             if (post.mediaList && post.mediaList.length > 0) {
                 const items = post.mediaList.map(m => {
-                    let inner = '';
-                    if (m.type === 'real_image') inner = `<img src="${m.url}" class="w-full h-full object-cover rounded-[12px]" />`;
-                    else if (m.type === 'virtual_image') inner = `<div class="w-full h-full bg-[#f8f9fa] rounded-[12px] flex flex-col items-center justify-center text-gray-500 border border-gray-200 p-3"><i data-lucide="camera" class="w-8 h-8 mb-2 opacity-50"></i><div class="text-[12px] font-bold line-clamp-3 text-center">${m.desc||'虚拟照片'}</div></div>`;
-                    else if (m.type === 'virtual_video') inner = `<div class="w-full h-full bg-[#f8f9fa] rounded-[12px] flex flex-col items-center justify-center text-gray-500 border border-gray-200 p-3"><i data-lucide="video" class="w-8 h-8 mb-2 text-blue-400 opacity-80"></i><div class="text-[12px] font-bold line-clamp-3 text-center">${m.desc||'虚拟视频'}</div></div>`;
-                    return `<div class="aspect-square shadow-sm">${inner}</div>`;
+                    if (m.type === 'real_image') return `<img src="${m.url}" class="w-full mt-3 object-cover rounded-xl shadow-sm border border-gray-100" />`;
+                    const isImg = m.type === 'virtual_image';
+                    return `
+                    <div class="relative w-full min-h-[12rem] bg-white cursor-pointer select-none rounded-xl border border-gray-200 overflow-hidden shadow-sm mt-3" onclick="const overlay = this.querySelector('.img-overlay'); overlay.classList.toggle('opacity-0'); overlay.classList.toggle('pointer-events-none');">
+                        <div class="absolute inset-0 p-4 overflow-y-auto text-[13px] text-gray-700 leading-relaxed text-left bg-white hide-scrollbar">
+                            <span class="font-bold text-gray-400 block mb-2 flex items-center"><i data-lucide="${isImg ? 'image' : 'video'}" class="w-4 h-4 mr-1 ${!isImg ? 'text-blue-400' : ''}"></i>${isImg ? '照片内容：' : '视频内容：'}</span>
+                            ${m.desc || (isImg ? '一张虚拟照片' : '一段虚拟视频')}
+                        </div>
+                        <div class="img-overlay absolute inset-0 bg-[#f8f9fa] flex flex-col items-center justify-center text-gray-400 transition-opacity duration-300 z-10">
+                            <i data-lucide="${isImg ? 'image' : 'video'}" class="w-10 h-10 mb-2 ${!isImg ? 'text-blue-400 opacity-80' : 'opacity-50'}"></i>
+                            <span class="text-[12px] font-bold tracking-widest animate-pulse">点击查看${isImg ? '照片' : '视频'}</span>
+                        </div>
+                    </div>`;
                 }).join('');
-                fullMediaHtml = `<div class="grid grid-cols-2 gap-2 mt-4">${items}</div>`;
+                fullMediaHtml = `<div class="flex flex-col">${items}</div>`;
             }
 
             let pollHtml = '';
@@ -664,11 +991,10 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
             let commentsHtml = '';
             if (post.comments && post.comments.length > 0) {
                 post.comments.forEach(c => { if (!c.timestamp) c.timestamp = Date.now(); });
-                const sortedComments = post.comments.slice().sort((a,b) => a.timestamp - b.timestamp);
+                const sortedComments = post.comments.slice().sort((a,b) => (a.floor || 0) - (b.floor || 0) || a.timestamp - b.timestamp);
+                
                 commentsHtml = sortedComments.map(c => {
                     const isReplying = state.replyingToCommentId === c.id;
-                    
-                    // 🌟 统一为蓝色的纸飞机按钮
                     const replyInputHtml = isReplying ? `
                         <div class="mt-3 mb-1 flex items-center animate-in slide-in-from-top-2 duration-200" onclick="event.stopPropagation()">
                             <input type="text" id="forum-reply-input-${c.id}" autofocus class="flex-1 bg-[#f4f5f7] border border-transparent rounded-full px-3 py-1.5 text-[13px] outline-none text-gray-800 placeholder-gray-400 transition-colors focus:bg-white focus:border-gray-200 shadow-inner" placeholder="回复 @${c.author}..." onkeydown="if(event.key==='Enter') window.forumActions.submitReply(${post.id}, ${c.id})">
@@ -682,15 +1008,13 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
                     <div class="flex items-start space-x-3 mt-5 cursor-pointer active:bg-gray-50 transition-colors p-2 -mx-2 rounded-xl" onclick="window.forumActions.openReplyInput(${c.id})">
                         <div class="w-9 h-9 rounded-full overflow-hidden flex items-center justify-center shrink-0 border border-gray-100 bg-white shadow-sm">${getCommentAvatar(c.author)}</div>
                         <div class="flex-1 border-b border-gray-100/60 pb-4">
-                            <div class="flex items-center justify-between">
-                                <div class="text-[13px] font-extrabold text-gray-500">${c.author}</div>
-                            </div>
+                            <div class="text-[13px] font-extrabold text-gray-500">${c.author}</div>
                             <div class="text-[15px] text-gray-800 mt-1.5 leading-relaxed break-words font-medium">
                                 ${c.replyTo ? `回复 <span class="text-blue-500">@${c.replyTo}</span>：` : ''}${c.content}
                             </div>
                             ${replyInputHtml}
                             <div class="flex items-center justify-between mt-2">
-                                <div class="text-[11px] font-bold text-gray-400">${formatForumTime(c.timestamp)}</div>
+                                <div class="text-[11px] font-bold text-gray-400">${c.floor ? c.floor+'楼 · ' : ''}${formatForumTime(c.timestamp)}</div>
                                 <div class="flex items-center">
                                     <i data-lucide="message-square" class="w-3.5 h-3.5 text-gray-300 mr-4"></i>
                                     <i data-lucide="trash-2" class="w-3.5 h-3.5 text-gray-300 hover:text-red-500 active:scale-90 transition-colors" onclick="event.stopPropagation(); window.forumActions.deleteComment(${post.id}, ${c.id})"></i>
@@ -737,15 +1061,15 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
                             <div class="text-[15px] font-black text-gray-800 mb-2">共 ${post.comments ? post.comments.length : 0} 条评论</div>
                             ${commentsHtml}
                             <div class="mt-8 flex justify-center">
-                                <button onclick="window.forumActions.loadMoreComments(${post.id})" class="px-6 py-2.5 rounded-full border border-gray-200 text-gray-600 text-[13px] font-bold active:bg-gray-50 flex items-center shadow-sm transition-colors">
-                                    <i data-lucide="loader" class="w-4 h-4 mr-1.5 ${state.isLoadingComments ? 'animate-spin' : 'hidden'}"></i>
-                                    ${state.isLoadingComments ? '加载评论中...' : '加载更多评论'}
+                                <button onclick="if(!window.forumState.isLoadingComments) window.forumActions.loadMoreComments(${post.id})" class="px-6 py-2.5 rounded-full border border-gray-200 text-gray-600 text-[13px] font-bold flex items-center shadow-sm transition-colors ${state.isLoadingComments ? 'opacity-50 bg-gray-100 cursor-not-allowed' : 'active:bg-gray-50'}">
+                                    <i data-lucide="loader" class="w-4 h-4 mr-1.5 ${state.isLoadingComments ? 'animate-spin inline-block' : 'hidden'}"></i>
+                                    ${state.isLoadingComments ? '评论加载中...' : '加载更多评论'}
                                 </button>
                             </div>
                         </div>
                     </div>
                     <div class="border-t border-gray-100 bg-white px-4 py-2.5 pb-safe flex items-center space-x-3 shadow-[0_-2px_10px_rgba(0,0,0,0.02)] z-30">
-                        <input type="text" id="forum-post-comment-input-${post.id}" class="flex-1 bg-[#f4f5f7] rounded-full px-4 py-2 text-[14px] text-gray-800 outline-none placeholder-gray-400 transition-colors focus:bg-gray-100 border border-transparent focus:border-gray-200" placeholder="留下你的评论..." onkeydown="if(event.key==='Enter') window.forumActions.commentOnPost(${post.id})">
+                        <input type="text" id="forum-post-comment-input-${post.id}" class="flex-1 bg-[#f4f5f7] rounded-full px-4 py-2 text-[14px] text-gray-800 outline-none placeholder-gray-400 transition-colors focus:bg-white border border-transparent focus:border-gray-200 shadow-inner" placeholder="留下你的评论..." onkeydown="if(event.key==='Enter') window.forumActions.commentOnPost(${post.id})">
                         <div class="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center cursor-pointer active:scale-90 transition-transform shadow-sm shrink-0" onclick="window.forumActions.commentOnPost(${post.id})">
                             <i data-lucide="send" class="w-4 h-4 mr-0.5 mt-0.5"></i>
                         </div>
@@ -792,6 +1116,205 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
             </div>
         `;
     }
+    // ==========================================
+    // 📖 视图路由：私信列表 / 盲盒匹配
+    // ==========================================
+    if (state.view === 'messages') {
+        let tabsHtml = `
+            <div class="flex p-1 bg-gray-100 rounded-full mx-16 mt-2 mb-4">
+                <div class="flex-1 py-1.5 text-center text-[13px] font-bold rounded-full cursor-pointer transition-all ${state.messageTab === 'contacts' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}" onclick="window.forumActions.switchMessageTab('contacts')">好友私信</div>
+                <div class="flex-1 py-1.5 text-center text-[13px] font-bold rounded-full cursor-pointer transition-all ${state.messageTab === 'discover' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-400'}" onclick="window.forumActions.switchMessageTab('discover')">陌生人私信</div>
+            </div>
+        `;
+
+        let listHtml = '';
+        if (state.messageTab === 'contacts') {
+            const contactsListHtml = (store.contacts || []).map(char => {
+                const fChat = store.forumChats.find(c => c.charId === char.id);
+                const lastMsg = fChat && fChat.messages.length > 0 ? fChat.messages[fChat.messages.length - 1] : null;
+                return `
+                    <div class="flex items-center space-x-3 p-4 active:bg-gray-50 cursor-pointer border-b border-gray-50 transition-colors" onclick="window.forumActions.openForumChat('${char.id}')">
+                        <img src="${char.avatar}" class="w-12 h-12 rounded-full object-cover shrink-0 border border-gray-100 shadow-sm">
+                        <div class="flex flex-col flex-1 overflow-hidden">
+                           <div class="flex justify-between items-center"><span class="text-[15px] font-black text-gray-800 truncate">${char.name}</span></div>
+                           <span class="text-[13px] text-gray-500 mt-1 truncate">${lastMsg ? lastMsg.text : '暂无反应'}</span>
+                        </div>
+                    </div>`;
+            }).join('');
+            
+            listHtml = `
+                <div class="px-4 pb-20">
+                    ${contactsListHtml || `<div class="text-center text-gray-400 mt-20 text-[13px] font-bold">暂无联系人</div>`}
+                    <div class="flex justify-center mt-6">
+                        <button class="px-6 py-2.5 bg-white border border-gray-200 text-gray-600 rounded-full text-[13px] font-bold shadow-sm active:bg-gray-50 flex items-center transition-colors" onclick="window.forumActions.refreshContactsReactions()">
+                            <i data-lucide="refresh-cw" class="w-4 h-4 mr-2 ${state.isRefreshingContacts ? 'animate-spin' : ''}"></i>
+                            ${state.isRefreshingContacts ? '正在获取反应...' : '获取好友对最新帖子的反应'}
+                        </button>
+                    </div>
+                </div>`;
+        } else {
+            // 🌟 盲盒卡片流 (增加了极其精美的空状态启动 UI)
+            if (state.isGeneratingStrangers) {
+                listHtml = `<div class="flex flex-col items-center justify-center mt-20 text-gray-400"><i data-lucide="loader" class="w-8 h-8 animate-spin mb-3 text-indigo-400"></i><span class="text-[13px] font-bold tracking-widest">获取中...</span></div>`;
+            } else if (state.strangers.length === 0) {
+                // 🌟 当没有任何陌生人时，展示这个巨大的召唤按钮
+                listHtml = `
+                    <div class="flex flex-col items-center justify-center mt-24 text-gray-400 animate-in fade-in zoom-in-95 duration-300">
+                        <div class="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mb-4 shadow-inner border border-indigo-100">
+                            <i data-lucide="radar" class="w-10 h-10 text-indigo-400"></i>
+                        </div>
+                        <span class="text-[15px] font-black text-gray-600 mb-1">茫茫人海，还未相遇</span>
+                        <span class="text-[12px] font-bold text-gray-400 mb-8">打捞几个漂流瓶，看看会有怎样的羁绊</span>
+                        <button class="px-8 py-3.5 bg-gray-900 text-white rounded-full text-[14px] font-black shadow-lg shadow-gray-900/20 active:scale-95 flex items-center transition-transform" onclick="window.forumActions.refreshStrangers()">
+                            <i data-lucide="radar" class="w-4 h-4 mr-2"></i>开始打捞
+                        </button>
+                    </div>
+                `;
+            } else {
+                const strangersHtml = state.strangers.map(s => {
+                    const allTags = [...s.baseTags, ...s.mutatedTags];
+                    const tagsHtml = allTags.map(t => `<span class="bg-indigo-50 text-indigo-500 text-[10px] font-extrabold px-2 py-1 rounded-md mr-1.5 mb-1.5 whitespace-nowrap">#${t}</span>`).join('');
+                    return `
+                        <div class="bg-white rounded-[20px] p-5 shadow-sm border border-gray-100 mb-4 cursor-pointer active:scale-[0.98] transition-transform" onclick="window.forumActions.openStrangerDetail('${s.id}')">
+                            <div class="flex items-start space-x-4">
+                                <img src="${s.avatar}" class="w-14 h-14 rounded-full object-cover shrink-0 border border-gray-100 shadow-sm bg-gray-50">
+                                <div class="flex flex-col flex-1">
+                                    <div class="text-[16px] font-black text-gray-900 mb-1 select-none">${s.name}</div>
+                                    <div class="flex flex-wrap mb-3">${tagsHtml}</div>
+                                    <div class="bg-gray-50 p-3 rounded-xl text-[14px] text-gray-700 font-medium italic border-l-2 border-indigo-300">"${s.hook}"</div>
+                                </div>
+                            </div>
+                        </div>`;
+                }).join('');
+                listHtml = `<div class="px-4 pb-20">${strangersHtml}<div class="flex justify-center mt-6"><button class="px-6 py-2.5 bg-gray-900 text-white rounded-full text-[13px] font-bold shadow-lg shadow-gray-900/20 active:scale-95 flex items-center transition-transform" onclick="window.forumActions.refreshStrangers()"><i data-lucide="refresh-cw" class="w-4 h-4 mr-2"></i>换一批</button></div></div>`;
+            }
+        }
+
+        contentHtml = `
+            <div class="absolute inset-0 bg-white z-[65] flex flex-col animate-in slide-in-from-right-4 duration-200">
+                <div class="pt-8 pb-2 px-4 flex items-center justify-between border-b border-gray-100/50 sticky top-0 bg-white/90 backdrop-blur-md z-10">
+                    <div class="cursor-pointer active:opacity-50 text-gray-600 w-8" onclick="window.forumActions.closePrivateMessages()"><i data-lucide="chevron-left" class="w-7 h-7"></i></div>
+                    <span class="text-[16px] font-black text-gray-800">我的私信</span>
+                    <div class="w-8"></div>
+                </div>
+                ${tabsHtml}
+                <div class="flex-1 overflow-y-auto hide-scrollbar bg-[#f8f9fa]">${listHtml}</div>
+            </div>
+        `;
+    }
+
+    // ==========================================
+    // 📖 视图路由：盲盒深度资料卡 (防雷折叠)
+    // ==========================================
+    else if (state.view === 'stranger_detail') {
+        const s = state.strangers.find(x => x.id === state.activeStrangerId);
+        if (s) {
+            let detailContent = '';
+            if (state.isGeneratingProfile) {
+                detailContent = `<div class="flex flex-col items-center justify-center py-20 text-gray-400"><i data-lucide="loader" class="w-8 h-8 animate-spin mb-4 text-indigo-400"></i><span class="text-[13px] font-bold tracking-widest animate-pulse">正在深度解析人物灵魂...</span></div>`;
+            } else if (s.profile) {
+                const p = s.profile;
+                detailContent = `
+                    <div class="space-y-4 animate-in fade-in duration-300">
+                        <div class="bg-white rounded-[20px] p-5 border border-gray-100 shadow-sm relative">
+                            <div class="absolute top-4 right-4 text-gray-300 hover:text-indigo-400 cursor-pointer active:rotate-180 transition-transform duration-500" onclick="window.forumActions.rerollStrangerProfile('${s.id}')">
+                                <i data-lucide="refresh-ccw" class="w-4 h-4"></i>
+                            </div>
+
+                            <div class="text-[12px] font-black text-indigo-400 mb-3 flex items-center"><i data-lucide="user" class="w-4 h-4 mr-1"></i>表面设定与社交档案</div>
+                            <div class="text-[14px] text-gray-800 leading-relaxed font-medium mb-3"><span class="text-gray-400 font-bold">真实姓名：</span>${p.realName}</div>
+                            <div class="text-[14px] text-gray-800 leading-relaxed font-medium mb-3"><span class="text-gray-400 font-bold">社会身份：</span>${p.identity}</div>
+                            <div class="text-[14px] text-gray-800 leading-relaxed font-medium mb-3"><span class="text-gray-400 font-bold">外貌气味：</span>${p.appearance}</div>
+                            <div class="text-[14px] text-gray-800 leading-relaxed font-medium mb-3"><span class="text-gray-400 font-bold">行为特征：</span>${p.behavior}</div>
+                            <div class="text-[14px] text-gray-800 leading-relaxed font-medium"><span class="text-gray-400 font-bold">人际社交：</span>${p.social}</div>
+                        </div>
+                        
+                        <details class="bg-white rounded-[20px] border border-gray-100 shadow-sm group">
+                            <summary class="p-5 text-[12px] font-black text-rose-400 flex items-center justify-between cursor-pointer outline-none select-none list-none">
+                                <div class="flex items-center"><i data-lucide="lock" class="w-4 h-4 mr-1.5"></i>点击解锁：过往档案与私密偏好</div>
+                                <i data-lucide="chevron-down" class="w-4 h-4 transition-transform group-open:rotate-180"></i>
+                            </summary>
+                            <div class="px-5 pb-5 pt-1 border-t border-gray-50">
+                                <div class="text-[14px] text-gray-800 leading-relaxed font-medium mb-3 mt-2"><span class="text-rose-300 font-bold">过往经历：</span>${p.background}</div>
+                                <div class="text-[14px] text-gray-800 leading-relaxed font-medium mb-3"><span class="text-rose-300 font-bold">秘密冲突：</span>${p.secret}</div>
+                                ${p.optional_flaws && !p.optional_flaws.includes('无') ? `<div class="text-[14px] text-gray-800 leading-relaxed font-medium mb-3"><span class="text-rose-300 font-bold">缺失病痛：</span>${p.optional_flaws}</div>` : ''}
+                                <div class="text-[14px] text-gray-800 leading-relaxed font-medium"><span class="text-rose-300 font-bold">亲密偏好：</span>${p.nsfw_kinks}</div>
+                            </div>
+                        </details>
+                    </div>
+                `;
+            }
+
+            contentHtml = `
+                <div class="absolute inset-0 bg-[#f4f5f7] z-[70] flex flex-col animate-in slide-in-from-bottom-4 duration-300">
+                    <div class="h-40 bg-gray-900 relative">
+                        <div class="absolute top-8 left-4 cursor-pointer active:opacity-50 text-white z-10" onclick="window.forumActions.closeStrangerDetail()"><i data-lucide="chevron-down" class="w-8 h-8"></i></div>
+                    </div>
+                    <div class="flex-1 overflow-y-auto hide-scrollbar px-5 pb-32 -mt-10 z-10">
+                        <div class="flex flex-col items-center mb-6">
+                            <img src="${s.avatar}" class="w-24 h-24 rounded-full object-cover border-4 border-white shadow-md bg-white">
+                            <span class="text-[22px] font-black text-gray-900 mt-3">${s.name}</span>
+                            <div class="flex flex-wrap justify-center mt-3 gap-1.5 max-w-[80%]">${[...s.baseTags, ...s.mutatedTags].map(t => `<span class="bg-indigo-100/50 text-indigo-600 text-[11px] font-extrabold px-2.5 py-1 rounded-full border border-indigo-100">#${t}</span>`).join('')}</div>
+                        </div>
+                        <div class="bg-gray-900 text-white p-4 rounded-[16px] text-[15px] font-medium italic text-center mb-5 shadow-lg shadow-gray-900/20 leading-relaxed">"${s.hook}"</div>
+                        ${detailContent}
+                    </div>
+                    
+                    ${!state.isGeneratingProfile ? `
+                    <div class="absolute bottom-0 left-0 right-0 bg-white border-t border-gray-100 pb-safe pt-3 px-5 flex space-x-4 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-20">
+                        <button class="flex-1 py-3.5 bg-gray-100 text-gray-500 rounded-full font-black text-[15px] active:scale-95 transition-transform" onclick="window.forumActions.rejectStranger('${s.id}')">不感兴趣</button>
+                        <button class="flex-[2] py-3.5 bg-indigo-500 text-white rounded-full font-black text-[15px] active:scale-95 transition-transform shadow-md shadow-indigo-500/30 flex items-center justify-center" onclick="window.forumActions.acceptStranger('${s.id}')"><i data-lucide="user-plus" class="w-4 h-4 mr-1.5"></i>通过验证，开聊</button>
+                    </div>` : ''}
+                </div>
+            `;
+        }
+    }
+    // ==========================================
+    // 📖 视图路由：论坛独立私信单聊页 (原生控制)
+    // ==========================================
+    else if (state.view === 'forum_chat') {
+        const char = store.contacts.find(c => c.id === state.activeForumChatId);
+        if (char) {
+            const fChat = store.forumChats.find(c => c.charId === char.id);
+            const messagesHtml = (fChat ? fChat.messages : []).map(m => {
+                const isMe = m.isMe;
+                const avatar = isMe ? displayAvatar : char.avatar;
+                return `
+                    <div class="flex items-start mb-4 ${isMe ? 'flex-row-reverse' : ''}">
+                        <img src="${avatar}" class="w-9 h-9 rounded-full object-cover shrink-0 border border-gray-100 shadow-sm ${isMe ? 'ml-3' : 'mr-3'}">
+                        <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[70%]">
+                            <div class="text-[11px] text-gray-400 mb-1 mx-1">${m.sender}</div>
+                            <div class="px-4 py-2.5 rounded-2xl text-[14px] leading-relaxed shadow-sm ${isMe ? 'bg-indigo-500 text-white rounded-tr-sm' : 'bg-white border border-gray-100 text-gray-800 rounded-tl-sm'}">
+                                ${m.text}
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            contentHtml = `
+                <div class="absolute inset-0 bg-[#f4f5f7] z-[70] flex flex-col animate-in slide-in-from-right-4 duration-200">
+                    <div class="pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200/50 z-20 sticky top-0 bg-white/90 backdrop-blur-md shadow-sm">
+                        <div class="cursor-pointer active:opacity-50 text-gray-600 w-8" onclick="window.forumActions.closeForumChat()"><i data-lucide="chevron-left" class="w-7 h-7"></i></div>
+                        <span class="text-[16px] font-black text-gray-800 absolute left-1/2 -translate-x-1/2">${char.name}</span>
+                        <div class="w-8"></div>
+                    </div>
+                    
+                    <div id="forum-chat-scroll" class="flex-1 overflow-y-auto p-4 hide-scrollbar">
+                        ${messagesHtml || '<div class="text-center text-gray-400 mt-10 text-[12px] font-bold">还没有聊天记录</div>'}
+                    </div>
+
+                    <div class="border-t border-gray-200 bg-white p-3 pb-safe flex items-center space-x-2 shadow-[0_-5px_15px_rgba(0,0,0,0.03)] z-30">
+                        <input type="text" id="forum-chat-input" class="flex-1 bg-[#f8f9fa] border border-gray-200 rounded-full px-4 py-2.5 text-[14px] text-gray-800 outline-none focus:bg-white focus:border-indigo-300 transition-colors shadow-inner" placeholder="发消息..." onkeydown="if(event.key==='Enter') window.forumActions.sendForumChatMsg('${char.id}')">
+                        
+                        <button class="px-3.5 py-2.5 bg-transparent text-gray-600 rounded-full text-[13px] font-extrabold flex items-center cursor-pointer active:scale-95 transition-transform disabled:opacity-50 shrink-0" onclick="window.forumActions.getForumChatReply('${char.id}')" ${state.isReplyingForumChat ? 'disabled' : ''}>
+                            <i data-lucide="sparkles" class="w-6 h-6 ml-1 ${state.isReplyingForumChat ? 'animate-pulse' : ''}"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+    }
 
     if (state.showForumSettingsModal && state.editingForumDraft) {
         const d = state.editingForumDraft;
@@ -810,7 +1333,7 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
                         <span class="text-[16px] font-black text-gray-800">${d.id ? '频道设置' : '新建频道'}</span>
                         <i data-lucide="x" class="w-5 h-5 text-gray-400 cursor-pointer active:scale-90" onclick="window.forumActions.closeForumSettings()"></i>
                     </div>
-                    <div id="forum-settings-scroll" onscroll="window.forumState.settingsScrollTop = this.scrollTop" class="flex-1 overflow-y-auto p-5 space-y-5 hide-scrollbar">
+                    <div id="forum-settings-scroll" class="flex-1 overflow-y-auto p-5 space-y-5 hide-scrollbar">
                         <div>
                             <label class="block text-[12px] font-black text-gray-500 mb-1.5">频道名称</label>
                             <input type="text" value="${d.name}" onchange="window.forumActions.updateDraftField('name', this.value)" ${isDefault ? 'disabled' : ''} class="w-full border border-gray-200 rounded-xl px-3 py-2 text-[14px] font-bold text-gray-800 outline-none focus:border-blue-500 disabled:bg-gray-100" placeholder="如：王者荣耀开黑吧">
@@ -842,15 +1365,17 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
             </div>
         `;
     }
-
     // ==========================================
     // 🔗 渲染：转发弹窗 (Share Modal)
     // ==========================================
     if (state.shareModalPostId) {
-        const chatsListHtml = store.chats.map(chat => {
-            const char = store.contacts.find(c => c.id === chat.charId);
+        // 加上 (store.chats || []) 的安全后备，防止空列表导致报错卡死！
+        const chatsListHtml = (store.chats || []).map(chat => {
+            const char = (store.contacts || []).find(c => c.id === chat.charId);
             let name = chat.isGroup ? chat.groupName : (char ? char.name : '未知');
-            let avatarHtml = chat.isGroup ? `<div class="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center shrink-0 border border-gray-100"><i data-lucide="users" class="w-5 h-5 text-gray-500"></i></div>` : `<img src="${char?.avatar}" class="w-10 h-10 rounded-full object-cover shrink-0 border border-gray-100">`;
+            let avatarHtml = chat.isGroup 
+                ? `<div class="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center shrink-0 border border-gray-100"><i data-lucide="users" class="w-5 h-5 text-gray-500"></i></div>` 
+                : `<img src="${char?.avatar || 'https://api.dicebear.com/7.x/notionists-neutral/svg?seed=user'}" class="w-10 h-10 rounded-full object-cover shrink-0 border border-gray-100">`;
             return `
                 <div class="flex items-center space-x-3 p-3 active:bg-gray-50 cursor-pointer rounded-xl transition-colors" onclick="window.forumActions.shareToChat('${chat.charId}')">
                     ${avatarHtml}
@@ -864,12 +1389,12 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
 
         shareModalHtml = `
             <div class="absolute inset-0 bg-black/40 z-[80] flex items-center justify-center animate-in fade-in duration-200" onclick="window.forumActions.closeShareModal()">
-                <div class="bg-white rounded-[20px] p-5 w-[85%] max-h-[70%] flex flex-col animate-in zoom-in-95 duration-200 shadow-xl" onclick="event.stopPropagation()">
+                <div style="background: #ffffff !important;" class="rounded-[20px] p-5 w-[85%] max-h-[70%] flex flex-col animate-in zoom-in-95 duration-200 shadow-xl" onclick="event.stopPropagation()">
                     <div class="flex justify-between items-center mb-4 border-b border-gray-100 pb-3">
                         <span class="text-[16px] font-black text-gray-800">发送给...</span>
                         <i data-lucide="x" class="w-5 h-5 text-gray-400 cursor-pointer active:scale-90" onclick="window.forumActions.closeShareModal()"></i>
                     </div>
-                    <div id="forum-share-scroll" class="flex-1 overflow-y-auto hide-scrollbar space-y-1">
+                    <div class="flex-1 overflow-y-auto hide-scrollbar space-y-1">
                         ${chatsListHtml || `<div class="text-center text-gray-400 mt-10 text-[13px] font-bold">微信列表为空哦</div>`}
                     </div>
                 </div>
@@ -885,7 +1410,7 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
         <div class="absolute inset-0 bg-white z-[70] flex flex-col animate-in slide-in-from-bottom-4 duration-200">
             <div class="backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200/50 z-20 sticky top-0 bg-white/90 relative">
                 <div class="cursor-pointer active:opacity-50 text-gray-600 w-8" onclick="window.forumActions.closePostModal()"><i data-lucide="chevron-left" class="w-7 h-7"></i></div>
-                <span class="text-[16px] font-black text-gray-800 absolute left-1/2 -translate-x-1/2">发帖子</span>
+                <span class="text-[16px] font-black text-gray-800 absolute left-1/2 -translate-x-1/2">发贴</span>
                 <div class="w-8"></div>
             </div>
             
@@ -939,13 +1464,6 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
             </div>
         </div>
         `;
-    }
-
-    if (state.showForumSettingsModal) {
-        setTimeout(() => {
-            const el = document.getElementById('forum-settings-scroll');
-            if (el && state.settingsScrollTop) el.scrollTop = state.settingsScrollTop;
-        }, 0);
     }
 
     return `

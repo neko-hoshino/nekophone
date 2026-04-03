@@ -178,7 +178,7 @@ export function renderHomeApp(store) {
           <div class="flex-1 grid grid-cols-2 gap-3 mt-4">
              <div class="flex flex-col h-full">
                 <div class="flex-1"></div> 
-                <div class="grid grid-cols-2 gap-y-4 gap-x-4 pb-16 mt-4">
+                <div class="grid grid-cols-2 gap-y-4 gap-x-4 pb-24 mt-4">
                    ${createAppIcon('message-circle', '微信', "window.actions.setCurrentApp('wechat')", 'mc-icon-wechat', isDark)}
                    ${createAppIcon('messages-square', '论坛', "window.actions.setCurrentApp('forum')", 'mc-icon-forum', isDark)}
                    ${createAppIcon('twitter', 'X', "window.actions.showtoast('打开X')", 'mc-icon-x', isDark)}
@@ -198,6 +198,11 @@ export function renderHomeApp(store) {
                    <input type="text" value="梦之旅途" class="w-[80%] mr-[20%] ${inputBg} backdrop-blur-md px-3 py-1 text-[11px] font-serif rounded-full outline-none text-center shadow-sm border" onclick="event.stopPropagation()" />
                 </div>
                 <div class="flex-1"></div> 
+
+                <div class="flex justify-end space-x-4 pb-0 mt-4 animate-in fade-in duration-500">
+                   ${createAppIcon('shopping-bag', '购物', "window.actions.setCurrentApp('shop')", 'mc-icon-shop', isDark)}
+                   ${createAppIcon('smartphone', '查手机', "window.actions.setCurrentApp('phone')", 'mc-icon-phone', isDark)}
+                </div>
              </div>
           </div>
         </div>
