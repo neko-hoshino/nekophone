@@ -1328,7 +1328,7 @@ ${combos}
 
         forumSettingsModalHtml = `
             <div class="absolute inset-0 bg-black/50 z-[90] flex items-center justify-center animate-in fade-in duration-200">
-                <div class="w-[85%] max-h-[80%] bg-white rounded-[24px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+                <div class="w-[85%] max-h-[80%] bg-[#fff] rounded-[24px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
                     <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between bg-gray-50">
                         <span class="text-[16px] font-black text-gray-800">${d.id ? '频道设置' : '新建频道'}</span>
                         <i data-lucide="x" class="w-5 h-5 text-gray-400 cursor-pointer active:scale-90" onclick="window.forumActions.closeForumSettings()"></i>

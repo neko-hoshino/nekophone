@@ -2636,7 +2636,13 @@ if (!chat.isGroup) {
               if (m.msgType === 'voice') content = `[语音]: ${content.replace(/^\[语音\][:：]?\s*/, '')}`;
               else if (m.msgType === 'virtual_image') content = `[虚拟照片]: ${m.virtualImageText || content.replace(/^\[虚拟照片\][:：]?\s*/, '') || '一张照片'}`;
               else if (m.msgType === 'location') content = `[发送定位]: ${content.replace(/^\[(?:发送)?定位\][:：]?\s*/, '') || '未知位置'}`;
-              else if (m.msgType === 'transfer') content = `[发起转账] 金额：${m.transferData?.amount || '未知'}，备注：${m.transferData?.note || '无'}`;
+             else if (m.msgType === 'transfer') {
+    let stateText = '';
+    if (m.transferState === 'accepted') stateText = ' (已接收)';
+    else if (m.transferState === 'returned') stateText = ' (已退回)';
+    else stateText = ' (未接收)';
+    content = `[发起转账] 金额：${m.transferData?.amount || '未知'}，备注：${m.transferData?.note || '无'}${stateText}`;
+}
               else if (m.msgType === 'real_image') content = `[真实照片]`;
               else if (m.msgType === 'emoji') content = `[表情包]: ${content.replace(/^\[表情包\][:：]?\s*/, '')}`;
               
@@ -4158,6 +4164,23 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
                         <i data-lucide="user" class="w-3 h-3 text-gray-400"></i>
                     </div>
                     <span class="text-[10px] text-gray-400 font-bold truncate">来自 @${cd.author}</span>
+                </div>
+            </div>
+            `;
+      } else if (msg.msgType === 'phone_invite_card') {
+            // 🌟 查手机权限邀请卡片 (高级极客风配色)
+            maxWidthClass = 'max-w-[240px]';
+            bubbleClass = 'bg-transparent shadow-none p-0 m-0 border-0'; 
+            bubbleStyle = ''; 
+            contentHtml = `
+            <div class="w-[200px] bg-slate-50 rounded-[18px] border border-slate-200 p-4 shadow-sm select-none flex flex-col items-center justify-center">
+                <div class="flex items-center space-x-2 text-slate-700 mb-2.5 mt-1">
+                    <i data-lucide="smartphone" class="w-5 h-5 opacity-80 shrink-0"></i>
+                    <span class="text-[14px] font-black tracking-wide leading-snug text-center">${boundPersona.name}请求获取<br>手机访问权限</span>
+                </div>
+                <div class="flex items-center space-x-1.5 text-slate-400 mb-1">
+                    <i data-lucide="shield-question" class="w-3.5 h-3.5 opacity-80"></i>
+                    <span class="text-[10px] font-bold">等待对方授权...</span>
                 </div>
             </div>
             `;
@@ -5880,8 +5903,13 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
             }
         }
 
-        // 🌟 2. 净化时间戳
-        let remainingText = replyText.replace(/\[\d{1,2}:\d{2}\][:：]?\s*/g, '').replace(/\[系统提示.*?\][:：]?\s*/g, '').replace(/\[好友申请\][:：]?\s*/g, '').trim();
+        // 2. 净化时间戳（匹配多种格式： [HH:MM]、[YYYY-MM-DD HH:MM]、[YYYY/MM/DD HH:MM] 等）
+let remainingText = replyText
+    .replace(/\[\d{4}[-\/]\d{2}[-\/]\d{2}\s+\d{1,2}:\d{2}\][:：]?\s*/g, '')  // 完整日期时间
+    .replace(/\[\d{1,2}:\d{2}\][:：]?\s*/g, '')                                 // 仅时分
+    .replace(/\[系统提示.*?\][:：]?\s*/g, '')
+    .replace(/\[好友申请\][:：]?\s*/g, '')
+    .trim();
 
         // 🌟 3. 提取 HTML 保护罩
         let codeBlocks = [];
@@ -6088,6 +6116,44 @@ if (/\[(?:退回转账|退还转账)\]/.test(remainingText)) {
             }
             hasSystemAction = true;
         }
+        // 👇 🌟 新增：解析手机权限请求反馈！
+        if (/\[同意\]/.test(remainingText)) {
+            // 1. 永久授权钢印
+            char.hasPhonePermission = true; 
+            
+            // 2. 发送全服广播的灰色系统提示语
+            chat.messages.push({ 
+                id: Date.now() + sysMsgOffset++, 
+                sender: 'system', 
+                text: `${char.name} 已同意你的手机访问请求`, 
+                isMe: false, source: 'wechat', msgType: 'system', 
+                time: cloudTime, timestamp: Date.now() + sysMsgOffset
+            });
+            
+            // 3. 抹除丑陋的指令标签，让剩下的聊天自然输出
+            remainingText = remainingText.replace(/\[同意\][:：]?\s*/g, '').trim();
+            hasSystemAction = true;
+            if (typeof window.actions?.saveStore === 'function') window.actions.saveStore();
+        }
+
+        if (/\[拒绝\]/.test(remainingText)) {
+            // 1. 剥夺权限
+            char.hasPhonePermission = false; 
+            
+            // 2. 发送被拒绝的灰色系统提示语
+            chat.messages.push({ 
+                id: Date.now() + sysMsgOffset++, 
+                sender: 'system', 
+                text: `${char.name} 拒绝了你的手机访问请求`, 
+                isMe: false, source: 'wechat', msgType: 'system', 
+                time: cloudTime, timestamp: Date.now() + sysMsgOffset
+            });
+            
+            remainingText = remainingText.replace(/\[拒绝\][:：]?\s*/g, '').trim();
+            hasSystemAction = true;
+            if (typeof window.actions?.saveStore === 'function') window.actions.saveStore();
+        }
+        // 👆 结束新增
 
         // 🌟 解析 AI 的主动闹钟超能力（倒计时与定时发送）
         let customAlarmMinutes = null;
@@ -6388,6 +6454,21 @@ if (cleanedBeforeText.trim()) {
             });
             msgOffset++; 
         });
+
+                if (finalMsgs.length === 0 && !hasSystemAction) {
+            const fallbackText = (replyText && replyText.trim()) ? replyText : 'AI 没有生成有效回复';
+            chat.messages.push({
+                id: Date.now() + sysMsgOffset++,
+                sender: 'system',
+                text: `⚠️ 云端响应异常: ${fallbackText}`,
+                isMe: false,
+                source: 'wechat',
+                isOffline: isOffline,
+                msgType: 'system',
+                time: cloudTime,
+                timestamp: Date.now() + sysMsgOffset
+            });
+        }
 
         if (finalMsgs.length === 0 && !hasSystemAction) continue;
 
