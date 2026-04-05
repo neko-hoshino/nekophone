@@ -47,6 +47,27 @@ if (!store.diaryConfig) {
 }
 if (!store.diaries) store.diaries = [];
 
+// 🌟 新增：将问答记录作为隐藏消息推入聊天室 (仅存储，不触发 AI)
+const pushQnAHiddenMessage = (charId, askerName, questionText, answererName, answerText) => {
+    const chat = store.chats.find(c => c.charId === charId);
+    if (!chat) return;
+    // 构造清晰易读的隐藏消息文本
+    const hiddenText = `【提问箱记录】\n${askerName} 问：${questionText}\n${answererName} 答：${answerText}`;
+    chat.messages.push({
+        id: Date.now(),
+        sender: 'system',           // 系统发送，不干扰对话
+        isMe: false,
+        isHidden: true,             // 隐藏消息，不在聊天界面展示
+        msgType: 'hidden_qna',
+        text: hiddenText,
+        timestamp: Date.now()
+    });
+    // 仅存储，不调用 scheduleCloudTask
+    if (window.actions?.saveStore) window.actions.saveStore();
+    // 如果当前正在渲染，刷新界面（但隐藏消息不会显示，仅保持数据同步）
+    if (typeof window.render === 'function') window.render();
+};
+
 if (!window.cpActions) {
   window.cpActions = {
     // 🧠 AI 思考链净化器
@@ -249,27 +270,31 @@ if (!window.cpActions) {
       await window.cpActions.fetchQAnswer(charId, qId, targetQ.text);
   },
 
-  // 🧠 角色回答核心大脑
   fetchQAnswer: async (charId, qId, text) => {
-      const ctx = window.cpActions.getQContext(charId, text);
-      try {
+    const ctx = window.cpActions.getQContext(charId, text);
+    try {
         const taskMsg = `【系统任务】用户 ${ctx.boundP.name} 在情侣提问箱向你提问：“${text}”。\n请结合上述人设和记忆，真实、自然地回答。❗要求极度精简，字数严格控制在30字以内！直接输出回答正文，绝不要带任何前缀！`;
         const prompt = window.cpActions.buildMasterPrompt(charId, {
-              task: taskMsg,
-              scenario: 'questions'
-          });  
+            task: taskMsg,
+            scenario: 'questions'
+        });  
         const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
-          });
-          const data = await res.json();
-          const targetQ = store.coupleSpacesData[charId].questions.find(q => q.id === qId);
-          if (targetQ) targetQ.answer = window.cpActions.cleanAI(data.choices[0].message.content);
-          window.render();
-      } catch(e) {
-          if (window.actions.showToast) window.actions.showToast('网络波动，TA没能回答');
-      }
-  },
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+            body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+        });
+        const data = await res.json();
+        const answer = window.cpActions.cleanAI(data.choices[0].message.content);
+        const targetQ = store.coupleSpacesData[charId].questions.find(q => q.id === qId);
+        if (targetQ) {
+            targetQ.answer = answer;
+            // 推入隐藏消息：用户提问，角色回答
+            pushQnAHiddenMessage(charId, ctx.boundP.name, text, ctx.char.name, answer);
+        }
+        window.render();
+    } catch(e) {
+        if (window.actions.showToast) window.actions.showToast('网络波动，TA没能回答');
+    }
+},
 
 // 🌟 删除卡片里的回答 (连带 TA 的反应一起撤销)
   deleteQAnswer: (charId, qId) => {
@@ -282,40 +307,42 @@ if (!window.cpActions) {
       window.render();
   },
 
-  // 🌟 进阶：用户回答 AI 的提问，并立刻呼唤 AI 做出反应！
   answerQuestion: async (qId) => {
-      const charId = cpState.activeCharId;
-      const input = document.getElementById('ans-input-' + qId);
-      const text = input.value.trim();
-      if (!text) return;
-      
-      const spaceData = store.coupleSpacesData[charId];
-      const targetQ = spaceData.questions.find(q => q.id === qId);
-      if (!targetQ) return;
-      
-      // 1. 先把你的答案存下来上屏 (输入框消失)
-      targetQ.answer = text;
-      window.render();
+    const charId = cpState.activeCharId;
+    const input = document.getElementById('ans-input-' + qId);
+    const text = input.value.trim();
+    if (!text) return;
+    
+    const spaceData = store.coupleSpacesData[charId];
+    const targetQ = spaceData.questions.find(q => q.id === qId);
+    if (!targetQ) return;
+    
+    targetQ.answer = text;
+    const ctx = window.cpActions.getQContext(charId);
+    const askerName = ctx.char.name;
+    const answererName = ctx.boundP.name;
+    // 推入隐藏消息：角色提问，用户回答
+    pushQnAHiddenMessage(charId, askerName, targetQ.text, answererName, text);
+    window.render();
 
-      // 2. 呼唤大模型对你的答案做出反应
-      try {
-          const taskMsg = `【系统任务】你之前在提问箱向用户提问：“${targetQ.text}”。\n用户刚才回答了你：“${text}”。\n请对用户的回答做出简短、自然的反应/评价。❗要求极度精简，字数严格控制在30字以内！直接输出反应正文，绝不要带任何前缀！`;
-          const prompt = window.cpActions.buildMasterPrompt(charId, {
-              task: taskMsg,
-              scenario: 'questions'
-          });
-          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
-          });
-          const data = await res.json();
-          targetQ.reaction = window.cpActions.cleanAI(data.choices[0].message.content);
-          window.render();
-      } catch(e) {
-          targetQ.reaction = "（TA 似乎在忙，轻轻摸了摸你的头...）";
-          window.render();
-      }
-  },
+    try {
+        const taskMsg = `【系统任务】你之前在提问箱向用户提问：“${targetQ.text}”。\n用户刚才回答了你：“${text}”。\n请对用户的回答做出简短、自然的反应/评价。❗要求极度精简，字数严格控制在30字以内！直接输出反应正文，绝不要带任何前缀！`;
+        const prompt = window.cpActions.buildMasterPrompt(charId, {
+            task: taskMsg,
+            scenario: 'questions'
+        });
+        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+            body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
+        });
+        const data = await res.json();
+        targetQ.reaction = window.cpActions.cleanAI(data.choices[0].message.content);
+        window.render();
+    } catch(e) {
+        targetQ.reaction = "（TA 似乎在忙，轻轻摸了摸你的头...）";
+        window.render();
+    }
+},
   // 🌟 重 Roll 提问箱里的 AI 反应
   rerollQReaction: async (charId, qId) => {
       const targetQ = store.coupleSpacesData[charId].questions.find(q => q.id === qId);

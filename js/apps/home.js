@@ -200,7 +200,7 @@ export function renderHomeApp(store) {
                 <div class="flex-1"></div> 
 
                 <div class="flex justify-end space-x-4 pb-0 mt-4 animate-in fade-in duration-500">
-                   ${createAppIcon('shopping-bag', '购物', "window.actions.setCurrentApp('shop')", 'mc-icon-shop', isDark)}
+                   ${createAppIcon('shopping-bag', '购物', "window.actions.setCurrentApp('shopping')", 'mc-icon-shop', isDark)}
                    ${createAppIcon('smartphone', '查手机', "window.actions.setCurrentApp('phone')", 'mc-icon-phone', isDark)}
                 </div>
              </div>

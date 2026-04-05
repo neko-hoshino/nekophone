@@ -2765,19 +2765,24 @@ ${realMomentsContext || '暂无真实朋友圈。'}
                         }
                     }
 
-                    // 🌟 移植原生气泡渲染引擎
-                    const messagesHtml = displayMsgs.map((msg) => {
-                        const isFromChar = msg.isMe; // isMe 为 true 就是右边的绿气泡
-                        
-                        // 🌟 动态生成群友的专属头像（如果是群聊，根据名字生成不同字母头像）
-                        let avatar = char.avatar;
-                        if (!isFromChar) {
-                            if (msg.isGroup) {
-                                avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${msg.sender}&backgroundColor=e5e7eb`;
-                            } else {
-                                avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${chatName}&backgroundColor=e5e7eb`;
-                            }
-                        }
+                    // 在 renderPhoneApp 函数内，wechat 视图的聊天室消息渲染部分
+const messagesHtml = displayMsgs.map((msg) => {
+    const isFromChar = msg.isMe; // isMe 为 true 就是右边的绿气泡
+    
+    // 🌟 修改点：根据是否是“与用户的单聊”来决定对方头像
+    let avatar = char.avatar;
+    if (!isFromChar) {
+        if (msg.isGroup) {
+            avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${msg.sender}&backgroundColor=e5e7eb`;
+        } else {
+            // ✅ 新增判定：如果当前打开的聊天室是“与用户的单聊”，则对方头像使用用户绑定的头像
+            if (state.activeWechatRoom === 'user') {
+                avatar = chat?.myAvatar || boundPersona.avatar;   // boundP 是当前绑定的用户身份（已有 avatar 属性）
+            } else {
+                avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${chatName}&backgroundColor=e5e7eb`;
+            }
+        }
+    }
                         
                         let contentHtml = '', bubbleClass = '', bubbleStyle = '', maxWidthClass = 'max-w-[75%]';
                         
@@ -2880,7 +2885,7 @@ ${realMomentsContext || '暂无真实朋友圈。'}
                             <div onclick="window.phoneActions.openWechatChat('user')" class="flex items-center px-4 py-3 border-b border-gray-100 bg-white cursor-pointer hover:bg-gray-50 active:bg-gray-100">
                                 <div class="relative mr-3">
                                     <div class="w-12 h-12 bg-gray-100 rounded-[14px] flex-shrink-0 overflow-hidden flex items-center justify-center text-2xl shadow-sm border border-gray-200/50">
-                                        <img src="${boundP.avatar}" class="w-full h-full object-cover">
+                                        <img src="${chat?.myAvatar || boundPersona.avatar}" class="w-full h-full object-cover">
                                     </div>
                                 </div>
                                 <div class="flex-1 overflow-hidden">
@@ -3013,29 +3018,6 @@ ${realMomentsContext || '暂无真实朋友圈。'}
                     `;
                 }
             }
-        }
-        else {
-            const appNames = {
-                'wechat': '微信', 'search': 'Safari 浏览器'
-            };
-            const currentAppName = appNames[state.view] || 'App';
-
-            contentHtml = `
-                <div class="absolute inset-0 bg-[#f4f5f7] z-30 flex flex-col animate-in zoom-in-95 duration-200">
-                    <div class="pt-12 pb-3 px-4 flex items-center justify-between border-b border-gray-200/60 bg-white/90 backdrop-blur-md z-40 shadow-sm">
-                        <div class="cursor-pointer active:opacity-50 text-gray-600 w-8 flex items-center" onclick="window.phoneActions.backToDesktop()">
-                            <i data-lucide="chevron-left" class="w-7 h-7"></i>
-                        </div>
-                        <span class="text-[16px] font-black text-gray-800 absolute left-1/2 -translate-x-1/2">${currentAppName}</span>
-                        <div class="w-8"></div>
-                    </div>
-                    
-                    <div class="flex-1 flex flex-col items-center justify-center text-gray-400">
-                        <i data-lucide="terminal" class="w-12 h-12 mb-4 text-indigo-400 opacity-50"></i>
-                        <span class="text-[14px] font-bold tracking-widest text-gray-500">等待协议接入...</span>
-                    </div>
-                </div>
-            `;
         }
 
         if (state.view === 'memo' && state.activeMemoIndex === null) {
