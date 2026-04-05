@@ -85,7 +85,7 @@ export const renderForumApp = (store) => {
     if (!store.forumChats) store.forumChats = []; 
     
     if (!store.forums || store.forums.length === 0) {
-        store.forums = [{ id: 'default', name: 'little univers', topic: '综合闲聊日常', userPersonaId: store.personas?.[0]?.id || null, includedCharIds: store.contacts?.map(c => c.id) || [], mountedWorldbookIds: [] }];
+        store.forums = [{ id: 'default', name: 'little universe', topic: '综合闲聊日常', userPersonaId: store.personas?.[0]?.id || null, includedCharIds: store.contacts?.map(c => c.id) || [], mountedWorldbookIds: [] }];
     }
     if (!store.forums.find(f => f.id === state.activeForumId)) state.activeForumId = store.forums[0].id;
     const activeForum = store.forums.find(f => f.id === state.activeForumId);

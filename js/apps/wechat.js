@@ -224,7 +224,7 @@ ${logText}`;
     if (memType === 'fragment') {
         const kwRes = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-            body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: `请从以下总结中提取2个核心名词作为触发关键词，用英文逗号分隔，不要输出多余符号。\n${summary}` }], temperature: 0.3 })
+            body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: `请从以下总结中提取2个核心名词作为触发关键词，用英文逗号分隔，不要输出多余符号。禁止使用人名作为关键词！\n${summary}` }], temperature: 0.3 })
         });
         const kwData = await kwRes.json();
         kws = window.cpActions.cleanAI(kwData.choices[0].message.content).replace(/^["']|["']$/g, '');
@@ -1415,7 +1415,7 @@ window.wxActions = {
       
       // 如果是碎片记忆，让 AI 再干点活：自动提炼关键词！
       if (wxState.extractMemoryConfig.type === 'fragment') {
-         const kwPrompt = `请从以下总结中提取2-3个核心名词作为触发关键词，用英文逗号分隔，绝不输出其他多余废话，不要输出多余符号。\n${wxState.extractMemoryContent}`;
+         const kwPrompt = `请从以下总结中提取2-3个核心名词作为触发关键词，用英文逗号分隔，绝不输出其他多余废话，不要输出多余符号。禁止使用人名作为关键词！\n${wxState.extractMemoryContent}`;
          const resKw = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
             body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: kwPrompt }], temperature: 0.3 })
@@ -5603,7 +5603,7 @@ window.scheduleCloudTask = async (charId, forceSystemPrompt = null) => {
 
             momentHistory.push({
                 id: Date.now(), sender: boundPersona.name,
-                text: `(系统最高指令：系统时间 ${timeString}。距离你上次发朋友圈已超过 ${targetObj.autoMomentFreq} 小时。请你立刻执行 [发朋友圈] 指令！\n\n【状态】\n${relation}\n\n1. 拒绝书面语（如岁月静好），说人话！\n2. 朋友圈通常没头没尾（如“困死”）。\n\n⚠️注意：你这次的唯一任务就是输出 [发朋友圈] 动态内容！绝对不要发普通的聊天回复！必要时可带[附带虚拟照片:描述]或[附带定位:地点]❗[附带虚拟照片:xxx] 与 [附带定位:xxx] 必须与你的朋友圈正文保持在同一行，绝对禁止在这两个标签前使用换行符！必须严格必须严格按照格式输出！)`,
+                text: `(系统最高指令：系统时间 ${timeString}。距离你上次发朋友圈已超过 ${targetObj.autoMomentFreq} 小时。请你立刻执行 [发朋友圈] 指令！\n\n【状态】\n${relation}\n\n1. 拒绝书面语（如岁月静好），说人话！\n2. 朋友圈通常没头没尾（如“困死”）。\n\n⚠️注意：你这次的唯一任务就是输出 [发朋友圈] 动态内容！必要时可带[附带虚拟照片:描述]或[附带定位:地点]❗必须把整个朋友圈内容压缩在同一行输出，中间严禁换行！必须严格必须严格按照格式输出！)`,
                 isMe: true, isHidden: true, msgType: 'text'
             });
 
@@ -6464,7 +6464,7 @@ if (cleanedBeforeText.trim()) {
                 isMe: false,
                 source: 'wechat',
                 isOffline: isOffline,
-                msgType: 'system',
+                msgType: 'text',
                 time: cloudTime,
                 timestamp: Date.now() + sysMsgOffset
             });

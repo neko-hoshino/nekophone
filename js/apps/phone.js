@@ -33,7 +33,11 @@ window.phoneState = {
     galleryTab: 'photos', // 'photos' | 'voices'
     // 🌟 搜索记录专属状态
     activeSearchIndex: null,
-    searchScrollTop: 0
+    searchScrollTop: 0,
+    
+    // 🌟 微信克隆版专属状态
+    wechatTab: 'chats', // 'chats' | 'moments'
+    activeWechatRoom: null // 记录点开了哪个聊天室
 };
 
 if (!window.phoneActions) {
@@ -547,6 +551,132 @@ if (!window.phoneActions) {
             chat.messages.push({ id: Date.now(), sender: 'me', isMe: true, msgType: 'html_card', text: cardHtml, timestamp: Date.now() });
             if (window.actions?.saveStore) window.actions.saveStore();
             if (window.actions?.showToast) window.actions.showToast('✅ 搜索记录与内心独白已转发，快去拷问TA！');
+        },
+
+        // 🌟 微信克隆版控制
+        switchWechatTab: (tab) => { 
+            window.phoneState.wechatTab = tab; 
+            window.phoneState.activeWechatRoom = null; 
+            window.render(); 
+        },
+        openWechatChat: (id) => {
+            window.phoneState.activeWechatRoom = id;
+            window.render();
+        },
+        closeWechatChat: () => {
+            window.phoneState.activeWechatRoom = null;
+            window.render();
+        },
+        // 🌟 假冒 TA 的身份发送微信消息
+        sendFakeMessage: () => {
+            const input = document.getElementById('fake-wx-input');
+            if (!input || !input.value.trim()) return;
+            const text = input.value.trim();
+            const state = window.phoneState;
+            const targetCharId = state.charId;
+            
+            if (state.activeWechatRoom === 'user') {
+                // 1. 如果是在和“你(玩家)”的聊天室，直接把消息塞入真实的聊天记录！
+                const chat = store.chats.find(c => c.charId === targetCharId);
+                const char = store.contacts.find(c => c.id === targetCharId);
+                if (chat && char) {
+                    chat.messages.push({
+                        id: Date.now(),
+                        sender: char.name,
+                        text: text,
+                        isMe: false, // 🌟 核心：在真实世界里，这是“他”发给你的话，所以在总数据里 isMe 是 false！
+                        source: 'wechat',
+                        msgType: 'text',
+                        time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}),
+                        timestamp: Date.now()
+                    });
+                }
+            } else {
+                // 2. 如果是在和 AI 假好友的聊天室
+                const wcNode = store.hackedData?.[targetCharId]?.wechat;
+                const fakeChat = wcNode?.items?.fakeChats?.find(c => c.id === state.activeWechatRoom);
+                if (fakeChat) {
+                    if (!fakeChat.messages) fakeChat.messages = [];
+                    fakeChat.messages.push({
+                        text: text,
+                        isChar: true, // 标记这是“他”发的话（绿色气泡）
+                        type: 'text'
+                    });
+                }
+            }
+            
+            if (window.actions?.saveStore) window.actions.saveStore();
+            input.value = '';
+            window.render();
+            
+            // 自动滚动到底部
+            setTimeout(() => {
+                const scroll = document.getElementById('fake-chat-scroll');
+                if(scroll) scroll.scrollTop = scroll.scrollHeight;
+            }, 50);
+        },
+
+        getFakeReply: async () => {
+            const state = window.phoneState;
+            const targetCharId = state.charId;
+            const char = store.contacts.find(c => c.id === targetCharId);
+            const boundP = store.personas[0]; 
+
+            const wcNode = store.hackedData?.[targetCharId]?.wechat;
+            const fakeChat = wcNode?.items?.fakeChats?.find(c => c.id === state.activeWechatRoom);
+            if (!fakeChat) return;
+
+            if(window.actions?.showToast) window.actions.showToast(fakeChat.isGroup ? '群友们正在输入...' : '对方正在输入...');
+
+            const recentMsgs = fakeChat.messages.slice(-8).map(m => `[${m.sender || (m.isChar ? char.name : fakeChat.name)}]: ${m.text}`).join('\n');
+            const lastMyMsg = fakeChat.messages.slice().reverse().find(m => m.isChar)?.text || '';
+
+            const prompt = `扮演微信对话方。当前背景：用户(${boundP.name})正冒充角色(${char.name})发消息。
+聊天室：${fakeChat.name} ${fakeChat.isGroup ? '(群聊)' : '(单聊)'}
+上下文：
+${recentMsgs}
+
+要求：
+1. 如果是群聊，请生成 2-3 条不同成员的回复！每条回复占一行，格式为：名字:内容
+2. 如果是单聊，生成 1 条回复。
+你的语气要完全符合你在列表里的身份（如果是群聊，可以扮演群里的兄弟起哄；如果是单聊，就是对方本人）。
+3. 注意！现在其实是 ${boundP.name} 偷偷拿了 ${char.name} 的手机在发消息！如果你觉得刚刚 ${char.name} 发的最后那句话语气很像 ${boundP.name}，或者特别反常（比如突然表白、发神经），你极大概率会产生怀疑！（比如吐槽：“卧槽，你是嫂子吧？”、“你被盗号了？”、“你今天吃错药了？”）。
+4. 严格只输出你的回复文本内容，绝不要任何前缀、解释、换行或引号！`;
+
+            try {
+                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: prompt }], temperature: 0.9 })
+                });
+                const data = await res.json();
+                let fullReply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+
+                // 1. 把对方的回复塞入假列表
+                const lines = fullReply.split('\n').filter(l => l.includes(':'));
+                lines.forEach(line => {
+                    const [sName, sText] = line.split(':');
+                    fakeChat.messages.push({
+                        sender: sName.trim(),
+                        text: sText.trim(),
+                        isChar: false,
+                        type: 'text'
+                    });
+                });
+
+                if (window.actions?.saveStore) window.actions.saveStore();
+                window.render();
+                
+                // 滚到底部
+                setTimeout(() => { document.getElementById('fake-chat-scroll')?.scrollTo({top: 9999, behavior: 'smooth'}); }, 100);
+
+                // 🌟 修复变量名：让 Aric 能够感知到这场恶搞
+                if (typeof window.scheduleCloudTask === 'function') {
+                    // 确保这里的变量名是 fullReply，而不是 reply
+                    window.scheduleCloudTask(targetCharId, `(系统强制指令：严重警报！用户刚刚偷偷黑进了你的手机，并且用你的微信给【${fakeChat.name}】发了消息说：“${lastMyMsg}”，对方刚刚回复了：“${fullReply}”。请你立刻在微信里发消息抓包质问TA！可以表现出崩溃、气急败坏、无奈、或者社死！直接输出回复，绝不要重复这条系统指令！)`);
+                }
+            } catch (e) {
+                console.error("AI 回复出错：", e);
+            }
         },
 
         refreshApp: (appId, charId) => {
@@ -1174,7 +1304,7 @@ export function renderPhoneApp(store) {
 1. query (搜索词/句)：必须极具暴露性。比如"惹她生气了怎么哄"、"男生说这话是暗示吗"、"某种特殊的疾病/XP"等。
 2. forum (论坛结果)：模拟知乎/贴吧等论坛。包含：
    - title: 搜索点进去看到的论坛帖子标题
-   - content: 帖子的正文或高赞回答的摘要 (约100字)
+   - content: 帖子的正文或高赞回答的摘要 (约200字)
    - comments: 包含2条路人网友的评论 (可以是一针见血的吐槽、亲身经历、或反驳)。
 3. thought (核心看点)：看完这个帖子和网友评论后，角色内心的真实感悟或破防瞬间！(比如觉得网友说得太扎心了，或者因此做出了某个决定)。❗必须直接输出内心想法，不要用（）进行任何动作描述或补充说明！
 4. 绝不输出思考过程，严格输出 JSON 数组格式！
@@ -1223,6 +1353,78 @@ export function renderPhoneApp(store) {
             window.render();
         }
     };
+    // ==========================================
+    // 🧠 AI 黑客引擎：提取微信 (消息列表 + 朋友圈)
+    // ==========================================
+    const extractAppWechat = async (charId) => {
+        window.phoneState.isGenerating = true;
+        window.phoneState.generatingApp = 'wechat';
+        window.render();
+
+        try {
+            const { chat, boundP, char } = getQContext(charId);
+            const historyStr = (chat?.messages || []).slice(-15).map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`).join('\n');
+            
+            // 🌟 获取TA最近发的3条真实朋友圈，喂给大模型让它造假评论！
+            const realMoments = (store.moments || []).filter(m => m.senderId === charId).slice(-3);
+            const realMomentsContext = realMoments.map((m, i) => `【真实动态 ${i}】内容: "${m.text || m.virtualImageText || '分享了图片'}"`).join('\n');
+
+            const task = `你现在正在被黑客协议抽取该角色的【微信社交数据】。
+请基于角色的性格、社交圈、以及和用户(${boundP.name})的关系，生成以下内容：
+1. 【fakeChats】: 生成3-4个其他人的聊天列表。必须同时包含【单聊】和至少一个【3人及以上群聊】。包含: id, name, preview, time, unreadCount, isGroup(是否为群聊)。
+   - 重点：每个 fakeChat 必须包含一个 messages 数组（长度8-12条的完整对话）。
+   - messages 包含：sender(发送者名字。如果是群聊，请务必给出不同群友的名字，如"大刘","老王"；单聊写对方名字即可), text(内容), isChar(true代表角色本人发的话，false代表对方发的话), type("text")。
+   - 内容极大概率暴露出他不为人知的一面。
+2. 【fakeMoments】: 生成2-3条其他人发的朋友圈。包含: senderName, text, time, likes, comments。
+3. 【realMomentInteractions】: 针对以下TA发过的真实朋友圈，生成TA好友的点赞和评论。
+真实朋友圈列表：
+${realMomentsContext || '暂无真实朋友圈。'}
+
+严格输出 JSON 格式！绝不输出思考过程！
+
+格式要求：
+{
+  "fakeChats": [
+    {
+      "id": "fc1", "name": "...", "preview": "...", "time": "...", "unreadCount": 0, "isGroup": true,
+      "messages": [
+        {"sender": "大刘", "text": "...", "isChar": false, "type": "text"}, 
+        {"sender": "角色名字", "text": "...", "isChar": true, "type": "text"}
+      ]
+    }
+  ],
+  "fakeMoments": [{"id": "fm1", "senderName": "...", "text": "...", "time": "...", "likes": ["..."], "comments": [{"senderName": "...", "text": "..."}]}],
+  "realMomentInteractions": [{"likes": ["..."], "comments": [{"senderName": "...", "text": "..."}]}]
+}`;
+
+            const masterPrompt = buildMasterPrompt(charId, { history: historyStr, task: task, scenario: 'phone' });
+            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 })
+            });
+
+            const data = await res.json();
+            let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
+            
+            let wc = JSON.parse(reply);
+            if (wc.wechat) wc = wc.wechat;
+
+            if (wc && wc.fakeChats) {
+                if (!store.hackedData) store.hackedData = {};
+                if (!store.hackedData[charId]) store.hackedData[charId] = {};
+                store.hackedData[charId].wechat = { items: wc, timestamp: Date.now() };
+                if (window.actions?.saveStore) window.actions.saveStore();
+            }
+        } catch (e) {
+            console.error("破解微信失败", e);
+            if (window.actions?.showToast) window.actions.showToast('数据加密过强，提取失败');
+            window.phoneState.view = 'desktop'; 
+        } finally {
+            window.phoneState.isGenerating = false;
+            window.phoneState.generatingApp = null;
+            window.render();
+        }
+    };
 
     // 🌟 在原有的 openApp 里，加上日历的触发器
     window.phoneActions.openApp = (appId, charId) => {
@@ -1261,6 +1463,9 @@ export function renderPhoneApp(store) {
 
         const hasSearch = store.hackedData?.[charId]?.search;
         if (appId === 'search' && !hasSearch) extractAppSearch(charId);
+
+        const hasWechat = store.hackedData?.[charId]?.wechat;
+        if (appId === 'wechat' && !hasWechat) extractAppWechat(charId);
     };
 
     // ==========================================
@@ -1330,13 +1535,9 @@ export function renderPhoneApp(store) {
     else {
         if (!state.appData[targetCharId]) state.appData[targetCharId] = {};
         const { chat, boundP, char } = getQContext(targetCharId);
-        const wallpaperUrl = chat?.myAvatar || boundP?.avatar || 'https://api.dicebear.com/7.x/lorelei/svg?seed=Eve&backgroundColor=ffffff';
         
-        if (wallpaperUrl.startsWith('http') || wallpaperUrl.startsWith('data:')) {
-            bgHtml = `<div class="absolute inset-0 bg-cover bg-center z-0" style="background-image: url('${wallpaperUrl}');"></div>`;
-        } else {
-            bgHtml = `<div class="absolute inset-0 flex items-center justify-center text-9xl bg-gray-900 z-0">${wallpaperUrl}</div>`;
-        }
+        // 🌟 恢复为极简护眼的浅蓝纯色壁纸
+        bgHtml = `<div class="absolute inset-0 bg-[#aed2eb] z-0"></div>`;
 
         const now = new Date();
         const hours = now.getHours().toString().padStart(2, '0');
@@ -2497,6 +2698,315 @@ export function renderPhoneApp(store) {
                                 <div class="text-center text-[12px] text-gray-400 font-medium mt-10 flex flex-col items-center">
                                     <i data-lucide="history" class="w-6 h-6 mb-2 opacity-50"></i>
                                     暂无更早记录
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+            }
+        }
+        // 💬 【微信视图 (像素级克隆)】
+        else if (state.view === 'wechat') {
+            if (state.isGenerating && state.generatingApp === 'wechat') {
+                if (state.accessMode === 'authorized') {
+                    contentHtml = `
+                        <div class="absolute inset-0 bg-[#EDEDED] z-30 flex flex-col items-center justify-center animate-in fade-in">
+                            <i data-lucide="loader" class="w-10 h-10 text-[#07C160] animate-spin mb-4"></i>
+                            <span class="text-[14px] font-bold text-gray-400 tracking-wider">正在同步微信数据...</span>
+                        </div>
+                    `;
+                } else {
+                    contentHtml = `
+                        <div class="absolute inset-0 bg-black z-30 flex flex-col items-center justify-center font-mono text-[#07C160] p-6 animate-in fade-in">
+                            <i data-lucide="message-circle" class="w-16 h-16 mb-6 animate-pulse opacity-80"></i>
+                            <div class="w-full max-w-[80%] space-y-3 text-[13px] opacity-90 text-center">
+                                <div class="typing-effect">> Bypassing Tencent MMKV...</div>
+                                <div class="typing-effect" style="animation-delay: 0.5s">> Decrypting EnMicroMsg.db...</div>
+                                <div class="typing-effect text-white font-bold mt-4" style="animation-delay: 1s">EXTRACTING CHATS [||||||||||||||||||  ] 92%</div>
+                            </div>
+                        </div>
+                    `;
+                }
+            } else {
+                const wcNode = store.hackedData?.[targetCharId]?.wechat;
+                const wcData = wcNode ? wcNode.items : { fakeChats: [], fakeMoments: [], realMomentInteractions: [] };
+                
+                const { chat: myChat, boundP } = getQContext(targetCharId);
+                const char = store.contacts.find(c => c.id === targetCharId);
+
+                // 🌟 如果点进了某个聊天室 (完美复刻原生聊天室与特殊气泡 UI)
+                if (state.activeWechatRoom) {
+                    let displayMsgs = [];
+                    let chatName = '';
+                    let otherAvatar = '';
+                    
+                    // 🌟 身份反转魔法：在 TA 的手机里，TA 是右边的绿色气泡 (isMe: true)
+                    if (state.activeWechatRoom === 'user') {
+                        chatName = boundP.name;
+                        otherAvatar = boundP.avatar;
+                        // 提取真实记录，并反转 isMe
+                        displayMsgs = (myChat?.messages || []).filter(m => !m.isHidden).slice(-30).map(m => ({
+                            ...m,
+                            isMe: !m.isMe // 反转身份！
+                        }));
+                    } else {
+                        // 提取 AI 生成的假聊天记录
+                        const fakeChat = wcData.fakeChats.find(c => c.id === state.activeWechatRoom);
+                        if (fakeChat) {
+                            chatName = fakeChat.name;
+                            displayMsgs = (fakeChat.messages || []).map((m, idx) => ({
+                                id: 'fake_' + idx,
+                                text: m.text,
+                                msgType: m.type || 'text',
+                                isMe: m.isChar, // isChar 为 true 时是角色发的 (绿色)
+                                sender: m.sender || '群友', // 🌟 把缺失的 sender 补回来！
+                                isGroup: fakeChat.isGroup // 🌟 标记是否为群聊
+                            }));
+                        }
+                    }
+
+                    // 🌟 移植原生气泡渲染引擎
+                    const messagesHtml = displayMsgs.map((msg) => {
+                        const isFromChar = msg.isMe; // isMe 为 true 就是右边的绿气泡
+                        
+                        // 🌟 动态生成群友的专属头像（如果是群聊，根据名字生成不同字母头像）
+                        let avatar = char.avatar;
+                        if (!isFromChar) {
+                            if (msg.isGroup) {
+                                avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${msg.sender}&backgroundColor=e5e7eb`;
+                            } else {
+                                avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${chatName}&backgroundColor=e5e7eb`;
+                            }
+                        }
+                        
+                        let contentHtml = '', bubbleClass = '', bubbleStyle = '', maxWidthClass = 'max-w-[75%]';
+                        
+                        // 🌟 核心：群聊且不是自己发的消息，在气泡顶上显示名字！
+                        const senderNameHtml = (msg.isGroup && !isFromChar) 
+                            ? `<span class="text-[11px] font-bold text-gray-400 mb-0.5 ml-1 block">${msg.sender}</span>` : '';
+
+                        if (msg.msgType === 'virtual_image') {
+                            maxWidthClass = 'max-w-[70%]';
+                            bubbleClass = 'mc-bubble-vimg rounded-xl shadow-sm overflow-hidden border border-gray-200'; 
+                            contentHtml = `<div class="relative w-48 min-h-[12rem] bg-white cursor-pointer select-none"><div class="absolute inset-0 p-4 overflow-y-auto text-[13px] text-gray-700 leading-relaxed text-left bg-white"><span class="font-bold text-gray-400 block mb-1 flex items-center"><i data-lucide="image" class="mr-1 w-3.5 h-3.5"></i>照片内容：</span>${msg.text}</div></div>`;
+                        } else if (msg.msgType === 'voice') {
+                            bubbleClass = `mc-bubble-voice px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-hidden text-[15px] ${isFromChar ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`; 
+                            contentHtml = `<div class="flex items-center space-x-3 ${isFromChar ? 'flex-row-reverse space-x-reverse' : ''}"><div class="flex items-center gap-[2px] ${isFromChar ? 'text-green-800' : 'text-gray-800'}"><div class="w-[2px] h-3 bg-current rounded-full"></div><div class="w-[2px] h-5 bg-current rounded-full"></div><div class="w-[2px] h-2 bg-current rounded-full"></div></div><span class="text-[13px] opacity-80">语音</span></div>`;
+                            if (msg.text && msg.text !== '[特殊消息]') {
+                                contentHtml += `<div class="mt-1.5 text-[12px] text-gray-500 pt-1 border-t ${isFromChar ? 'border-green-600/20' : 'border-gray-200'}">${msg.text}</div>`;
+                            }
+                        } else if (msg.msgType === 'html_card' || msg.msgType === 'invite_card' || msg.msgType === 'accept_card' || msg.msgType === 'anniversary_card') {
+                            maxWidthClass = 'max-w-[85%]';
+                            bubbleClass = 'mc-bubble-html bg-white rounded-[16px] shadow-sm border border-gray-100 overflow-hidden w-full flex flex-col';
+                            contentHtml = `<div class="w-full p-4 mc-html-render-box relative text-[14px] text-gray-800 leading-relaxed">${msg.text}</div>`;
+                        } else if (msg.msgType === 'transfer') {
+                            maxWidthClass = ''; 
+                            bubbleClass = 'mc-bubble-transfer w-[230px] h-[95px] rounded-xl shadow-sm overflow-hidden flex flex-col'; 
+                            contentHtml = `
+                              <div class="flex-1 flex items-center p-3.5 space-x-3 text-white bg-[#fbab66]">
+                                <div class="w-10 h-10 rounded-full flex items-center justify-center border border-white opacity-90"><i data-lucide="arrow-right-left" class="w-5 h-5"></i></div>
+                                <div class="flex flex-col"><span class="text-[15px] font-bold">¥${msg.transferData?.amount || '0.00'}</span><span class="text-[11px] opacity-90 truncate">${msg.transferData?.note || '转账'}</span></div>
+                              </div>
+                              <div class="h-[26px] bg-white px-3 flex items-center justify-between text-[10px] text-gray-400 font-bold border-t border-gray-100">微信转账</div>
+                            `;
+                        } else if (msg.msgType === 'real_image') {
+                            maxWidthClass = 'max-w-[40%]';
+                            bubbleClass = 'mc-bubble-img bg-white p-1 rounded-xl shadow-sm border border-gray-100'; 
+                            contentHtml = `<img src="${msg.imageUrl || msg.text}" class="w-full h-auto rounded-lg object-cover max-h-[200px]" alt="照片" />`;
+                        } else if (msg.msgType === 'emoji') {
+                            maxWidthClass = 'max-w-[25%]';
+                            bubbleClass = 'bg-transparent shadow-none'; 
+                            contentHtml = `<img src="${msg.imageUrl || msg.text}" class="w-full h-auto object-contain drop-shadow-md" />`;
+                        } else {
+                            bubbleClass = `mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-wrap break-words whitespace-pre-wrap text-[15px] ${isFromChar ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`;
+                            contentHtml = msg.text || '[空白消息]';
+                        }
+
+                        return `
+                        <div class="flex ${isFromChar ? 'flex-row-reverse' : 'flex-row'} items-start w-full mb-4">
+                            <img src="${avatar}" class="w-10 h-10 rounded-[8px] shrink-0 border border-black/5 ${isFromChar ? 'ml-3' : 'mr-3'}" />
+                            <div class="relative inline-flex flex-col ${isFromChar ? 'items-end' : 'items-start'} ${maxWidthClass}">
+                                ${senderNameHtml}
+                                <div class="${bubbleClass}" style="${bubbleStyle}">${contentHtml}</div>
+                            </div>
+                        </div>`;
+                    }).join('');
+
+                    // 🌟 渲染：原味顶栏 + 气泡列表 + 完美复刻的底栏！
+                    contentHtml = `
+                        <div class="absolute inset-0 bg-[#f3f3f3] z-30 flex flex-col animate-in slide-in-from-right-4 duration-200">
+                            <div class="mc-topbar backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200/50 z-10 sticky top-0 bg-gray-100/90">
+                                <div class="mc-btn-back flex items-center cursor-pointer text-gray-800 w-1/4" onclick="window.phoneActions.closeWechatChat()">
+                                    <i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i>
+                                </div>
+                                <span class="mc-title flex-1 font-bold text-gray-800 text-[17px] text-center truncate px-2">${chatName}</span>
+                                <div class="mc-btn-more w-1/4 flex justify-end">
+                                    <i data-lucide="more-horizontal" class="text-gray-800 cursor-pointer active:scale-90" style="width: 24px; height: 24px;"></i>
+                                </div>
+                            </div>
+                            
+                            <div id="fake-chat-scroll" class="flex-1 overflow-y-auto p-4 hide-scrollbar">
+                                ${messagesHtml || '<div class="text-center text-gray-400 mt-10 text-[12px]">暂无聊天记录</div>'}
+                                <div class="h-4"></div>
+                            </div>
+
+                            <div class="mc-bottombar bg-gray-50 px-3 py-2 pb-6 border-t border-gray-200/60 z-20 relative">
+                                <div class="flex items-center space-x-3 mb-2 px-1">
+                                    <div class="flex-1 bg-white rounded-[20px] flex items-center border border-gray-200/60 px-2 py-0.5 shadow-sm">
+                                        <input type="text" id="fake-wx-input" onkeydown="if(event.key==='Enter') window.phoneActions.sendFakeMessage()" class="mc-input flex-1 h-[38px] py-1.5 px-2 outline-none text-[15px] bg-transparent text-gray-800 placeholder-gray-400" placeholder="以 ${char.name} 的身份回复..." />
+                                    </div>
+                                    <button class="mc-btn-ai w-[40px] h-[40px] flex items-center justify-center bg-transparent rounded-full text-gray-500 active:scale-90 transition-transform flex-shrink-0" title="获取回复" onclick="window.phoneActions.getFakeReply()">
+                                        <i data-lucide="sparkles" style="width: 25px; height: 25px;"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    // 🌟 主界面 (列表/朋友圈)
+                    let pageContent = '';
+                    
+                    if (state.wechatTab === 'chats') {
+                        // 1. 组装真实用户列表
+                        const validMsgs = (myChat?.messages || []).filter(m => !m.isHidden);
+                        let realPreview = '暂无消息';
+                        let realTime = '刚刚';
+                        if (validMsgs.length > 0) {
+                            const rawText = validMsgs[validMsgs.length - 1].text || '';
+                            realPreview = rawText.replace(/<[^>]+>/g, '').trim().split('\n')[0] || '[图片/卡片]';
+                        }
+                        
+                        const realChatHtml = `
+                            <div onclick="window.phoneActions.openWechatChat('user')" class="flex items-center px-4 py-3 border-b border-gray-100 bg-white cursor-pointer hover:bg-gray-50 active:bg-gray-100">
+                                <div class="relative mr-3">
+                                    <div class="w-12 h-12 bg-gray-100 rounded-[14px] flex-shrink-0 overflow-hidden flex items-center justify-center text-2xl shadow-sm border border-gray-200/50">
+                                        <img src="${boundP.avatar}" class="w-full h-full object-cover">
+                                    </div>
+                                </div>
+                                <div class="flex-1 overflow-hidden">
+                                    <div class="flex justify-between items-center mb-1"><span class="font-bold text-gray-800 text-[16px]">${boundP.name}</span><span class="text-xs text-gray-500">${realTime}</span></div>
+                                    <p class="text-sm text-gray-500 truncate">${realPreview}</p>
+                                </div>
+                            </div>
+                        `;
+
+                        // 2. 组装 AI 假列表 (预览对齐最后一条消息)
+                        const fakeChatsHtml = wcData.fakeChats.map(c => {
+                            // 🌟 自动获取最后一条消息作为预览，确保一致性
+                            const lastMsg = c.messages && c.messages.length > 0 ? c.messages[c.messages.length - 1] : null;
+                            const dynamicPreview = lastMsg ? (lastMsg.text || '[图片/语音]') : c.preview;
+                            
+                            const iconHtml = c.isGroup 
+                                ? `<div class="w-full h-full bg-gray-200 text-gray-500 flex items-center justify-center"><i data-lucide="users" class="w-6 h-6"></i></div>`
+                                : `<div class="w-full h-full bg-gradient-to-br from-indigo-100 to-purple-100 text-indigo-400 font-bold flex items-center justify-center text-lg">${c.name.substring(0,1)}</div>`;
+                            
+                            return `
+                            <div onclick="window.phoneActions.openWechatChat('${c.id}')" class="flex items-center px-4 py-3 border-b border-gray-100 bg-white cursor-pointer active:bg-gray-50">
+                                <div class="relative mr-3">
+                                    <div class="w-12 h-12 bg-gray-100 rounded-[8px] flex-shrink-0 overflow-hidden flex items-center justify-center border border-gray-200/50">${iconHtml}</div>
+                                </div>
+                                <div class="flex-1 overflow-hidden">
+                                    <div class="flex justify-between items-center mb-1"><span class="font-bold text-gray-800 text-[16px]">${c.name}</span><span class="text-xs text-gray-400">${c.time}</span></div>
+                                    <p class="text-sm text-gray-500 truncate">${dynamicPreview}</p>
+                                </div>
+                            </div>`;
+                        }).join('');
+
+                        pageContent = `<div class="flex-1 overflow-y-auto bg-white hide-scrollbar">${realChatHtml}${fakeChatsHtml}</div>`;
+                    } 
+                    else if (state.wechatTab === 'moments') {
+                        // 1. 组装带 AI 评论的真实朋友圈
+                        const realMoments = (store.moments || []).filter(m => m.senderId === targetCharId).slice(-3);
+                        const realMomentsHtml = realMoments.map((m, idx) => {
+                            const interactions = wcData.realMomentInteractions?.[idx] || { likes: [], comments: [] };
+                            const hasLikes = interactions.likes && interactions.likes.length > 0;
+                            const hasComments = interactions.comments && interactions.comments.length > 0;
+                            let interactHtml = '';
+                            if (hasLikes || hasComments) {
+                                interactHtml = '<div class="bg-gray-50 mt-2.5 rounded-[6px] px-3 py-2 text-[13px] relative before:content-[\'\'] before:absolute before:bottom-full before:left-3 before:border-4 before:border-transparent before:border-b-[#f0f0f0]">';
+                                if (hasLikes) interactHtml += `<div class="flex items-start text-[#576b95] font-medium ${hasComments?'border-b border-gray-300/50 pb-1.5 mb-1.5':''}"><i data-lucide="heart" class="w-3.5 h-3.5 mr-1.5 mt-0.5 flex-shrink-0"></i><span class="leading-relaxed">${interactions.likes.join(', ')}</span></div>`;
+                                if (hasComments) interactHtml += interactions.comments.map(c => `<div class="py-0.5 leading-relaxed break-words"><span class="text-[#576b95] font-medium">${c.senderName}：</span><span class="text-gray-800">${c.text}</span></div>`).join('');
+                                interactHtml += '</div>';
+                            }
+                            return `
+                            <div class="flex items-start p-4 border-b border-gray-100/60 bg-white">
+                                <div class="w-10 h-10 rounded-[8px] overflow-hidden bg-gray-100 flex-shrink-0 mr-3 shadow-sm border border-gray-100"><img src="${char.avatar}" class="w-full h-full object-cover"></div>
+                                <div class="flex-1 min-w-0">
+                                    <span class="text-[#576b95] font-medium text-[15px] mb-1 block">${char.name}</span>
+                                    <span class="text-gray-800 text-[15px] leading-relaxed break-words whitespace-pre-wrap">${m.text || m.virtualImageText || '[分享了图片]'}</span>
+                                    <div class="flex items-center justify-between mt-3 relative">
+                                        <div class="text-[12px] text-gray-400">刚刚</div>
+                                        <div class="bg-gray-100 rounded-[4px] px-2 py-0.5"><i data-lucide="more-horizontal" class="text-[#576b95] w-4 h-4"></i></div>
+                                    </div>
+                                    ${interactHtml}
+                                </div>
+                            </div>`;
+                        }).join('');
+
+                        // 2. 组装 AI 生成的假朋友圈
+                        const fakeMomentsHtml = wcData.fakeMoments.map(m => {
+                            const hasLikes = m.likes && m.likes.length > 0;
+                            const hasComments = m.comments && m.comments.length > 0;
+                            let interactHtml = '';
+                            if (hasLikes || hasComments) {
+                                interactHtml = '<div class="bg-gray-50 mt-2.5 rounded-[6px] px-3 py-2 text-[13px] relative before:content-[\'\'] before:absolute before:bottom-full before:left-3 before:border-4 before:border-transparent before:border-b-[#f0f0f0]">';
+                                if (hasLikes) interactHtml += `<div class="flex items-start text-[#576b95] font-medium ${hasComments?'border-b border-gray-300/50 pb-1.5 mb-1.5':''}"><i data-lucide="heart" class="w-3.5 h-3.5 mr-1.5 mt-0.5 flex-shrink-0"></i><span class="leading-relaxed">${m.likes.join(', ')}</span></div>`;
+                                if (hasComments) interactHtml += m.comments.map(c => `<div class="py-0.5 leading-relaxed break-words"><span class="text-[#576b95] font-medium">${c.senderName}：</span><span class="text-gray-800">${c.text}</span></div>`).join('');
+                                interactHtml += '</div>';
+                            }
+                            return `
+                            <div class="flex items-start p-4 border-b border-gray-100/60 bg-white">
+                                <div class="w-10 h-10 rounded-[8px] overflow-hidden bg-gradient-to-br from-green-100 to-teal-100 text-teal-500 font-bold flex flex-shrink-0 items-center justify-center mr-3 shadow-sm border border-gray-100">${m.senderName.substring(0,1)}</div>
+                                <div class="flex-1 min-w-0">
+                                    <span class="text-[#576b95] font-medium text-[15px] mb-1 block">${m.senderName}</span>
+                                    <span class="text-gray-800 text-[15px] leading-relaxed break-words whitespace-pre-wrap">${m.text}</span>
+                                    <div class="flex items-center justify-between mt-3 relative">
+                                        <div class="text-[12px] text-gray-400">${m.time}</div>
+                                        <div class="bg-gray-100 rounded-[4px] px-2 py-0.5"><i data-lucide="more-horizontal" class="text-[#576b95] w-4 h-4"></i></div>
+                                    </div>
+                                    ${interactHtml}
+                                </div>
+                            </div>`;
+                        }).join('');
+
+                        pageContent = `
+                            <div class="flex-1 overflow-y-auto bg-white hide-scrollbar pb-10">
+                                <div class="relative h-60 bg-gray-200 flex items-center justify-center overflow-visible">
+                                    <img src="${char.momentBg || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&q=80'}" class="w-full h-full object-cover" />
+                                    <div class="absolute inset-x-0 bottom-[-20px] flex justify-end items-end px-4">
+                                        <span class="text-white font-bold text-[20px] mr-4 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] pb-6">${char.name}</span>
+                                        <div class="w-16 h-16 rounded-[12px] overflow-hidden border-2 border-white shadow-md bg-white flex items-center justify-center z-10"><img src="${char.avatar}" class="w-full h-full object-cover" /></div>
+                                    </div>
+                                </div>
+                                <div class="h-10 bg-white"></div>
+                                <div class="flex flex-col">${realMomentsHtml}${fakeMomentsHtml}</div>
+                            </div>
+                        `;
+                    }
+
+                    // 🌟 完美复刻原生的顶栏与底栏
+                    contentHtml = `
+                        <div class="absolute inset-0 bg-white z-30 flex flex-col animate-in slide-in-from-right-4 duration-200">
+                            <div class="backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 z-10 sticky top-0 bg-[rgba(243,244,246,0.9)]">
+                                <div class="text-gray-800 cursor-pointer w-1/4 active:opacity-50 transition-opacity" onclick="window.phoneActions.backToDesktop()">
+                                    <i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i>
+                                </div>
+                                <span class="absolute left-1/2 -translate-x-1/2 font-bold text-gray-800 text-[17px] tracking-wide">${state.wechatTab === 'chats' ? '微信' : '朋友圈'}</span>
+                                <div class="w-1/4 flex justify-end space-x-3 text-gray-800">
+                                    <i data-lucide="refresh-cw" class="cursor-pointer active:scale-90 transition-transform opacity-60 hover:opacity-100" style="width: 20px; height: 20px;" onclick="window.phoneActions.refreshApp('wechat', '${targetCharId}')"></i>
+                                </div>
+                            </div>
+
+                            ${pageContent}
+
+                            <div class="backdrop-blur-md border-t border-gray-200 flex items-center justify-around pb-6 pt-2 z-10 bg-[rgba(249,250,251,0.9)]">
+                                <div onclick="window.phoneActions.switchWechatTab('chats')" class="flex flex-col items-center space-y-1 cursor-pointer w-16 ${state.wechatTab === 'chats' ? 'text-[#07c160]' : 'text-gray-500'}">
+                                    <i data-lucide="message-circle" class="${state.wechatTab === 'chats' ? 'fill-current' : ''}" style="width: 24px; height: 24px;"></i>
+                                    <span class="text-[10px] font-bold">微信</span>
+                                </div>
+                                <div onclick="window.phoneActions.switchWechatTab('moments')" class="flex flex-col items-center space-y-1 cursor-pointer w-16 ${state.wechatTab === 'moments' ? 'text-[#07c160]' : 'text-gray-500'}">
+                                    <i data-lucide="aperture" style="width: 24px; height: 24px;"></i>
+                                    <span class="text-[10px] font-bold">发现</span>
                                 </div>
                             </div>
                         </div>

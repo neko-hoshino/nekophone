@@ -2529,7 +2529,7 @@ export function renderCoupleApp(store) {
                        ${renderDiaryContent(diary.content, cfg)}
                    </div>
                    <div class="flex items-center justify-end space-x-5 mt-4 pt-4 border-t ${isDark?'border-gray-700/50':'border-gray-300/30'}">
-                       <div class="flex items-center space-x-1.5 cursor-pointer active:scale-90 transition-all text-gray-400 hover:text-pink-500" onclick="window.cpActions.rerollDiary('${cpState.diaryDate}')">
+                       <div class="flex items-center space-x-1.5 cursor-pointer active:scale-90 transition-all text-gray-400 hover:text-pink-500" onclick="window.cpActions.rerollDiary('${cpState.activeCharId}', '${cpState.diaryDate}')">
                            <i data-lucide="refresh-cw" class="w-4 h-4"></i>
                        </div>
                        <div class="flex items-center space-x-1.5 cursor-pointer active:scale-90 transition-all text-gray-400 hover:text-red-500" onclick="window.cpActions.deleteDiary('${cpState.diaryDate}')">
