@@ -6459,7 +6459,7 @@ if (cleanedBeforeText.trim()) {
             const fallbackText = (replyText && replyText.trim()) ? replyText : 'AI 没有生成有效回复';
             chat.messages.push({
                 id: Date.now() + sysMsgOffset++,
-                sender: 'system',
+                sender: char.name,
                 text: `⚠️ 云端响应异常: ${fallbackText}`,
                 isMe: false,
                 source: 'wechat',
