@@ -1304,7 +1304,7 @@ export function renderPhoneApp(store) {
 1. query (搜索词/句)：必须极具暴露性。比如"惹她生气了怎么哄"、"男生说这话是暗示吗"、"某种特殊的疾病/XP"等。
 2. forum (论坛结果)：模拟知乎/贴吧等论坛。包含：
    - title: 搜索点进去看到的论坛帖子标题
-   - content: 帖子的正文或高赞回答的摘要 (约200字)
+   - content: 帖子的正文或高赞回答的摘要 (至少200字)
    - comments: 包含2条路人网友的评论 (可以是一针见血的吐槽、亲身经历、或反驳)。
 3. thought (核心看点)：看完这个帖子和网友评论后，角色内心的真实感悟或破防瞬间！(比如觉得网友说得太扎心了，或者因此做出了某个决定)。❗必须直接输出内心想法，不要用（）进行任何动作描述或补充说明！
 4. 绝不输出思考过程，严格输出 JSON 数组格式！
@@ -1808,7 +1808,7 @@ ${realMomentsContext || '暂无真实朋友圈。'}
                 } else {
                     contentHtml = `
                         <div class="absolute inset-0 bg-black z-30 flex flex-col items-center justify-center font-mono text-[#fe2c55] p-6 animate-in fade-in">
-                            <i data-lucide="music" class="w-16 h-16 mb-6 animate-pulse opacity-80"></i>
+                            <i data-lucide="music-2" class="w-16 h-16 mb-6 animate-pulse opacity-80"></i>
                             <div class="w-full max-w-[80%] space-y-3 text-[13px] opacity-90">
                                 <div class="typing-effect">> Bypassing Aweme network...</div>
                                 <div class="typing-effect" style="animation-delay: 0.5s">> Fetching user profile & likes...</div>
@@ -2427,7 +2427,7 @@ ${realMomentsContext || '暂无真实朋友圈。'}
                             <div class="w-full max-w-[80%] space-y-3 text-[13px] opacity-90 text-center">
                                 <div class="typing-effect">> Bypassing incognito mode...</div>
                                 <div class="typing-effect" style="animation-delay: 0.5s">> Intercepting network traffic...</div>
-                                <div class="typing-effect text-red-500 font-bold mt-4" style="animation-delay: 1s">EXTRACTING ADULT CONTENT [||||||||||||||||||  ] 99%</div>
+                                <div class="typing-effect text-red-500 font-bold mt-4" style="animation-delay: 1s">EXTRACTING CONTENT [||||||||||||||||||  ] 99%</div>
                             </div>
                         </div>
                     `;
@@ -2518,7 +2518,7 @@ ${realMomentsContext || '暂无真实朋友圈。'}
                 } else {
                     contentHtml = `
                         <div class="absolute inset-0 bg-black z-30 flex flex-col items-center justify-center font-mono text-[#C20C0C] p-6 animate-in fade-in">
-                            <i data-lucide="music-2" class="w-16 h-16 mb-6 animate-pulse opacity-80"></i>
+                            <i data-lucide="music" class="w-16 h-16 mb-6 animate-pulse opacity-80"></i>
                             <div class="w-full max-w-[80%] space-y-3 text-[13px] opacity-90 text-center">
                                 <div class="typing-effect">> Bypassing CloudMusic authentication...</div>
                                 <div class="typing-effect" style="animation-delay: 0.5s">> Intercepting private_playlist.json...</div>
@@ -2658,7 +2658,7 @@ ${realMomentsContext || '暂无真实朋友圈。'}
                                 <div class="mx-4 mb-6 relative">
                                     <div class="absolute -left-2 -top-3 text-[40px] text-red-100 italic font-serif z-0">"</div>
                                     <div class="bg-red-50/80 border border-red-100 rounded-xl p-4 relative z-10 shadow-sm">
-                                        <div class="text-[12px] font-black text-red-500 mb-2 flex items-center"><i data-lucide="brain-circuit" class="w-3.5 h-3.5 mr-1.5"></i>TA 看完后的自我破防 / 感悟</div>
+                                        <div class="text-[12px] font-black text-red-500 mb-2 flex items-center">TA 的感悟</div>
                                         <div class="text-[14px] text-red-800 leading-relaxed font-medium italic">
                                             ${item.thought}
                                         </div>
@@ -2777,7 +2777,7 @@ const messagesHtml = displayMsgs.map((msg) => {
         } else {
             // ✅ 新增判定：如果当前打开的聊天室是“与用户的单聊”，则对方头像使用用户绑定的头像
             if (state.activeWechatRoom === 'user') {
-                avatar = chat?.myAvatar || boundPersona.avatar;   // boundP 是当前绑定的用户身份（已有 avatar 属性）
+                avatar = myChat?.myAvatar || boundP.avatar;   
             } else {
                 avatar = `https://api.dicebear.com/7.x/initials/svg?seed=${chatName}&backgroundColor=e5e7eb`;
             }
@@ -2885,7 +2885,7 @@ const messagesHtml = displayMsgs.map((msg) => {
                             <div onclick="window.phoneActions.openWechatChat('user')" class="flex items-center px-4 py-3 border-b border-gray-100 bg-white cursor-pointer hover:bg-gray-50 active:bg-gray-100">
                                 <div class="relative mr-3">
                                     <div class="w-12 h-12 bg-gray-100 rounded-[14px] flex-shrink-0 overflow-hidden flex items-center justify-center text-2xl shadow-sm border border-gray-200/50">
-                                        <img src="${chat?.myAvatar || boundPersona.avatar}" class="w-full h-full object-cover">
+                                        <img src="${myChat?.myAvatar || boundP.avatar}" class="w-full h-full object-cover">
                                     </div>
                                 </div>
                                 <div class="flex-1 overflow-hidden">
