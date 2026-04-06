@@ -3637,7 +3637,7 @@ export function renderWeChatApp(store) {
     </div>
 </div>
         
-        <div id="offline-scroll" class="mc-offline-scroll flex-1 p-5 overflow-y-auto hide-scrollbar flex flex-col pb-6 ${targetObj?.offlineBg ? 'bg-black/10 backdrop-blur-[2px]' : 'bg-[#fcfcfc]'}">
+        <div id="offline-scroll" class="mc-offline-list flex-1 p-5 overflow-y-auto hide-scrollbar flex flex-col pb-6 ${targetObj?.offlineBg ? 'bg-black/10 backdrop-blur-[2px]' : 'bg-[#fcfcfc]'}">
           <div class="text-center text-xs text-gray-400 italic mb-8 tracking-widest pointer-events-none">—— 故事开始 ——</div>
           ${(() => {
               let html = '';
