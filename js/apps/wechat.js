@@ -6744,12 +6744,12 @@ if (cleanedBeforeText.trim()) {
     // 改为推入 finalMsgs，而不是直接 chat.messages.push
     finalMsgs.push({
         id: Date.now() + sysMsgOffset++,
-        sender: 'system',
+        sender: char.name,
         text: `云端响应异常: ${fallbackText}`,
         isMe: false,
         source: 'wechat',
         isOffline: isOffline,
-        msgType: 'system',
+        msgType: 'text',
         time: cloudTime,
         timestamp: Date.now() + sysMsgOffset
     });
