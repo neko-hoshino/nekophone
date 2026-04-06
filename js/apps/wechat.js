@@ -6486,7 +6486,7 @@ if (cleanedBeforeText.trim()) {
                     time: new Date().toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}),
                     timestamp: Date.now(), deliveryTime: Date.now() + deliveryMs,
                     type: 'food', storeName: storeName, items: foodItemsArr, totalPrice: totalPriceStr,
-                    status: '骑手赶往中', recipient: store.personas[0]?.name || '你',
+                    status: '骑手赶往中', recipient: (store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas.find(p => p.isCurrent) || store.personas[0])?.name || '你',
                     targetCharId: char.id, buyFor: 'user_by_ta'
                 });
                 if (window.actions?.saveStore) window.actions.saveStore();
@@ -6538,7 +6538,7 @@ if (cleanedBeforeText.trim()) {
                     time: new Date().toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}),
                     timestamp: Date.now(), deliveryTime: Date.now() + deliveryMs,
                     type: 'shop', storeName: '淘宝精选', items: parsedItems, totalPrice: totalAmount.toFixed(2),
-                    status: '卖家已发货', recipient: store.personas[0]?.name || '你',
+                    status: '卖家已发货', recipient: (store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas.find(p => p.isCurrent) || store.personas[0])?.name || '你',
                     targetCharId: char.id, buyFor: 'user_by_ta'
                 });
                 if (window.actions?.saveStore) window.actions.saveStore();
@@ -6740,21 +6740,23 @@ if (cleanedBeforeText.trim()) {
         });
 
                 if (finalMsgs.length === 0 && !hasSystemAction) {
-            const fallbackText = (replyText && replyText.trim()) ? replyText : 'AI 没有生成有效回复';
-            chat.messages.push({
-                id: Date.now() + sysMsgOffset++,
-                sender: char.name,
-                text: `云端响应异常: ${fallbackText}`,
-                isMe: false,
-                source: 'wechat',
-                isOffline: isOffline,
-                msgType: 'text',
-                time: cloudTime,
-                timestamp: Date.now() + sysMsgOffset
-            });
-        }
+    const fallbackText = (replyText && replyText.trim()) ? replyText : 'AI 没有生成有效回复';
+    // 改为推入 finalMsgs，而不是直接 chat.messages.push
+    finalMsgs.push({
+        id: Date.now() + sysMsgOffset++,
+        sender: 'system',
+        text: `云端响应异常: ${fallbackText}`,
+        isMe: false,
+        source: 'wechat',
+        isOffline: isOffline,
+        msgType: 'system',
+        time: cloudTime,
+        timestamp: Date.now() + sysMsgOffset
+    });
+    hasSystemAction = true;
+}
 
-        if (finalMsgs.length === 0 && !hasSystemAction) continue;
+if (finalMsgs.length === 0 && !hasSystemAction) continue;
 
         // ==========================================
         // 🌟 核心分流引擎：精准拿捏 Render 时机

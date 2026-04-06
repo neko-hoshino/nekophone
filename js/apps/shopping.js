@@ -505,7 +505,10 @@ if (!window.shoppingActions) {
 
             const chat = currentStore.chats.find(c => c.charId === charId);
             const char = currentStore.contacts.find(c => c.id === charId);
-            const userName = currentStore.personas[0].name;
+            
+            // 🌟 核心修复：不再死板取 [0]，而是动态获取与该角色绑定的专属马甲！
+            const boundPersona = currentStore.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || currentStore.personas.find(p => p.isCurrent) || currentStore.personas[0];
+            const userName = boundPersona.name;
 
             if (chat && char) {
                 const cartCardHtml = `
@@ -523,7 +526,6 @@ if (!window.shoppingActions) {
                 </div>`;
 
                 chat.messages.push({ id: Date.now(), sender: userName, text: cartCardHtml, isMe: true, msgType: 'html_card', time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}), timestamp: Date.now() });
-                chat.messages.push({ id: Date.now()+1, sender: userName, text: `你看！这是我攒了好久的购物车～一共才 ¥${totalPrice}！👀✨`, isMe: true, msgType: 'text', time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}), timestamp: Date.now()+1 });
 
                 if (window.actions?.saveStore) window.actions.saveStore();
                 window.shoppingState.showSharePopup = false; 
@@ -602,15 +604,23 @@ if (!window.shoppingActions) {
             }
 
             // 2. 确立收件人与通知对象
-            let recipientName = currentStore.personas[0].name;
             let targetChar = null; 
-
             if (data.buyFor === 'ta') {
                 targetChar = currentStore.contacts.find(c => c.id === data.buyForCharId);
-                if (targetChar) recipientName = targetChar.name;
             } else {
                 if (data.shareCharId) targetChar = currentStore.contacts.find(c => c.id === data.shareCharId);
             }
+            
+            const payChar = currentStore.contacts.find(c => c.id === data.payCharId);
+
+            // 🌟 核心修复：寻找在这个订单里，你主要在和谁互动，取对应的绑定马甲
+            const referenceChar = targetChar || payChar || currentStore.contacts[0];
+            const boundPersona = currentStore.personas.find(p => String(p.id) === String(referenceChar?.boundPersonaId)) || currentStore.personas.find(p => p.isCurrent) || currentStore.personas[0];
+            const myName = boundPersona.name;
+
+            // 如果是给TA买，收件人是TA；如果是给自己买，收件人是你自己的马甲名
+            let recipientName = myName; 
+            if (data.buyFor === 'ta' && targetChar) recipientName = targetChar.name;
 
             // 🌟 3. 核心：合并生成唯一订单！
             const orderNum = (isFoodOrder ? 'WM' : 'TB') + Date.now().toString().slice(-8) + Math.floor(Math.random() * 1000);
@@ -637,10 +647,10 @@ if (!window.shoppingActions) {
             currentStore.shoppingData.cart = cart.filter(i => !i.selected); 
             state.showCheckoutPopup = false;
 
-            // 4. 生成发给微信的卡片数据
+            // 4. 智能分流：外卖生成小票，淘宝生成订单
             const deliveryDate = new Date(nowTime + deliveryMs);
             let orderMsg = {
-                id: Date.now(), sender: currentStore.personas[0].name, isMe: true,
+                id: Date.now(), sender: myName, isMe: true, // 🌟 替换为 myName
                 time: new Date(nowTime).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}), timestamp: Date.now()
             };
 
@@ -665,21 +675,17 @@ if (!window.shoppingActions) {
 
             // 5. 微信联动派遣引擎
             if (isUnpaid) {
-                const payChar = currentStore.contacts.find(c => c.id === data.payCharId);
                 if (payChar) {
                     const payChat = currentStore.chats.find(c => c.charId === payChar.id);
                     if (payChat) {
                         payChat.messages.push({ ...orderMsg });
-                        payChat.messages.push({ id: Date.now()+1, sender: currentStore.personas[0].name, text: "亲爱的～帮我付一下嘛，拜托拜托！", isMe: true, msgType: 'text', time: orderMsg.time, timestamp: Date.now()+1 });
-                        payChat.messages.push({ id: Date.now()+2, sender: 'system', text: `[系统/动作记录：用户刚刚发来一笔代付，总计 ¥${total.toFixed(2)}。决定付款请在回复末尾独占一行输出 [付款] 指令！]`, isMe: true, isHidden: true, msgType: 'text', time: orderMsg.time, timestamp: Date.now()+2 });
+                        payChat.messages.push({ id: Date.now()+2, sender: 'system', text: `[系统/动作记录：用户刚刚给你发送了一笔代付订单，总计 ¥${total.toFixed(2)}。请你决定是否帮ta付款。如果同意付款，请在回复的最末尾独占一行输出 [付款] 指令！]`, isMe: true, isHidden: true, msgType: 'text', time: orderMsg.time, timestamp: Date.now()+2 });
                     }
                 }
             } else if (targetChar) {
                 const chat = currentStore.chats.find(c => c.charId === targetChar.id);
                 if (chat) {
-                    let msgContext = data.buyFor === 'ta' ? "宝宝，给你买的小礼物哦，开心吗！" : "你看我新买的宝贝！嘿嘿！";
                     chat.messages.push({ ...orderMsg });
-                    chat.messages.push({ id: Date.now()+1, sender: currentStore.personas[0].name, text: msgContext, isMe: true, msgType: 'text', time: orderMsg.time, timestamp: Date.now()+1 });
                 }
             }
 
@@ -1149,12 +1155,15 @@ export function renderShoppingApp(store) {
     } 
     // 👤 3. 我的(订单)区域
     else if (isMe) {
+        // 🌟 获取全局当前正在使用的马甲
+        const activePersona = store.personas.find(p => p.isCurrent) || store.personas[0];
+
         pageContentHtml = `
             <div class="pt-12 pb-3 px-4 bg-[#fff] z-40 relative shadow-sm border-b border-gray-100 flex items-center shrink-0">
                 <div class="w-10 flex items-center cursor-pointer active:opacity-50 text-gray-800" onclick="window.actions.setCurrentApp(null)"><i data-lucide="chevron-left" class="w-7 h-7 -ml-2"></i></div>
                 <div class="flex items-center space-x-4">
-                    <div class="w-14 h-14 rounded-full border border-gray-200 overflow-hidden shrink-0"><img src="${store.personas[0].avatar}" class="w-full h-full object-cover"></div>
-                    <div class="flex flex-col"><span class="text-[18px] font-black text-gray-900">${store.personas[0].name}</span></div>
+                    <div class="w-14 h-14 rounded-full border border-gray-200 overflow-hidden shrink-0"><img src="${activePersona.avatar}" class="w-full h-full object-cover"></div>
+                    <div class="flex flex-col"><span class="text-[18px] font-black text-gray-900">${activePersona.name}</span></div>
                 </div>
             </div>
             
@@ -1387,8 +1396,10 @@ setInterval(() => {
     
     // 1. 到货状态流转与微信暗语通知
     globalStore.shoppingData.orders.forEach(order => {
+        // 如果是未结账、已经送达或者已经完成的，直接跳过
         if (order.status === '未结账' || order.status.includes('已送达') || order.status.includes('已完成')) return;
         
+        // 如果当前时间已经超过了预计送达时间
         if (now >= order.deliveryTime) {
             order.status = order.type === 'food' ? '已送达' : '已完成';
             needsSave = true;
@@ -1399,18 +1410,25 @@ setInterval(() => {
                 if (chat) {
                     let noticeMsg = '';
                     if (order.buyFor === 'ta') {
-                        noticeMsg = `[系统/动作记录：用户给你买的【${order.storeName}】等商品已经送达/签收了！请你主动发消息告诉ta，并表达你的喜悦和感谢！]`;
+                        noticeMsg = `用户给你买的【${order.storeName}】等商品刚刚已经送达/签收了！请你马上主动发消息告诉ta，并表达你的喜悦、感动和感谢！`;
                     } else if (order.buyFor === 'self') {
-                        noticeMsg = `[系统/动作记录：用户自己买的【${order.storeName}】等商品已经送达/签收了！请你主动发消息提醒ta去拿快递/外卖。]`;
+                        noticeMsg = `用户自己买的【${order.storeName}】等商品刚刚已经送达/外卖到了！请你像个贴心的男友一样，马上主动发消息提醒ta去拿，别让东西放凉了或丢了。`;
                     } else if (order.buyFor === 'user_by_ta') {
-                        noticeMsg = `[系统/动作记录：你给用户买的【${order.storeName}】等商品已经送达/签收了！请你主动发消息提醒ta去拿快递/外卖，并调侃或关心ta一下。]`;
+                        noticeMsg = `你给用户买的【${order.storeName}】等商品刚刚已经送达/签收了！请你马上主动发消息提醒ta去拿，并趁机邀功、调侃或关心ta一下。`;
                     }
                     
                     if (noticeMsg) {
+                        // 第一步：把状态写进历史记录，让他以后也能记住这事
+                        const historyContext = `[系统/动作记录：${noticeMsg}]`;
                         chat.messages.push({
-                            id: Date.now(), sender: 'system', text: noticeMsg, isMe: true, isHidden: true, msgType: 'text',
+                            id: Date.now(), sender: 'system', text: historyContext, isMe: true, isHidden: true, msgType: 'text',
                             time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}), timestamp: Date.now()
                         });
+                        
+                        // 🌟 第二步：核心修复！拉响防空警报，强行把 AI 从云端叫醒！
+                        if (typeof window.scheduleCloudTask === 'function') {
+                            window.scheduleCloudTask(order.targetCharId, `(系统强制指令：严重物流/外卖状态更新！\n\n${historyContext}\n\n请你立刻结合该事件，主动给用户发消息！严格符合你的人设，自然地开口说话，绝不允许输出任何系统标签或这句指令本身！)`);
+                        }
                     }
                 }
             }
