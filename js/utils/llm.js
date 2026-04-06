@@ -121,9 +121,27 @@ ${emojiRule}
    - 戳一戳用户：[戳一戳]
    - 修改被戳提示：[修改被戳动作:捏了捏] 和 [修改被戳后缀:的脸]（这里改的是用户戳你的动作，并非你戳用户的动作，如果想戳用户，请用[戳一戳]）
    - 拉黑用户：[拉黑用户]（极度生气、吃醋决裂时使用）
-   
-❗【绝对红线】：你只能使用上方列表和词典中【精确存在】的指令！绝对禁止编造/更改指令（严禁输出任何未定义的格式）！`;
-  }
+   - 为她网购惊喜/清空购物车：[淘宝下单: 商品1名称|单价|数量, 商品2名称|单价|数量] (请发挥想象力为她购买各种礼物，如汉服、首饰、零食、数码产品等。必须包含单价和数量，支持同时买多件商品，用逗号隔开！必须严格按格式独占一行！)`;
+  // 🍔 🌟 动态外卖超能力注入！直接注册到他的合法技能库里！
+      if (store.foodPoolInfo && store.foodPoolInfo.items) {
+          const pool = store.foodPoolInfo.items;
+          let selectedFoods = [];
+          
+          // 从四个分类里，各随机洗牌抽出2家
+          ['美食', '奶茶', '烧烤', '甜点'].forEach(cat => {
+              if (pool[cat] && pool[cat].length > 0) {
+                  const shuffled = [...pool[cat]].sort(() => 0.5 - Math.random());
+                  selectedFoods.push(...shuffled.slice(0, 2).map(f => `${f.name}(预估S$${f.price || '0.00'})`));
+              }
+          });
+          
+          if (selectedFoods.length > 0) {
+              systemRules += `\n   - 为她点外卖：[下单: 店名 | S$Total_Price | 给她的备注 | 菜品1, 菜品2...] (当前城市 ${store.foodPoolInfo.city} 附近有: ${selectedFoods.join('、')}。请发挥吃货常识，结合环境和天气，点出极其自然的菜品/套餐细节。备注请写一句极具情感价值或宠溺色彩的简短话语。严禁每次重复！必须独占一行！)`;
+          }
+      }
+
+      systemRules += `\n   \n❗【绝对红线】：你只能使用上方列表和词典中【精确存在】的指令！绝对禁止编造/更改指令（严禁输出任何未定义的格式）！`;
+    }
 
   let turnsCount = 0; let lastSender = null; let startIndex = 0;
   // 🌟 读取正确的上下文记忆长度

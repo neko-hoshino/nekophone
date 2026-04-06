@@ -651,17 +651,43 @@ ${recentMsgs}
                 const data = await res.json();
                 let fullReply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
 
-                // 1. 把对方的回复塞入假列表
-                const lines = fullReply.split('\n').filter(l => l.includes(':'));
-                lines.forEach(line => {
-                    const [sName, sText] = line.split(':');
-                    fakeChat.messages.push({
-                        sender: sName.trim(),
-                        text: sText.trim(),
-                        isChar: false,
-                        type: 'text'
-                    });
-                });
+                // 判断是否为群聊
+if (fakeChat.isGroup) {
+    // 群聊：按行解析，每行格式 "名字:内容"
+    const lines = fullReply.split('\n').filter(l => l.includes(':'));
+    lines.forEach(line => {
+        const colonIndex = line.indexOf(':');
+        const sName = line.substring(0, colonIndex).trim();
+        const sText = line.substring(colonIndex + 1).trim();
+        if (sName && sText) {
+            fakeChat.messages.push({
+                sender: sName,
+                text: sText,
+                isChar: false,
+                type: 'text'
+            });
+        }
+    });
+} else {
+    // 单聊：整段回复就是对方发的话（可能包含换行，我们合并为一段）
+    let replyText = fullReply.trim();
+    // 如果 AI 意外输出了 "名字:内容" 格式，也兼容解析
+    if (replyText.includes(':')) {
+        const colonIndex = replyText.indexOf(':');
+        const possibleName = replyText.substring(0, colonIndex).trim();
+        // 简单判断名字是否像一个人名（长度不超过 10 且不含空格过多）
+        if (possibleName.length <= 10 && !possibleName.includes(' ')) {
+            replyText = replyText.substring(colonIndex + 1).trim();
+        }
+    }
+    // 直接作为对方发送的消息，发送者就是聊天室对方的名字
+    fakeChat.messages.push({
+        sender: fakeChat.name,   // 对方的昵称
+        text: replyText,
+        isChar: false,
+        type: 'text'
+    });
+}
 
                 if (window.actions?.saveStore) window.actions.saveStore();
                 window.render();
@@ -671,13 +697,87 @@ ${recentMsgs}
 
                 // 🌟 修复变量名：让 Aric 能够感知到这场恶搞
                 if (typeof window.scheduleCloudTask === 'function') {
-                    // 确保这里的变量名是 fullReply，而不是 reply
-                    window.scheduleCloudTask(targetCharId, `(系统强制指令：严重警报！用户刚刚偷偷黑进了你的手机，并且用你的微信给【${fakeChat.name}】发了消息说：“${lastMyMsg}”，对方刚刚回复了：“${fullReply}”。请你立刻在微信里发消息抓包质问TA！可以表现出崩溃、气急败坏、无奈、或者社死！直接输出回复，绝不要重复这条系统指令！)`);
-                }
+    // 构建真实的聊天记录历史（这些是角色本人之前与对方的对话）
+    let historyContext = `【你与 ${fakeChat.name} 的聊天记录（是你本人之前的真实对话）】\n`;
+    (fakeChat.messages || []).forEach(msg => {
+        const sender = msg.isChar ? char.name : fakeChat.name;
+        historyContext += `${sender}：${msg.text}\n`;
+    });
+
+    // 最后一条是用户冒充发出的
+    const spoofedMsg = `\n【⚠️ 异常警报】最后一条消息（${char.name}：${lastMyMsg}）并不是你本人发送的！\n用户（${boundP.name}）偷偷拿了你的手机，冒充你的身份发出了这条消息。\n请根据你的人设和这条消息的影响对此进行反应（例如：震惊、愤怒、无奈或社死）！直接输出你的回复，不要重复指令。`;
+
+    window.scheduleCloudTask(targetCharId, `(系统强制指令：严重警报！${spoofedMsg}\n\n${historyContext})`);
+}
             } catch (e) {
                 console.error("AI 回复出错：", e);
             }
         },
+        forwardFakeChat: () => {
+    const state = window.phoneState;
+    if (!state.charId || !state.activeWechatRoom) return;
+    const char = store.contacts.find(c => c.id === state.charId);
+    const chat = store.chats.find(c => c.charId === state.charId);
+    const wcNode = store.hackedData?.[state.charId]?.wechat;
+    if (!char || !chat || !wcNode) return;
+
+    // 获取当前聊天室（假聊天记录）
+    let fakeChat = null;
+    let chatName = '';
+    let messages = [];
+
+    if (state.activeWechatRoom === 'user') {
+        // 与用户的聊天：不允许转发（因为那是真实聊天记录）
+        if (window.actions?.showToast) window.actions.showToast('无法转发真实聊天记录');
+        return;
+    } else {
+        fakeChat = wcNode.items?.fakeChats?.find(c => c.id === state.activeWechatRoom);
+        if (!fakeChat) return;
+        chatName = fakeChat.name;
+        messages = fakeChat.messages || [];
+    }
+
+    if (!messages.length) {
+        if (window.actions?.showToast) window.actions.showToast('聊天记录为空，无法转发');
+        return;
+    }
+
+    // 构建 HTML 卡片
+    const msgHtml = messages.map(msg => {
+        const sender = msg.sender || (msg.isChar ? char.name : chatName);
+        const text = msg.text || '';
+        return `<div style="margin-bottom:8px; padding-bottom:6px; border-bottom:1px dashed #e2e8f0;">
+                    <span style="font-weight:bold; color:#0f172a;">${sender}：</span>
+                    <span style="color:#475569;">${text}</span>
+                </div>`;
+    }).join('');
+
+    const cardHtml = `
+    <div style="width:100%; max-width:360px; margin:5px 0; font-family:-apple-system, sans-serif; user-select:text;">
+      <details style="background:#f8fafc; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,0.05); border: 1px solid #cbd5e1; overflow:hidden;">
+        <summary style="padding:12px 15px; cursor:pointer; list-style:none; display:flex; align-items:center; justify-content:space-between; background:#e2e8f0; color:#334155; outline:none; font-size:14px;">
+          <span style="font-weight:800; display:flex; align-items:center;">💬 微信聊天记录导出</span>
+          <span style="font-size:11px; color:#2563eb; font-weight:bold;">${fakeChat.isGroup ? '群聊' : '单聊'}</span>
+        </summary>
+        <div style="padding:15px; background:#f8fafc; color:#333; border-top: 1px solid #cbd5e1;">
+          <div style="font-weight:bold; margin-bottom:8px;">${chatName}</div>
+          <div style="font-size:13px; line-height:1.6;">${msgHtml}</div>
+        </div>
+      </details>
+    </div>`.trim();
+
+    chat.messages.push({
+        id: Date.now(),
+        sender: 'me',
+        isMe: true,
+        msgType: 'html_card',
+        text: cardHtml,
+        timestamp: Date.now()
+    });
+
+    if (window.actions?.saveStore) window.actions.saveStore();
+    if (window.actions?.showToast) window.actions.showToast('✅ 聊天记录已转发至微信，快去质问TA吧！');
+},
 
         refreshApp: (appId, charId) => {
             // 清除本地永久数据，并触发重新提取
@@ -2729,6 +2829,7 @@ ${realMomentsContext || '暂无真实朋友圈。'}
                 }
             } else {
                 const wcNode = store.hackedData?.[targetCharId]?.wechat;
+const wcTime = wcNode ? new Date(wcNode.timestamp).toLocaleString('zh-CN', {month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit'}) : '';
                 const wcData = wcNode ? wcNode.items : { fakeChats: [], fakeMoments: [], realMomentInteractions: [] };
                 
                 const { chat: myChat, boundP } = getQContext(targetCharId);
@@ -2745,10 +2846,12 @@ ${realMomentsContext || '暂无真实朋友圈。'}
                         chatName = boundP.name;
                         otherAvatar = boundP.avatar;
                         // 提取真实记录，并反转 isMe
-                        displayMsgs = (myChat?.messages || []).filter(m => !m.isHidden).slice(-30).map(m => ({
+                        let rawMsgs = (myChat?.messages || []).filter(m => !m.isHidden).slice(-30).map(m => ({
                             ...m,
                             isMe: !m.isMe // 反转身份！
                         }));
+                        // 过滤掉标记为离线的消息
+    displayMsgs = rawMsgs.filter(m => !m.isOffline);
                     } else {
                         // 提取 AI 生成的假聊天记录
                         const fakeChat = wcData.fakeChats.find(c => c.id === state.activeWechatRoom);
@@ -2846,8 +2949,8 @@ const messagesHtml = displayMsgs.map((msg) => {
                                 </div>
                                 <span class="mc-title flex-1 font-bold text-gray-800 text-[17px] text-center truncate px-2">${chatName}</span>
                                 <div class="mc-btn-more w-1/4 flex justify-end">
-                                    <i data-lucide="more-horizontal" class="text-gray-800 cursor-pointer active:scale-90" style="width: 24px; height: 24px;"></i>
-                                </div>
+    <i data-lucide="share" class="text-gray-800 cursor-pointer active:scale-90" style="width: 22px; height: 22px;" onclick="window.phoneActions.forwardFakeChat()"></i>
+</div>
                             </div>
                             
                             <div id="fake-chat-scroll" class="flex-1 overflow-y-auto p-4 hide-scrollbar">
@@ -2996,7 +3099,10 @@ const messagesHtml = displayMsgs.map((msg) => {
                                 <div class="text-gray-800 cursor-pointer w-1/4 active:opacity-50 transition-opacity" onclick="window.phoneActions.backToDesktop()">
                                     <i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i>
                                 </div>
-                                <span class="absolute left-1/2 -translate-x-1/2 font-bold text-gray-800 text-[17px] tracking-wide">${state.wechatTab === 'chats' ? '微信' : '朋友圈'}</span>
+                                <div class="absolute left-1/2 -translate-x-1/2 flex flex-col items-center">
+    <span class="font-bold text-gray-800 text-[17px] tracking-wide">${state.wechatTab === 'chats' ? '微信' : '朋友圈'}</span>
+    ${wcTime ? `<span class="text-[9px] text-gray-400 font-medium tracking-tighter mt-0.5">同步于 ${wcTime}</span>` : ''}
+</div>
                                 <div class="w-1/4 flex justify-end space-x-3 text-gray-800">
                                     <i data-lucide="refresh-cw" class="cursor-pointer active:scale-90 transition-transform opacity-60 hover:opacity-100" style="width: 20px; height: 20px;" onclick="window.phoneActions.refreshApp('wechat', '${targetCharId}')"></i>
                                 </div>

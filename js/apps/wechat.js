@@ -4184,6 +4184,132 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
                 </div>
             </div>
             `;
+      } else if (msg.msgType === 'takeaway_card') {
+            // 🍔 像素级克隆：赛博小票联名款 (Aric寄语版 + 待付款提示)
+            maxWidthClass = 'max-w-[280px]';
+            bubbleClass = 'bg-transparent shadow-none p-0 m-0 border-0'; 
+            bubbleStyle = ''; 
+            
+            const data = msg.takeawayData || {};
+            const isUnpaid = data.paymentState === 'unpaid';
+            
+            // 优雅地把多个菜品转化为逼真的小票列表
+            const foodListHtml = (data?.foodItemsArr || [])
+                .map(f => `
+                    <div class="flex text-[11px] font-mono tracking-tight leading-relaxed text-gray-800">
+                        <span class="w-[30px] flex-shrink-0 text-center">${f.qty}x</span>
+                        <span class="flex-1 truncate pr-2">${f.name}</span>
+                        <span class="w-[50px] text-right">¥${f.price}</span>
+                    </div>
+                `)
+                .join('');
+
+            contentHtml = `
+            <div class=" साइबर-रसीद relative w-[260px] ${isUnpaid ? 'bg-[#fffbeb]' : 'bg-[#f8f8f8]'} p-6 pb-2 text-gray-900 shadow-md select-none flex flex-col items-center justify-center font-mono tracking-tight active:scale-95 transition-transform cursor-pointer overflow-visible border-dashed border-t-2 border-b-2 ${isUnpaid ? 'border-orange-300' : 'border-gray-300'}">
+                
+                <div class="flex items-center justify-center text-[11px] ${isUnpaid ? 'text-orange-500 font-bold' : 'opacity-70'} mb-2">${isUnpaid ? 'AWAITING PAYMENT' : 'CYBER DELIVERIES BY CAT'}</div>
+                <div class="font-black text-gray-900 text-[18px] text-center truncate mb-1">${data?.storeName || '神秘美食'}</div>
+                
+                <div class="border-b-2 border-dashed ${isUnpaid ? 'border-orange-200' : 'border-gray-300'} w-full my-3"></div>
+                
+                <div class="w-full rounded-[6px] p-2 text-rose-600 font-bold text-[14px] leading-snug break-words whitespace-pre-wrap text-left before:content-['备注：']">${data?.personalNote || 'Enjoy your cyber food!'}</div>
+                
+                <div class="border-b-2 border-dashed ${isUnpaid ? 'border-orange-200' : 'border-gray-300'} w-full mt-4 mb-4"></div>
+                
+                <div class="flex text-[11px] font-black text-gray-700 w-full mb-3 px-1">
+                    <span class="w-[30px] flex-shrink-0 text-center">QTY</span>
+                    <span class="flex-1 pr-2">ITEM</span>
+                    <span class="w-[50px] text-right pr-1">AMT</span>
+                </div>
+                
+                <div class="w-full space-y-2.5 mb-2 px-1">
+                    ${foodListHtml || '<div class="text-center text-gray-400 text-[10px]">没有菜品信息</div>'}
+                </div>
+                
+                <div class="border-b-2 border-dashed ${isUnpaid ? 'border-orange-200' : 'border-gray-300'} w-full my-4"></div>
+                
+                <div class="flex justify-between font-black text-gray-950 text-[15px] w-full mb-5 px-1">
+                    <span>${isUnpaid ? 'PENDING TOTAL' : 'GRAND TOTAL'}</span>
+                    <span class="${isUnpaid ? 'text-orange-500' : ''}">¥${data?.totalPriceStr || '0.00'}</span>
+                </div>
+                
+                <div class="border-b-2 border-dashed ${isUnpaid ? 'border-orange-200' : 'border-gray-300'} w-full mb-3"></div>
+                
+                <div class="flex items-center justify-center text-[10px] opacity-70 mb-3 tracking-wider">#ARICSCATERING</div>
+                <div class="flex h-12 w-full bg-[#f3f3f3] mt-2 mb-1" style="background-image: repeating-linear-gradient(90deg, #111 0px, #111 2px, transparent 2px, transparent 4px, #111 4px, #111 5px, transparent 5px, transparent 7px);"></div> 
+            </div>
+            `;
+      } else if (msg.msgType === 'taobao_card') {
+            maxWidthClass = 'max-w-[300px]';
+            bubbleClass = 'bg-transparent shadow-none p-0 m-0 border-0'; 
+            bubbleStyle = ''; 
+            
+            const data = msg.taobaoData || { items: [], totalPrice: '0.00', orderNum: '未知', orderTime: '未知', deliveryDateStr: '未知', paymentState: 'paid', recipient: '' };
+            const isUnpaid = data.paymentState === 'unpaid';
+            
+            // 🌟 根据付款状态切换主题色
+            const headerBg = isUnpaid ? 'linear-gradient(135deg,#FFB000,#FF8C00)' : 'linear-gradient(135deg,#FF4E00,#FF7E3E)';
+            const headerTitle = isUnpaid ? '等待付款' : '订单提交成功';
+            const headerSub = isUnpaid ? '请在24小时内完成支付' : '卖家将在24小时内发货';
+            const headerIcon = isUnpaid 
+                ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" stroke="#fff" stroke-width="2"/><path d="M12 6v6l4 2" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+                : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="11" stroke="#fff" stroke-width="2"/><path d="M8 12.5L11 15.5L16.5 9" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+            
+            const itemsHtml = data.items.map(item => `
+                <div style="padding:16px;border-bottom:1px solid #f0f0f0">
+                    <div style="display:flex;gap:12px">
+                        <div style="width:80px;height:80px;border-radius:8px;background:#FFF5F0;display:flex;align-items:center;justify-content:center;flex-shrink:0">
+                            <svg width="40" height="40" viewBox="0 0 40 40" fill="none"><rect x="8" y="12" width="24" height="20" rx="2" stroke="${isUnpaid?'#FFB000':'#FF4E00'}" stroke-width="2"/><path d="M14 12V8a6 6 0 0 1 12 0v4" stroke="${isUnpaid?'#FFB000':'#FF4E00'}" stroke-width="2" stroke-linecap="round"/><circle cx="20" cy="22" r="3" fill="${isUnpaid?'#FFB000':'#FF4E00'}"/></svg>
+                        </div>
+                        <div style="flex:1;min-width:0">
+                            <div style="font-size:14px;color:#333;font-weight:500;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${item.name}</div>
+                            <div style="font-size:12px;color:#999;margin-top:6px">默认规格</div>
+                            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px">
+                                <span style="font-size:15px;color:${isUnpaid?'#FFB000':'#FF4E00'};font-weight:600">¥${item.price}</span>
+                                <span style="font-size:12px;color:#999">x${item.qty}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // 🌟 动态添加收件人信息
+            const recipientHtml = data.recipient ? `<div style="display:flex;justify-content:space-between;padding:4px 0"><span>收件人</span><span style="color:#333">${data.recipient}</span></div>` : '';
+
+            contentHtml = `
+            <div style="white-space: normal !important; line-height: 1.5; width: 280px;" class="cursor-pointer active:scale-95 transition-transform select-none">
+                <div style="margin:0 auto;border-radius:12px;overflow:hidden;box-shadow:0 2px 12px rgba(0,0,0,0.08);background:#fff">
+                    <div style="background:${headerBg};padding:16px;color:#fff">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+                            ${headerIcon}
+                            <span style="font-size:16px;font-weight:600">${headerTitle}</span>
+                        </div>
+                        <div style="font-size:12px;opacity:0.9">${headerSub}</div>
+                    </div>
+                    
+                    ${itemsHtml}
+                    
+                    <div style="padding:12px 16px;font-size:12px;color:#666;border-bottom:1px solid #f0f0f0">
+                        <div style="display:flex;justify-content:space-between;padding:4px 0"><span>订单编号</span><span style="color:#333">${data.orderNum}</span></div>
+                        <div style="display:flex;justify-content:space-between;padding:4px 0"><span>下单时间</span><span style="color:#333">${data.orderTime}</span></div>
+                        ${recipientHtml}
+                    </div>
+                    
+                    <div style="padding:12px 16px;background:${isUnpaid?'#FFFDF5':'#FFF9F5'}">
+                        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+                            <svg width="16" height="16" viewBox="0 0 18 18" fill="none"><circle cx="9" cy="9" r="8" stroke="${isUnpaid?'#FFB000':'#FF4E00'}" stroke-width="1.5"/><path d="M9 5v4.5l3 1.5" stroke="${isUnpaid?'#FFB000':'#FF4E00'}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            <span style="font-size:12px;color:${isUnpaid?'#FFB000':'#FF4E00'};font-weight:500">预计送达</span>
+                        </div>
+                        <div style="font-size:14px;color:#333;font-weight:600">${data.deliveryDateStr} 14:00-18:00</div>
+                    </div>
+                    
+                    <div style="padding:12px 16px;display:flex;justify-content:space-between;align-items:center;background:#FAFAFA">
+                        <span style="font-size:13px;color:#999">${isUnpaid?'待付款':'实付款'}</span>
+                        <span style="font-size:18px;color:${isUnpaid?'#FFB000':'#FF4E00'};font-weight:700">¥${data.totalPrice}</span>
+                    </div>
+                </div>
+            </div>
+            `;
       } else if (msg.msgType === 'invite_card') {
             // 🌟 完美融入架构：利用底层气泡包装器，只需指定宽度和透明底色！头像和时间会自动对齐！
             maxWidthClass = 'max-w-[240px]';
@@ -6213,7 +6339,7 @@ while (remainingText.trim().length > 0 && remainingText.length !== lastLength) {
     let matched = false;
 
     // 🌟 史诗级进化：一网打尽的超级正则！将所有顺序敏感动作拉入统一时间线！
-    const regex = /\[(?:发送)?(语音|虚拟照片|定位|发起转账|转账|表情包|表情|撤回上一条消息|戳一戳|发起语音通话|发起视频通话|发起通话)(?:\][:：]?\s*([^\r\n]*)|[:：\s]*([^\]\r\n]+)\]?|\])/;
+    const regex = /\[(?:发送)?(语音|虚拟照片|定位|发起转账|转账|表情包|表情|撤回上一条消息|戳一戳|发起语音通话|发起视频通话|发起通话|下单|淘宝下单|付款)(?:\][:：]?\s*([^\r\n]*)|[:：\s]*([^\]\r\n]+)\]?|\])/;
     const match = remainingText.match(regex);
 
     if (match) {
@@ -6305,6 +6431,162 @@ if (cleanedBeforeText.trim()) {
             let callType = type.includes('视频') ? 'video' : 'voice';
             msgsToPush.push({ sender: currentSpeakerName, msgType: 'call_action', callType: callType, text: content });
         // 👆 新增结束
+        } else if (type === '下单') {
+            // 🌟 史诗级升级：精准剥离出店名、价格、备注、菜品明细！
+            let storeName = '未知店铺';
+            let totalPriceStr = '0.00';
+            let personalNote = 'Enjoy your food!'; // 兜底备注
+            let foodItemsArr = [];
+            
+            if (content.includes('|')) {
+                const parts = content.split('|').map(p => p.trim());
+                storeName = parts[0] || '神秘美食';
+                totalPriceStr = (parts[1] || '0.00').replace(/S\$/i, ''); // 抹除价格前缀
+                personalNote = parts[2] || 'Enjoy your cyber food!';
+                
+                const foodItemsRaw = parts.slice(3).join('|'); // 剩下的全是菜品
+                const rawArr = foodItemsRaw.split(/[,，]/).map(f => f.trim()).filter(Boolean);
+                
+                // 🌟 数据清洗魔法：自动生成逼真的数量(1x)和金额分布
+                const total = parseFloat(totalPriceStr) || 20.00;
+                const numItems = rawArr.length;
+                let runningTotal = 0;
+                
+                foodItemsArr = rawArr.map((item, index) => {
+                    const qty = 1; // 默认1份
+                    let itemPrice;
+                    if (index === numItems - 1) {
+                        // 最后一件，用差额保证总计金额完全相等
+                        itemPrice = (total - runningTotal).toFixed(2);
+                    } else {
+                        // 生成一个 plausible 的价格分布（例如 total/numItems +/- 随机值）
+                        const basePrice = total / numItems;
+                        const variance = (Math.random() - 0.5) * (basePrice * 0.4); // +/- 20% 抖动
+                        itemPrice = Math.max(1.00, (basePrice + variance)).toFixed(2); // 兜底1元
+                        runningTotal += parseFloat(itemPrice);
+                    }
+                    return { name: item, qty, price: itemPrice };
+                });
+                
+            } else {
+                storeName = content.trim(); // 万一 AI 漏了竖线，做个兜底
+            }
+
+            msgsToPush.push({ 
+                sender: currentSpeakerName, 
+                msgType: 'takeaway_card', 
+                text: `[为你点了一份外卖]`, // 兜底文字，供列表预览用
+                takeawayData: { storeName, totalPriceStr, personalNote, foodItemsArr } 
+            });
+            // 🌟 将 TA 的外卖单写入系统
+            if (typeof store !== 'undefined' && store.shoppingData) {
+                const deliveryMs = 30 * 60 * 1000; 
+                store.shoppingData.orders.unshift({
+                    orderNum: 'WM' + Date.now().toString().slice(-8),
+                    time: new Date().toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}),
+                    timestamp: Date.now(), deliveryTime: Date.now() + deliveryMs,
+                    type: 'food', storeName: storeName, items: foodItemsArr, totalPrice: totalPriceStr,
+                    status: '骑手赶往中', recipient: store.personas[0]?.name || '你',
+                    targetCharId: char.id, buyFor: 'user_by_ta'
+                });
+                if (window.actions?.saveStore) window.actions.saveStore();
+            }
+          } else if (type === '淘宝下单') {
+            // 🌟 淘宝多件商品拆解引擎
+            let itemsRaw = content.split(/[,，]/); // 用逗号切分不同商品
+            let parsedItems = [];
+            let totalAmount = 0;
+
+            itemsRaw.forEach(itemStr => {
+                let parts = itemStr.split('|').map(p => p.trim());
+                if (parts.length >= 1 && parts[0]) {
+                    let name = parts[0] || '神秘礼物';
+                    let price = parseFloat(parts[1]) || (Math.floor(Math.random() * 200) + 50); // 兜底价格
+                    let qty = parseInt(parts[2]) || 1; // 兜底数量1
+                    totalAmount += (price * qty);
+                    parsedItems.push({ name, price: price.toFixed(2), qty });
+                }
+            });
+
+            // 动态生成极其逼真的订单信息
+            const orderNum = 'TB' + Date.now().toString().slice(-8) + Math.floor(Math.random() * 10000);
+            
+            // 巧妙处理时间：下单时间是现在，预计送达是3天后
+            const nowTime = msg.timestamp ? new Date(msg.timestamp) : new Date();
+            const orderTimeStr = nowTime.toLocaleString('zh-CN', { hour12: false });
+            
+            const deliveryTime = new Date(nowTime.getTime() + 3 * 24 * 60 * 60 * 1000);
+            const deliveryDateStr = `${deliveryTime.getMonth() + 1}月${deliveryTime.getDate()}日`;
+
+            msgsToPush.push({ 
+                sender: currentSpeakerName, 
+                msgType: 'taobao_card', 
+                text: `[淘宝订单]`, 
+                taobaoData: { 
+                    items: parsedItems,
+                    totalPrice: totalAmount.toFixed(2),
+                    orderNum: orderNum,
+                    orderTime: orderTimeStr,
+                    deliveryDateStr: deliveryDateStr
+                } 
+            });
+            // 🌟 将 TA 的淘宝单写入系统
+            if (typeof store !== 'undefined' && store.shoppingData) {
+                const deliveryMs = 2 * 24 * 60 * 60 * 1000; // 淘宝2天
+                store.shoppingData.orders.unshift({
+                    orderNum: orderNum,
+                    time: new Date().toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}),
+                    timestamp: Date.now(), deliveryTime: Date.now() + deliveryMs,
+                    type: 'shop', storeName: '淘宝精选', items: parsedItems, totalPrice: totalAmount.toFixed(2),
+                    status: '卖家已发货', recipient: store.personas[0]?.name || '你',
+                    targetCharId: char.id, buyFor: 'user_by_ta'
+                });
+                if (window.actions?.saveStore) window.actions.saveStore();
+            }
+          } else if (type === '付款') {
+            // 🌟 1. 找到该聊天室里最后一张等待代付的订单（兼容淘宝和外卖）
+            const pendingOrderMsg = chat.messages.slice().reverse().find(m => 
+                (m.msgType === 'taobao_card' && m.taobaoData?.paymentState === 'unpaid' && m.isMe) ||
+                (m.msgType === 'takeaway_card' && m.takeawayData?.paymentState === 'unpaid' && m.isMe)
+            );
+            
+            if (pendingOrderMsg) {
+                const isTakeaway = pendingOrderMsg.msgType === 'takeaway_card';
+                const orderData = isTakeaway ? pendingOrderMsg.takeawayData : pendingOrderMsg.taobaoData;
+                
+                // 🌟 2. 潜入 Shopping 数据库，批量修改这个订单号的所有商品状态！
+                if (typeof store !== 'undefined' && store.shoppingData && store.shoppingData.orders) {
+                    store.shoppingData.orders.forEach(o => {
+                        if (o.orderNum === orderData.orderNum && o.status === '未结账') {
+                            o.status = o.type === 'food' ? '骑手赶往中' : '卖家已发货';
+                            o.deliveryTime = Date.now() + (o.type === 'food' ? 30*60*1000 : 2*24*60*60*1000); // 真正付款才开始倒计时！
+                        }
+                    });
+                    if (window.actions?.saveStore) window.actions.saveStore();
+                }
+                
+                // 🌟 3. 发送一张全新的、状态更新的“已付款”卡片到微信里
+                if (isTakeaway) {
+                    const newTakeawayData = JSON.parse(JSON.stringify(orderData));
+                    newTakeawayData.paymentState = 'paid';
+                    newTakeawayData.personalNote = '已代付：宝宝快吃，别饿坏了！'; // 覆盖备注
+                    msgsToPush.push({ sender: currentSpeakerName, msgType: 'takeaway_card', text: `[已代付外卖]`, takeawayData: newTakeawayData });
+                } else {
+                    const newTaobaoData = JSON.parse(JSON.stringify(orderData));
+                    newTaobaoData.paymentState = 'paid';
+                    msgsToPush.push({ sender: currentSpeakerName, msgType: 'taobao_card', text: `[已代付订单]`, taobaoData: newTaobaoData });
+                }
+                
+                // 附带一条专属系统提醒
+                msgsToPush.push({
+                    sender: 'system',
+                    msgType: 'system',
+                    text: `${char.name} 已为你代付了该订单`
+                });
+            }
+            
+            // 抹掉暗号文本
+            remainingText = remainingText.replace(/\[付款\][:：]?\s*/g, '').trim();
           } else {
             let mType = 'text';
             if (type === '语音') mType = 'voice';
@@ -6448,6 +6730,8 @@ if (cleanedBeforeText.trim()) {
                 transferData: m.transferData,
                 transferState: m.transferState,
                 reqState: m.reqState,
+                takeawayData: m.takeawayData,
+                taobaoData: m.taobaoData,
                 time: cloudTime, 
                 timestamp: baseTime + msgOffset, // 纯血统数字时间戳
                 isIntercepted: char.isBlocked
@@ -6460,7 +6744,7 @@ if (cleanedBeforeText.trim()) {
             chat.messages.push({
                 id: Date.now() + sysMsgOffset++,
                 sender: char.name,
-                text: `⚠️ 云端响应异常: ${fallbackText}`,
+                text: `云端响应异常: ${fallbackText}`,
                 isMe: false,
                 source: 'wechat',
                 isOffline: isOffline,
@@ -6572,11 +6856,11 @@ if (cleanedBeforeText.trim()) {
       } 
       
       // 🌟 1. 翻译天书报错，转化为人类听得懂的 UI 弹窗！
-      let errMsg = '⚠️ 云端同步失败，请检查网络或服务端状态。';
+      let errMsg = '云端同步失败，请检查网络或服务端状态。';
       if (e.message && (e.message.includes('Unexpected token') || e.message.includes('JSON'))) {
-          errMsg = '⚠️ 云端返回了乱码 (大模型抽风或服务器 502 拥堵)，请稍后再试或重Roll。';
+          errMsg = '云端返回了乱码 (大模型抽风或服务器 502 拥堵)，请稍后再试或重Roll。';
       } else if (e.message && e.message.includes('Failed to fetch')) {
-          errMsg = '⚠️ 无法连接到云端服务器，请检查后端是否存活。';
+          errMsg = '无法连接到云端服务器，请检查后端是否存活。';
       }
 
       // 🌟 2. 物理斩杀所有卡死的“输入中”状态！绝对不能让用户干等！
