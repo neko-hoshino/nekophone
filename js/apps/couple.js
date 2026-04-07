@@ -2350,7 +2350,7 @@ export function renderCoupleApp(store) {
      const phone = loc.phone || { total: '--', apps: [{name: '未知', time: '--'}] };
      const appColors = ['bg-purple-500', 'bg-pink-500', 'bg-blue-500', 'bg-green-500', 'bg-yellow-500']; // 预备 5 种 App 颜色
      const chat = store.chats.find(c => c.charId === char.id);
-     const boundPersona = store.personas.find(p => String(p.id) === String(chat?.boundPersonaId)) || store.personas[0];
+     const boundPersona = store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas[0];
      // 🌟 优先提取聊天室专属头像，如果没有才用马甲头像
      const myAvatar = chat?.myAvatar || boundPersona.avatar;
 
@@ -3409,7 +3409,7 @@ export function renderCoupleApp(store) {
     } else if (cpState.view === 'hundredStory') {
         const char = store.contacts.find(c => c.id === cpState.activeCharId);
         const chat = store.chats.find(c => c.charId === char.id);
-        const boundPersona = store.personas.find(p => String(p.id) === String(chat?.boundPersonaId)) || store.personas[0];
+        const boundPersona = store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas[0];
         const spaceData = store.coupleSpacesData[char.id] || {};
         const target = spaceData.hundredThings.find(t => t.id === cpState.activeThingId);
         

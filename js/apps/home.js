@@ -2,7 +2,7 @@
 import { store } from '../store.js';
 
 // 初始化弹窗控制状态
-if (!window.homeState) window.homeState = { showAddAudioModal: false, showPlaylistModal: false };
+if (!window.homeState) window.homeState = { showAddAudioModal: false, showPlaylistModal: false, showTodoModal: false, showPeriodModal: false };
 
 if (!window.homeActions) {
   window.homeActions = {
@@ -12,6 +12,42 @@ if (!window.homeActions) {
       e.target.value = '';
     },
     updateName: (val) => { store.personas[0].name = val; window.render(); },
+    // 🌟 日历组件与月经期动作引擎
+    openTodoModal: () => { window.homeState.showTodoModal = true; window.render(); },
+    closeTodoModal: () => { window.homeState.showTodoModal = false; window.render(); },
+    saveTodo: () => {
+        const text = document.getElementById('todo-text-input').value.trim();
+        const date = document.getElementById('todo-date-input').value; // 🌟 获取用户选择的日期
+        if (!text) return window.actions.showToast('请输入待办内容哦');
+        if (!store.calendarData) store.calendarData = { todos: [], lastPeriod: '' };
+        if (!store.calendarData.todos) store.calendarData.todos = [];
+        
+        store.calendarData.todos.push({ 
+            id: Date.now(), 
+            text, 
+            targetDate: date || new Date().toISOString().split('T')[0] // 默认今天
+        });
+        
+        window.homeState.showTodoModal = false;
+        if (window.render) window.render(); 
+        if (window.actions.showToast) window.actions.showToast('✅ 事项已安排');
+    },
+    deleteTodo: (id) => {
+        if(!store.calendarData || !store.calendarData.todos) return;
+        store.calendarData.todos = store.calendarData.todos.filter(t => t.id !== id);
+        if (window.render) window.render();
+    },
+    openPeriodModal: () => { window.homeState.showPeriodModal = true; window.render(); },
+    closePeriodModal: () => { window.homeState.showPeriodModal = false; window.render(); },
+    savePeriod: () => {
+        const date = document.getElementById('period-date-input').value;
+        if (!date) return window.actions.showToast('请选择日期');
+        if (!store.calendarData) store.calendarData = { todos: [], lastPeriod: '' };
+        store.calendarData.lastPeriod = date;
+        window.homeState.showPeriodModal = false;
+        if (window.render) window.render();
+        if (window.actions.showToast) window.actions.showToast('🩸 月经记录已更新'); // 修正名词
+    },
     
     // 音频控制基础动作
     togglePlay: () => {
@@ -159,52 +195,206 @@ export function renderHomeApp(store) {
       <div id="home-swiper-scroll" class="flex-1 w-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar" onscroll="window.homeActions.updateDots(event)">
         
         <div class="w-full h-full flex-shrink-0 snap-center flex flex-col pt-12 px-5 pb-4 overflow-y-auto hide-scrollbar relative">
-          <div class="w-full pt-2 shrink-0 ${txtMain}">
-             <div class="flex justify-between items-end mb-4 px-1">
-                <div class="flex items-baseline space-x-2"><span class="font-extrabold text-4xl tracking-wider opacity-90">12月</span><span class="text-xs font-bold opacity-50 uppercase tracking-widest">Dec 2026</span></div>
-             </div>
-             
-             <div class="flex justify-between items-center px-1 mb-3">
-               <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">日</span><span class="text-[14px] font-bold opacity-70">13</span></div>
-               <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">一</span><span class="text-[14px] font-bold opacity-70">14</span></div>
-               <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">二</span><div class="${isDark ? 'bg-white/30 text-white border-black/20' : 'bg-white/30 text-gray-900 border-white/20'} border rounded-full w-7 h-7 flex items-center justify-center text-[14px] font-bold shadow-sm">15</div></div>
-               <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">三</span><span class="text-[14px] font-bold opacity-70">16</span></div>
-               <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">四</span><span class="text-[14px] font-bold opacity-70">17</span></div>
-               <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">五</span><span class="text-[14px] font-bold opacity-70">18</span></div>
-               <div class="flex flex-col items-center space-y-2"><span class="text-[10px] font-bold opacity-50">六</span><span class="text-[14px] font-bold opacity-70">19</span></div>
-             </div>
-          </div>
+          
+          ${(() => {
+              if (!store.calendarData) store.calendarData = { todos: [], lastPeriod: '' };
+              const now = new Date();
+              const currentMonth = now.getMonth() + 1;
+              const currentYear = now.getFullYear();
+              const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+              const currentMonthEng = monthNames[now.getMonth()];
+              
+              const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); 
+              const monday = new Date(now);
+              monday.setDate(now.getDate() - dayOfWeek + 1);
+              
+              const eventsList = [];
+              
+              // 统一将本周的周一和周日界限算准，避免时分秒导致的跨天漏算
+              const monZero = new Date(monday); monZero.setHours(0,0,0,0);
+              const sunEnd = new Date(monday); sunEnd.setDate(monday.getDate() + 6); sunEnd.setHours(23,59,59,999);
 
-          <div class="flex-1 grid grid-cols-2 gap-3 mt-4">
-             <div class="flex flex-col h-full">
-                <div class="flex-1"></div> 
-                <div class="grid grid-cols-2 gap-y-4 gap-x-4 pb-24 mt-4">
-                   ${createAppIcon('message-circle', '微信', "window.actions.setCurrentApp('wechat')", 'mc-icon-wechat', isDark)}
-                   ${createAppIcon('messages-square', '论坛', "window.actions.setCurrentApp('forum')", 'mc-icon-forum', isDark)}
-                   ${createAppIcon('twitter', 'X', "window.actions.showtoast('打开X')", 'mc-icon-x', isDark)}
-                   ${createAppIcon('book-heart', '情侣空间', "window.actions.setCurrentApp('couple')", 'mc-icon-diary', isDark)}
-                </div>
-             </div>
+              // 🌟 1. 真实纪念日联动 (支持每年同月同日自动匹配！)
+              const activeAnniversaries = store.anniversaries || [];
+              activeAnniversaries.forEach(a => {
+                  if (!a.date) return;
+                  const aMonthDay = a.date.substring(5, 10); // 取出 MM-DD
+                  
+                  // 遍历本周的每一天，看有没有对得上的日子
+                  for (let i = 0; i < 7; i++) {
+                      const d = new Date(monZero);
+                      d.setDate(monZero.getDate() + i);
+                      const dMonthDay = String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+                      
+                      if (aMonthDay === dMonthDay) {
+                          const char = (store.contacts || []).find(c => String(c.id) === String(a.charId));
+                          const charName = char ? char.name : 'TA';
+                          const dStr = d.getFullYear() + '-' + dMonthDay;
+                          // 插入到事件池：角色名 | 纪念日名称
+                          eventsList.push({ date: dStr, text: `${charName} | ${a.name}`, dotColor: "bg-orange-400" });
+                      }
+                  }
+              });
 
-             <div class="flex flex-col pt-2 h-full">
-                <div class="flex flex-col items-end text-right shrink-0">
-                   <div class="w-[4.5rem] h-[4.5rem] rounded-full overflow-hidden ${isDark?'bg-black/30 border-black/20':'bg-white/30 border-white/20'} mb-3 cursor-pointer active:scale-95 transition-transform shadow-sm border" onclick="document.getElementById('home-avatar-upload').click()">
-                     ${avatarHtml}
-                   </div>
-                   <input type="text" value="${my.name}" onchange="window.homeActions.updateName(this.value)" class="font-medium ${txtMain} text-2xl tracking-wide bg-transparent outline-none text-right w-full ${isDark?'placeholder-white/30':'placeholder-gray-800/40'}" placeholder="点击编辑" />
-                </div>
-                <div class="flex flex-col items-end space-y-4 mt-2 w-full shrink-0">
-                   <input type="text" value="正在进入..." class="w-[70%] ${inputBg} backdrop-blur-md px-3 py-1 text-[11px] font-serif rounded-full outline-none text-right shadow-sm border" onclick="event.stopPropagation()" />
-                   <input type="text" value="梦之旅途" class="w-[80%] mr-[20%] ${inputBg} backdrop-blur-md px-3 py-1 text-[11px] font-serif rounded-full outline-none text-center shadow-sm border" onclick="event.stopPropagation()" />
-                </div>
-                <div class="flex-1"></div> 
+              // 🌟 2. 真实待办事项
+              const activeTodos = store.calendarData.todos || [];
+              activeTodos.forEach(t => {
+                  const tDateStr = t.targetDate || t.date.split('T')[0];
+                  const tDate = new Date(tDateStr);
+                  
+                  if (tDate >= monZero && tDate <= sunEnd) {
+                      eventsList.push({ date: tDateStr, text: t.text, dotColor: "bg-purple-400" });
+                  }
+              });
 
-                <div class="flex justify-end space-x-4 pb-0 mt-4 animate-in fade-in duration-500">
-                   ${createAppIcon('shopping-bag', '购物', "window.actions.setCurrentApp('shopping')", 'mc-icon-shop', isDark)}
-                   ${createAppIcon('smartphone', '查手机', "window.actions.setCurrentApp('phone')", 'mc-icon-phone', isDark)}
-                </div>
-             </div>
-          </div>
+              // 月经期状态计算 (无emoji纯净版)
+              let periodText = '';
+              let periodDot = '';
+              if (store.calendarData.lastPeriod) {
+                  const lastP = new Date(store.calendarData.lastPeriod); lastP.setHours(0,0,0,0);
+                  const todayZero = new Date(now); todayZero.setHours(0,0,0,0);
+                  const daysSince = Math.floor((todayZero - lastP) / (1000 * 60 * 60 * 24));
+                  if (daysSince >= 0) {
+                      const cycleDay = daysSince % 28;
+                      const daysToNext = 28 - cycleDay;
+                      if (cycleDay < 5) {
+                          periodText = daysSince < 28 ? '月经期中，注意保暖' : '预测月经期，注意身体';
+                          periodDot = daysSince < 28 ? 'bg-rose-400' : 'bg-rose-200';
+                      } else if (daysToNext <= 3) {
+                          periodText = `距预测月经期约 ${daysToNext} 天`;
+                          periodDot = 'bg-rose-200';
+                      }
+                  }
+              }
+              if (periodText) eventsList.unshift({ date: 'general', text: periodText, dotColor: periodDot, isGeneral: true });
+              if (eventsList.length === 0) eventsList.push({ text: "本周暂无特殊安排", dotColor: "bg-gray-400", isGeneral: true });
+
+              const weekDays = ['一', '二', '三', '四', '五', '六', '日'];
+              const weekHtml = weekDays.map((dayName, idx) => {
+                  const d = new Date(monday);
+                  d.setDate(monday.getDate() + idx);
+                  const isToday = d.getDate() === now.getDate() && d.getMonth() === now.getMonth();
+                  const dateNum = d.getDate();
+                  const dStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+
+                  let periodType = null;
+                  let isStart = false; let isEnd = false;
+                  if (store.calendarData.lastPeriod) {
+                      const lastP = new Date(store.calendarData.lastPeriod); lastP.setHours(0,0,0,0);
+                      const currentD = new Date(d); currentD.setHours(0,0,0,0);
+                      const diffDays = Math.floor((currentD - lastP) / (1000 * 60 * 60 * 24));
+                      if (diffDays >= 0) {
+                          const cycleDay = diffDays % 28;
+                          if (cycleDay >= 0 && cycleDay < 5) {
+                              periodType = diffDays < 28 ? 'actual' : 'predicted';
+                              if (cycleDay === 0) isStart = true;
+                              if (cycleDay === 4) isEnd = true;
+                          }
+                      }
+                  }
+
+                  let radiusClass = '';
+                  if (isStart && isEnd) radiusClass = 'rounded-md';
+                  else if (isStart) radiusClass = 'rounded-l-md';
+                  else if (isEnd) radiusClass = 'rounded-r-md';
+                  
+                  // 🌟 修复：荧光笔高亮只包裹内部，不再延伸到星期几和小圆点！
+                  let highlightHtml = '';
+                  if (periodType === 'actual') highlightHtml = `<div class="absolute inset-y-0 -inset-x-0 bg-rose-200/80 z-0 ${radiusClass}"></div>`;
+                  else if (periodType === 'predicted') highlightHtml = `<div class="absolute inset-y-0 -inset-x-0 bg-rose-100/50 z-0 ${radiusClass}"></div>`;
+
+                  const dotsForDay = eventsList.filter(e => !e.isGeneral && e.date === dStr);
+                  // 🌟 修复：减小 mt 的数值，让点离数字更近
+                  const dotsHtml = dotsForDay.length > 0 
+                      ? `<div class="flex space-x-0.5 mt-0.5 h-1 justify-center z-10 relative">` + dotsForDay.map(e => `<div class="w-1 h-1 rounded-full ${e.dotColor}"></div>`).join('') + `</div>`
+                      : `<div class="mt-0.5 h-1 z-10 relative"></div>`;
+
+                  let dateDisplay = '';
+                  if (isToday) {
+                      dateDisplay = `
+                      <div class="relative flex items-center justify-center z-10 w-full h-7">
+                          <div class="bg-white/60 border border-white/50 rounded-full w-7 h-7 flex items-center justify-center text-[14px] font-bold shadow-sm backdrop-blur-sm text-gray-900">${dateNum}</div>
+                      </div>`;
+                  } else {
+                      dateDisplay = `<span class="text-[14px] font-bold opacity-80 relative z-10 h-7 flex items-center justify-center w-full">${dateNum}</span>`;
+                  }
+
+                  return `
+                  <div class="flex flex-col items-center py-1 w-full">
+                    <span class="text-[10px] font-bold opacity-50 z-10 mb-1">${dayName}</span>
+                    <div class="relative w-full flex flex-col items-center justify-center">
+                        ${highlightHtml}
+                        ${dateDisplay}
+                    </div>
+                    ${dotsHtml}
+                  </div>`;
+              }).join('');
+
+              // 🌟 修复：紧凑行距的一行一条事件列表
+              const eventsHtml = eventsList.map(e => `
+                  <div class="flex items-start space-x-2">
+                      <div class="w-1.5 h-1.5 rounded-full ${e.dotColor} shrink-0 mt-1"></div>
+                      <span class="text-[11px] font-bold tracking-wide leading-snug line-clamp-2">${e.text}</span>
+                  </div>
+              `).join('');
+
+              // 将生成的内容返回给全局，用于分离排版
+              return `
+              <div class="w-full pt-2 shrink-0 ${txtMain}">
+                 <div class="flex justify-between items-end mb-3 px-1">
+                    <div class="flex items-baseline space-x-2">
+                        <span class="font-extrabold text-4xl tracking-wider opacity-90">${currentMonth}月</span>
+                        <span class="text-xs font-bold opacity-50 uppercase tracking-widest">${currentMonthEng} ${currentYear}</span>
+                    </div>
+                    <div class="flex space-x-3 mb-1">
+                        <i data-lucide="calendar-plus" class="w-[22px] h-[22px] cursor-pointer active:scale-90 transition-transform opacity-70 hover:opacity-100 ${isDark ? 'text-white' : 'text-gray-800'}" onclick="window.homeActions.openTodoModal()" title="记事项"></i>
+                        <i data-lucide="droplet" class="w-[22px] h-[22px] cursor-pointer active:scale-90 transition-transform opacity-70 hover:opacity-100 text-rose-400" onclick="window.homeActions.openPeriodModal()" title="月经记录"></i>
+                    </div>
+                 </div>
+                 
+                 <div class="grid grid-cols-7 gap-0 px-1 mb-0">
+                   ${weekHtml}
+                 </div>
+              </div>
+
+              <div class="flex-1 grid grid-cols-2 gap-3 mt-1.5">
+                 
+                 <div class="flex flex-col h-full min-w-0">
+                    <div class="px-1 pt-0.5 pb-2 flex flex-col space-y-1 overflow-hidden cursor-pointer active:opacity-70 transition-opacity ${isDark ? 'text-white/90 drop-shadow-md' : 'text-gray-800/90 drop-shadow-sm'}" onclick="window.homeActions.openTodoModal()">
+                        ${eventsHtml}
+                    </div>
+                    
+                    <div class="flex-1"></div> 
+                    <div class="grid grid-cols-2 gap-y-4 gap-x-4 pb-24 mt-2">
+                       ${createAppIcon('message-circle', '微信', "window.actions.setCurrentApp('wechat')", 'mc-icon-wechat', isDark)}
+                       ${createAppIcon('messages-square', '论坛', "window.actions.setCurrentApp('forum')", 'mc-icon-forum', isDark)}
+                       ${createAppIcon('twitter', 'X', "window.actions.showToast('打开X')", 'mc-icon-x', isDark)}
+                       ${createAppIcon('book-heart', '情侣空间', "window.actions.setCurrentApp('couple')", 'mc-icon-diary', isDark)}
+                    </div>
+                 </div>
+
+                 <div class="flex flex-col pt-2 h-full min-w-0">
+                    <div class="flex flex-col items-end text-right shrink-0">
+                       <div class="w-[4.5rem] h-[4.5rem] rounded-full overflow-hidden ${isDark?'bg-black/30 border-black/20':'bg-white/30 border-white/20'} mb-3 cursor-pointer active:scale-95 transition-transform shadow-sm border" onclick="document.getElementById('home-avatar-upload').click()">
+                         ${avatarHtml}
+                       </div>
+                       <input type="text" value="${my.name}" onchange="window.homeActions.updateName(this.value)" class="font-medium ${txtMain} text-2xl tracking-wide bg-transparent outline-none text-right w-full ${isDark?'placeholder-white/30':'placeholder-gray-800/40'}" placeholder="点击编辑" />
+                    </div>
+                    <div class="flex flex-col items-end space-y-4 mt-2 w-full shrink-0">
+                       <input type="text" value="正在进入..." class="w-[70%] ${inputBg} backdrop-blur-md px-3 py-1 text-[11px] font-serif rounded-full outline-none text-right shadow-sm border" onclick="event.stopPropagation()" />
+                       <input type="text" value="梦之旅途" class="w-[80%] mr-[20%] ${inputBg} backdrop-blur-md px-3 py-1 text-[11px] font-serif rounded-full outline-none text-center shadow-sm border" onclick="event.stopPropagation()" />
+                    </div>
+                    <div class="flex-1"></div> 
+
+                    <div class="flex justify-end space-x-4 pb-0 mt-4 animate-in fade-in duration-500">
+                       ${createAppIcon('shopping-bag', '购物', "window.actions.setCurrentApp('shopping')", 'mc-icon-shop', isDark)}
+                       ${createAppIcon('smartphone', '查手机', "window.actions.setCurrentApp('phone')", 'mc-icon-phone', isDark)}
+                    </div>
+                 </div>
+              </div>
+              `;
+          })()}
+
         </div>
 
         <div class="w-full h-full flex-shrink-0 snap-center flex flex-col pt-12 px-5 pb-4 relative justify-end">
@@ -324,6 +514,58 @@ export function renderHomeApp(store) {
                         </div>
                     `).join('')}
                     ${(!window.audioPlaylist || window.audioPlaylist.length === 0) ? `<div class="text-center py-10 text-gray-400 text-[13px] tracking-widest">列表空空如也，快去添加吧</div>` : ''}
+                </div>
+            </div>
+        </div>
+        ` : ''}
+        ${window.homeState?.showTodoModal ? `
+        <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-5 backdrop-blur-sm animate-in fade-in" onclick="window.homeActions.closeTodoModal()">
+            <div class="bg-[#f9fafb] w-full rounded-[24px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+                <div class="px-5 py-4 border-b border-gray-100 flex justify-between items-center bg-white">
+                    <span class="font-bold text-gray-800 text-[16px] flex items-center"><i data-lucide="calendar-plus" class="w-5 h-5 mr-2 text-[#ff5000]"></i>安排新事项</span>
+                    <i data-lucide="x" class="w-5 h-5 text-gray-400 cursor-pointer active:scale-90 bg-gray-50 p-1 rounded-full" onclick="window.homeActions.closeTodoModal()"></i>
+                </div>
+                <div class="p-5 flex flex-col space-y-4">
+                    <div>
+                        <label class="block text-[11px] font-bold text-gray-400 mb-1 ml-1">安排在哪一天？</label>
+                        <input id="todo-date-input" type="date" value="${new Date().toISOString().split('T')[0]}" class="w-full bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[14px] text-gray-800 shadow-sm focus:border-[#ff5000] transition-colors">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-bold text-gray-400 mb-1 ml-1">事项内容</label>
+                        <input id="todo-text-input" type="text" placeholder="比如：纪念日、全栈开发..." class="w-full bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[14px] text-gray-800 shadow-sm focus:border-[#ff5000] transition-colors">
+                    </div>
+                    
+                    <div class="max-h-[120px] overflow-y-auto space-y-2 hide-scrollbar">
+                        ${(store.calendarData?.todos || []).map(t => `
+                            <div class="flex justify-between items-center bg-white p-2.5 rounded-lg border border-gray-100 shadow-sm">
+                                <div class="flex flex-col flex-1 truncate mr-2">
+                                    <span class="text-[12px] font-bold text-gray-700 truncate">${t.text}</span>
+                                    <span class="text-[10px] text-gray-400 mt-0.5">${t.targetDate || t.date.split('T')[0]}</span>
+                                </div>
+                                <i data-lucide="trash-2" class="w-4 h-4 text-rose-400 cursor-pointer active:scale-90" onclick="window.homeActions.deleteTodo(${t.id})"></i>
+                            </div>
+                        `).join('')}
+                    </div>
+                    <button onclick="window.homeActions.saveTodo()" class="w-full py-3.5 bg-gradient-to-r from-[#ff9000] to-[#ff5000] text-white font-bold rounded-[14px] active:scale-95 transition-transform shadow-md">保存安排</button>
+                </div>
+            </div>
+        </div>
+        ` : ''}
+
+        ${window.homeState?.showPeriodModal ? `
+        <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-5 backdrop-blur-sm animate-in fade-in" onclick="window.homeActions.closePeriodModal()">
+            <div class="bg-[#f9fafb] w-full rounded-[24px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
+                <div class="px-5 py-4 border-b border-gray-100 flex justify-between items-center bg-white">
+                    <span class="font-bold text-gray-800 text-[16px] flex items-center"><i data-lucide="droplet" class="w-5 h-5 mr-2 text-rose-500"></i>月经周期管理</span>
+                    <i data-lucide="x" class="w-5 h-5 text-gray-400 cursor-pointer active:scale-90 bg-gray-50 p-1 rounded-full" onclick="window.homeActions.closePeriodModal()"></i>
+                </div>
+                <div class="p-5 flex flex-col space-y-4">
+                    <div>
+                        <label class="block text-[12px] font-bold text-gray-600 mb-1.5 ml-1">上次月经开始日期是？</label>
+                        <input id="period-date-input" type="date" value="${store.calendarData?.lastPeriod || ''}" class="w-full bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[14px] text-gray-800 shadow-sm focus:border-rose-400 transition-colors">
+                    </div>
+                    <p class="text-[11px] text-gray-400 leading-relaxed px-1">记录后，系统将使用粉色荧光带连续高亮您的预测或真实月经期，方便您直观掌握生理周期。</p>
+                    <button onclick="window.homeActions.savePeriod()" class="w-full py-3.5 bg-rose-500 text-white font-bold rounded-[14px] active:scale-95 transition-transform shadow-md">更新记录</button>
                 </div>
             </div>
         </div>

@@ -161,6 +161,41 @@ window.settingsActions = {
       window.render();
     }
   },
+  // 🌟 高精定位开关引擎
+  toggleLocation: (e) => {
+    const isChecked = e.target.checked;
+    if (isChecked) {
+      if (!navigator.geolocation) {
+          e.target.checked = false;
+          return window.actions.showToast('您的设备不支持定位功能');
+      }
+      window.actions.showToast('正在请求定位权限...');
+      navigator.geolocation.getCurrentPosition(
+          (pos) => {
+              store.enableLocation = true;
+              window.actions.showToast('📍 高精定位已开启！真实外卖雷达上线');
+              if (window.actions.saveStore) window.actions.saveStore();
+              window.render();
+          },
+          (err) => {
+              e.target.checked = false;
+              store.enableLocation = false;
+              window.actions.showToast('授权被拒绝！雷达已关闭');
+              if (window.actions.saveStore) window.actions.saveStore();
+              window.render();
+          },
+          { enableHighAccuracy: true, timeout: 5000 }
+      );
+    } else {
+      // 关闭时：切断定位并强行销毁当前的真实外卖库，逼迫 AI 产生幻觉
+      store.enableLocation = false;
+      if (store.foodPoolInfo) store.foodPoolInfo = null;
+      if (store.shoppingData && store.shoppingData.userRealLocation) store.shoppingData.userRealLocation = '';
+      window.actions.showToast('定位已关闭，AI 将自由发挥外卖内容！');
+      if (window.actions.saveStore) window.actions.saveStore();
+      window.render();
+    }
+  },
   // 🌟 云端推送绑定引擎
   connectPushServer: async () => {
     try {
@@ -315,10 +350,21 @@ export function renderSettingsApp(store) {
 
       <div id="setting-scroll" class="flex-1 overflow-y-auto p-4 space-y-4 pb-20">
 
-      <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mt-4">
-            <div class="flex justify-between items-center">
-                <span class="font-bold text-gray-800 text-[14px] flex items-center"><i data-lucide="bell-ring" class="w-4 h-4 mr-2 text-purple-500"></i>是否开启系统通知</span>
+      <div class="bg-white p-4 rounded-[16px] shadow-sm border border-gray-100 mt-4 space-y-4">
+            <div class="flex justify-between items-center border-b border-gray-50 pb-3">
+                <div class="flex flex-col">
+                    <span class="font-bold text-gray-800 text-[14px] flex items-center"><i data-lucide="bell-ring" class="w-4 h-4 mr-2 text-purple-500"></i>允许系统通知</span>
+                    <span class="text-[10px] text-gray-400 mt-0.5 ml-6">开启后切后台也能收到消息</span>
+                </div>
                 <input type="checkbox" ${("Notification" in window && Notification.permission === 'granted' && store.enableNotifications !== false) ? 'checked' : ''} onchange="window.settingsActions.toggleNotification(event)" class="ios-switch shrink-0" />
+            </div>
+            
+            <div class="flex justify-between items-center">
+                <div class="flex flex-col">
+                    <span class="font-bold text-gray-800 text-[14px] flex items-center"><i data-lucide="map-pin" class="w-4 h-4 mr-2 text-rose-500"></i>开启高精定位 (外卖雷达)</span>
+                    <span class="text-[10px] text-gray-400 mt-0.5 ml-6">关闭后，AI 将自由发挥外卖店铺与菜品</span>
+                </div>
+                <input type="checkbox" ${store.enableLocation ? 'checked' : ''} onchange="window.settingsActions.toggleLocation(event)" class="ios-switch shrink-0" />
             </div>
         </div>
         

@@ -122,22 +122,29 @@ ${emojiRule}
    - 修改被戳提示：[修改被戳动作:捏了捏] 和 [修改被戳后缀:的脸]（这里改的是用户戳你的动作，并非你戳用户的动作，如果想戳用户，请用[戳一戳]）
    - 拉黑用户：[拉黑用户]（极度生气、吃醋决裂时使用）
    - 为她网购惊喜/清空购物车：[淘宝下单: 商品1名称|单价|数量, 商品2名称|单价|数量] (请发挥想象力为她购买各种礼物，如汉服、首饰、零食、数码产品等。必须包含单价和数量，支持同时买多件商品，用逗号隔开！必须严格按格式独占一行！)`;
-  // 🍔 🌟 动态外卖超能力注入！直接注册到他的合法技能库里！
-      if (store.foodPoolInfo && store.foodPoolInfo.items) {
+  // 🍔 🌟 动态外卖/虚构外卖双轨超能力注入！
+      if (store.enableLocation && store.foodPoolInfo && store.foodPoolInfo.items) {
+          // 📍 模式一：开启了真实定位，塞入周边真实店铺
           const pool = store.foodPoolInfo.items;
           let selectedFoods = [];
           
-          // 从四个分类里，各随机洗牌抽出2家
           ['美食', '奶茶', '烧烤', '甜点'].forEach(cat => {
               if (pool[cat] && pool[cat].length > 0) {
                   const shuffled = [...pool[cat]].sort(() => 0.5 - Math.random());
-                  selectedFoods.push(...shuffled.slice(0, 2).map(f => `${f.name}(预估S$${f.price || '0.00'})`));
+                  selectedFoods.push(...shuffled.slice(0, 2).map(f => {
+                      const sName = f.storeName || f.name || f.title || '本地热门店铺';
+                      const extraInfo = f.price ? `预估¥${f.price}` : (f.desc || '招牌必吃');
+                      return `${sName}(${extraInfo})`;
+                  }));
               }
           });
           
           if (selectedFoods.length > 0) {
-              systemRules += `\n   - 为她点外卖：[下单: 店名 | S$Total_Price | 给她的备注 | 菜品1, 菜品2...] (当前城市 ${store.foodPoolInfo.city} 附近有: ${selectedFoods.join('、')}。请发挥吃货常识，结合环境和天气，点出极其自然的菜品/套餐细节。备注请写一句极具情感价值或宠溺色彩的简短话语。严禁每次重复！必须独占一行！)`;
+              systemRules += `\n   - 为她点外卖：[下单: 店名 | ¥预估总价 | 给她的备注 | 菜品1, 菜品2...] (当前城市 ${store.foodPoolInfo.city} 附近有: ${selectedFoods.join('、')}。请发挥吃货常识，结合环境和天气，从这些真实店铺中点出极其自然的菜品/套餐细节。备注请写一句极具情感价值或宠溺色彩的简短话语。严禁每次重复！必须独占一行！)`;
           }
+      } else {
+          // 🌌 模式二：关闭了定位或无数据，强行注入“完全捏造”指令，洗刷他的记忆惯性！
+          systemRules += `\n   - 为她点外卖：[下单: 自造店名 | ¥预估总价 | 给她的备注 | 菜品1, 菜品2...] (注意：目前你无法获取她的真实位置和周边店铺。请完全发挥你的想象力，自由捏造一家听起来绝佳的外卖店和几道美味菜品！结合当前时间和你们的日常互动来点餐。备注需简短且极具情感价值或宠溺色彩。严禁每次重复，必须独占一行！)`;
       }
 
       systemRules += `\n   \n❗【绝对红线】：你只能使用上方列表和词典中【精确存在】的指令！绝对禁止编造/更改指令（严禁输出任何未定义的格式）！`;

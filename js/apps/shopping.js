@@ -701,7 +701,7 @@ if (!window.shoppingActions) {
             // 4. 合并生成唯一订单存入历史
             const orderNum = (isFoodOrder ? 'WM' : 'TB') + Date.now().toString().slice(-8) + Math.floor(Math.random() * 1000);
             const nowTime = Date.now();
-            const deliveryMs = isFoodOrder ? (1 * 60 * 1000) : (2 * 24 * 60 * 60 * 1000); 
+            const deliveryMs = isFoodOrder ? (30 * 60 * 1000) : (2 * 24 * 60 * 60 * 1000); 
 
             const newOrder = {
                 orderNum: orderNum,
@@ -1491,37 +1491,76 @@ export function renderShoppingApp(store) {
 }
 
 // ==========================================
-// 📡 全局后台静默雷达：跨城动态外卖盲盒库
+// 📡 全局后台静默雷达：高精 GPS 用户周边盲盒库 (专供 AI 给用户点餐)
 // ==========================================
 setTimeout(async () => {
-    // 🌟 直接使用顶部 import 进来的终极 store！不靠猜！
     if (!store) {
         console.log("📡 [外卖雷达] 未找到全局状态，雷达静默...");
         return;
     }
+    
+    // 🌟 核心拦截器：如果没开启定位开关，直接把这个雷达杀死！
+    if (!store.enableLocation) {
+        console.log("📡 [外卖雷达] 用户已关闭定位权限，AI 将使用幻觉点餐。");
+        return; 
+    }
 
     try {
-        console.log("📡 [外卖雷达] 正在探测当前城市定位...");
-        const ipRes = await fetch('https://ipapi.co/json/');
-        const ipData = await ipRes.json();
-        const currentCity = ipData.city || '上海市';
+        console.log("📡 [外卖雷达] 正在探测用户高精度真实定位...");
+
+        let realLoc = '';
+        
+        // 🌟 1. 尝试调用浏览器原生 GPS 接口获取精确经纬度
+        const getGPS = () => new Promise((resolve, reject) => {
+            if (!navigator.geolocation) return reject('No GPS');
+            navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 5000 });
+        });
+
+        try {
+            const pos = await getGPS();
+            // 调用免费无跨域限制的逆地理编码，将经纬度转为中文市区
+            const geoRes = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&localityLanguage=zh`);
+            const geoData = await geoRes.json();
+            
+            const city = geoData.city || geoData.principalSubdivision || '';
+            const district = geoData.locality || ''; // locality 在国内通常对应的就是“xx区”
+            
+            // 组合成高精度定位：例如 "武汉市武昌区" 或 "黄石市黄石港区"
+            realLoc = `${city}${district !== city ? district : ''}` || '未知区域';
+            console.log(`📍 [GPS成功] 探测到用户真实物理位置：${realLoc}`);
+        } catch (gpsErr) {
+            console.warn("📍 [GPS失败/拒绝] 降级使用 IP 定位...");
+            // 🌟 2. 兜底方案：使用免跨域的 GeoJS IP 接口 (解决了 CORS 报错)
+            try {
+                const ipRes = await fetch('https://get.geojs.io/v1/ip/geo.json');
+                const ipData = await ipRes.json();
+                realLoc = ipData.city ? ipData.city + '市' : '上海市';
+            } catch (ipErr) {
+                realLoc = '上海市';
+            }
+        }
+
+        // 把高精度的物理定位存入 store，方便角色（大模型）直接读取你的真实位置
+        if (!store.shoppingData) store.shoppingData = { cart: [], orders: [] };
+        store.shoppingData.userRealLocation = realLoc;
 
         const cachedInfo = store.foodPoolInfo;
         
-        // 🌟 核心判断：如果没有库存，或者当前城市变了，立刻重新搜刮！
-        if (!cachedInfo || cachedInfo.city !== currentCity) {
-            console.log(`📡 [外卖雷达] 城市变更 (${cachedInfo?.city || '无'} -> ${currentCity})，开始狂卷四大品类...`);
+        // 🌟 核心判断：如果没库存，或者用户的真实位置变了，立刻重新搜刮周边！
+        if (!cachedInfo || cachedInfo.city !== realLoc) {
+            console.log(`📡 [外卖雷达] 锁定用户所在区域 (${cachedInfo?.city || '无'} -> ${realLoc})，开始搜刮周边外卖...`);
             
             const categories = ['美食', '奶茶', '烧烤', '甜点'];
-            // 🌟 4个请求并发，向你的 1GB 服务器索要数据
+            // 并发请求你的后端，填满外卖库
             const fetchPromises = categories.map(kw => 
                 fetch('https://neko-hoshino.duckdns.org/search-food', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'x-secret-token': 'EAAF99' },
-                    body: JSON.stringify({ keyword: kw, location: currentCity })
+                    body: JSON.stringify({ keyword: kw, location: realLoc }) 
                 })
                 .then(res => res.json())
-                .then(data => ({ kw, items: (data.items || []).slice(0, 10) })) // 每个分类屯 10 家！
+                .then(data => ({ kw, items: (data.items || []).slice(0, 10) })) 
+                .catch(err => ({ kw, items: [] })) // 加上防撞垫，防止网络波动报错
             );
 
             const results = await Promise.all(fetchPromises);
@@ -1529,18 +1568,18 @@ setTimeout(async () => {
             results.forEach(r => { newItems[r.kw] = r.items; });
 
             store.foodPoolInfo = {
-                city: currentCity,
+                city: realLoc,
                 items: newItems
             };
             if (window.actions?.saveStore) window.actions.saveStore();
-            console.log("🍔 [外卖雷达] 动态盲盒库更新完毕，库存量充足！", store.foodPoolInfo);
+            console.log(`🍔 [外卖雷达] [${realLoc}] 周边动态盲盒库更新完毕，可供 AI 随时调用！`);
         } else {
-            console.log(`📡 [外卖雷达] 城市未变 (${currentCity})，继续使用缓存美食库。`);
+            console.log(`📡 [外卖雷达] 用户位置未变 (${realLoc})，继续使用缓存周边外卖库。`);
         }
     } catch (e) {
         console.warn("📡 [外卖雷达] 探测受阻，将使用兜底数据", e);
     }
-}, 3000); // 网页加载后延迟3秒执行，绝不卡主界面！
+}, 3000);
 // ==========================================
 // 🚚 全局异步物流巡逻员 & 内存回收机制
 // ==========================================
