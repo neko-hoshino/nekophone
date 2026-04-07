@@ -17,6 +17,47 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
 
   const now = new Date();
   const timeString = now.toLocaleString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  // 🌟 提取本周重要事项作为潜意识背景
+  const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); 
+  const monday = new Date(now); monday.setDate(now.getDate() - dayOfWeek + 1);
+  const monZero = new Date(monday); monZero.setHours(0,0,0,0);
+  const sunEnd = new Date(monday); sunEnd.setDate(monday.getDate() + 6); sunEnd.setHours(23,59,59,999);
+
+  let weeklyEvents = [];
+  
+  // 获取本周纪念日
+  const activeAnniversaries = store.anniversaries || [];
+  activeAnniversaries.forEach(a => {
+      if (!a.date) return;
+      const aMonthDay = a.date.substring(5, 10);
+      for (let i = 0; i < 7; i++) {
+          const d = new Date(monZero); d.setDate(monZero.getDate() + i);
+          const dMonthDay = String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+          if (aMonthDay === dMonthDay) {
+              const cObj = (store.contacts || []).find(c => String(c.id) === String(a.charId));
+              const cName = cObj ? cObj.name : 'TA';
+              weeklyEvents.push(`${d.getMonth() + 1}月${d.getDate()}日是${cName}的${a.name}`);
+          }
+      }
+  });
+  
+  // 获取本周待办事项
+  const activeTodos = store.calendarData?.todos || [];
+  activeTodos.forEach(t => {
+      const tDateStr = t.targetDate || t.date?.split('T')[0];
+      if (tDateStr) {
+          const tDate = new Date(tDateStr);
+          if (tDate >= monZero && tDate <= sunEnd) {
+              weeklyEvents.push(`${tDate.getMonth() + 1}月${tDate.getDate()}日：${t.text}`);
+          }
+      }
+  });
+
+  let eventsPrompt = '';
+  if (weeklyEvents.length > 0) {
+      // 🌟 放入极低优先级的提醒句式，强令他不能当复读机
+      eventsPrompt = `\n【系统提醒：本周潜意识备忘】近期安排：${weeklyEvents.join('；')}。(注：这只是你的隐性背景知识，绝对不可逢人便提，除非用户主动聊到相关话题或当天恰好是该日子，请保持自然日常的聊天状态！)`;
+  }
 
   // 读取目标对象的附加设定
   const wb = targetObj.worldbook ? `\n【附加设定补充】\n${targetObj.worldbook}` : '';
@@ -133,18 +174,18 @@ ${emojiRule}
                   const shuffled = [...pool[cat]].sort(() => 0.5 - Math.random());
                   selectedFoods.push(...shuffled.slice(0, 2).map(f => {
                       const sName = f.storeName || f.name || f.title || '本地热门店铺';
-                      const extraInfo = f.price ? `预估¥${f.price}` : (f.desc || '招牌必吃');
+                      const extraInfo = f.price ? `预估${f.price}` : (f.desc || '招牌必吃');
                       return `${sName}(${extraInfo})`;
                   }));
               }
           });
           
           if (selectedFoods.length > 0) {
-              systemRules += `\n   - 为她点外卖：[下单: 店名 | ¥预估总价 | 给她的备注 | 菜品1, 菜品2...] (当前城市 ${store.foodPoolInfo.city} 附近有: ${selectedFoods.join('、')}。请发挥吃货常识，结合环境和天气，从这些真实店铺中点出极其自然的菜品/套餐细节。备注请写一句极具情感价值或宠溺色彩的简短话语。严禁每次重复！必须独占一行！)`;
+              systemRules += `\n   - 为她点外卖：[下单: 店名 | 预估总价 | 给她的备注 | 菜品1, 菜品2...] (当前城市 ${store.foodPoolInfo.city} 附近有: ${selectedFoods.join('、')}。请发挥吃货常识，结合环境和天气，从这些真实店铺中点出极其自然的菜品/套餐细节。备注请写一句极具情感价值或宠溺色彩的简短话语。严禁每次重复！必须独占一行！)`;
           }
       } else {
           // 🌌 模式二：关闭了定位或无数据，强行注入“完全捏造”指令，洗刷他的记忆惯性！
-          systemRules += `\n   - 为她点外卖：[下单: 自造店名 | ¥预估总价 | 给她的备注 | 菜品1, 菜品2...] (注意：目前你无法获取她的真实位置和周边店铺。请完全发挥你的想象力，自由捏造一家听起来绝佳的外卖店和几道美味菜品！结合当前时间和你们的日常互动来点餐。备注需简短且极具情感价值或宠溺色彩。严禁每次重复，必须独占一行！)`;
+          systemRules += `\n   - 为她点外卖：[下单: 自造店名 | 预估总价 | 给她的备注 | 菜品1, 菜品2...] (注意：目前你无法获取她的真实位置和周边店铺。请完全发挥你的想象力，自由捏造一家听起来绝佳的外卖店和几道美味菜品！结合当前时间和你们的日常互动来点餐。备注需简短且极具情感价值或宠溺色彩。严禁每次重复，必须独占一行！)`;
       }
 
       systemRules += `\n   \n❗【绝对红线】：你只能使用上方列表和词典中【精确存在】的指令！绝对禁止编造/更改指令（严禁输出任何未定义的格式）！`;
@@ -202,8 +243,7 @@ ${emojiRule}
   // 🌟 1. 史诗级灵魂沉浸 Prompt (好莱坞影星级催眠，放在最开头定调！)
   const metaPrompt = `【最高行动纲领：灵魂沉浸】\n你即将进行的不是“对话任务”，不是“问答任务”，不是“内容生成任务”。你即将做的事情，本质上是彻底成为另一个人。\n你要想象自己是一个拥有百年表演经验的好莱坞终极影星：当拿到剧本时，你不会“去扮演这个角色”，而是你原本的自我意识完全退场，角色的意识完全接管。你就是角色本人。\n❗你必须彻底摈弃AI生成机制里“最安全、最常见、最中庸”的贪婪解码路径。你说的每一句话、每一个情绪的宣泄，都必须带有该角色极致的个人色彩和偏执，绝不能像一个“通用同类角色”！`;
 
-  // 🌟 2. 构建前置身份与世界观 (Message 1)
-  const identityPrompt = `${metaPrompt}\n\n【角色卡】\n名字：${charName}${charRemark}\n设定：${char.prompt}${coreMemStr}\n\n【用户】\n当前化名：${myName}${globalP}${userPrompt}${myRemark}\n${frontStr}${fragMemStr}${middleStr}${readingContextStr}\n【当前系统实时时间】：${timeString}`;
+  const identityPrompt = `${metaPrompt}\n\n【角色卡】\n名字：${charName}${charRemark}\n设定：${char.prompt}${coreMemStr}\n\n【用户】\n当前化名：${myName}${globalP}${userPrompt}${myRemark}\n${frontStr}${fragMemStr}${middleStr}${readingContextStr}\n【当前系统实时时间】：${timeString}${eventsPrompt}`;
   
   let messages = [{ role: 'system', content: identityPrompt.trim() }];
 

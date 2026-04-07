@@ -343,8 +343,8 @@ export function renderHomeApp(store) {
               <div class="w-full pt-2 shrink-0 ${txtMain}">
                  <div class="flex justify-between items-end mb-3 px-1">
                     <div class="flex items-baseline space-x-2">
-                        <span class="font-extrabold text-4xl tracking-wider opacity-90">${currentMonth}月</span>
-                        <span class="text-xs font-bold opacity-50 uppercase tracking-widest">${currentMonthEng} ${currentYear}</span>
+                        <span class="font-extrabold text-4xl tracking-wider opacity-90 uppercase">${currentMonthEng}</span>
+                        <span class="text-sm font-bold opacity-50 uppercase tracking-widest">${currentYear}</span>
                     </div>
                     <div class="flex space-x-3 mb-1">
                         <i data-lucide="calendar-plus" class="w-[22px] h-[22px] cursor-pointer active:scale-90 transition-transform opacity-70 hover:opacity-100 ${isDark ? 'text-white' : 'text-gray-800'}" onclick="window.homeActions.openTodoModal()" title="记事项"></i>
@@ -522,17 +522,17 @@ export function renderHomeApp(store) {
         <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-5 backdrop-blur-sm animate-in fade-in" onclick="window.homeActions.closeTodoModal()">
             <div class="bg-[#f9fafb] w-full rounded-[24px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
                 <div class="px-5 py-4 border-b border-gray-100 flex justify-between items-center bg-white">
-                    <span class="font-bold text-gray-800 text-[16px] flex items-center"><i data-lucide="calendar-plus" class="w-5 h-5 mr-2 text-[#ff5000]"></i>安排新事项</span>
+                    <span class="font-bold text-gray-800 text-[16px] flex items-center"><i data-lucide="calendar-plus" class="w-5 h-5 mr-2 text-blue-500"></i>安排新事项</span>
                     <i data-lucide="x" class="w-5 h-5 text-gray-400 cursor-pointer active:scale-90 bg-gray-50 p-1 rounded-full" onclick="window.homeActions.closeTodoModal()"></i>
                 </div>
                 <div class="p-5 flex flex-col space-y-4">
                     <div>
                         <label class="block text-[11px] font-bold text-gray-400 mb-1 ml-1">安排在哪一天？</label>
-                        <input id="todo-date-input" type="date" value="${new Date().toISOString().split('T')[0]}" class="w-full bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[14px] text-gray-800 shadow-sm focus:border-[#ff5000] transition-colors">
+                        <input id="todo-date-input" type="date" value="${new Date().toISOString().split('T')[0]}" class="w-80% bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[14px] text-gray-800 shadow-sm focus:border-[#ff5000] transition-colors">
                     </div>
                     <div>
                         <label class="block text-[11px] font-bold text-gray-400 mb-1 ml-1">事项内容</label>
-                        <input id="todo-text-input" type="text" placeholder="比如：纪念日、全栈开发..." class="w-full bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[14px] text-gray-800 shadow-sm focus:border-[#ff5000] transition-colors">
+                        <input id="todo-text-input" type="text" placeholder="比如：会议、考试..." class="w-full bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[14px] text-gray-800 shadow-sm focus:border-[#ff5000] transition-colors">
                     </div>
                     
                     <div class="max-h-[120px] overflow-y-auto space-y-2 hide-scrollbar">
@@ -546,7 +546,7 @@ export function renderHomeApp(store) {
                             </div>
                         `).join('')}
                     </div>
-                    <button onclick="window.homeActions.saveTodo()" class="w-full py-3.5 bg-gradient-to-r from-[#ff9000] to-[#ff5000] text-white font-bold rounded-[14px] active:scale-95 transition-transform shadow-md">保存安排</button>
+                    <button onclick="window.homeActions.saveTodo()" class="w-full py-3.5 bg-blue-400 text-white font-bold rounded-[14px] active:scale-95 transition-transform shadow-md">保存安排</button>
                 </div>
             </div>
         </div>
@@ -562,10 +562,10 @@ export function renderHomeApp(store) {
                 <div class="p-5 flex flex-col space-y-4">
                     <div>
                         <label class="block text-[12px] font-bold text-gray-600 mb-1.5 ml-1">上次月经开始日期是？</label>
-                        <input id="period-date-input" type="date" value="${store.calendarData?.lastPeriod || ''}" class="w-full bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[14px] text-gray-800 shadow-sm focus:border-rose-400 transition-colors">
+                        <input id="period-date-input" type="date" value="${store.calendarData?.lastPeriod || ''}" class="w-80% bg-white border border-gray-200 rounded-[12px] p-3 outline-none text-[14px] text-gray-800 shadow-sm focus:border-rose-400 transition-colors">
                     </div>
-                    <p class="text-[11px] text-gray-400 leading-relaxed px-1">记录后，系统将使用粉色荧光带连续高亮您的预测或真实月经期，方便您直观掌握生理周期。</p>
-                    <button onclick="window.homeActions.savePeriod()" class="w-full py-3.5 bg-rose-500 text-white font-bold rounded-[14px] active:scale-95 transition-transform shadow-md">更新记录</button>
+                    <p class="text-[11px] text-gray-400 leading-relaxed px-1">记录后，系统将高亮您的预测或真实月经期，方便您直观掌握生理周期。</p>
+                    <button onclick="window.homeActions.savePeriod()" class="w-full py-3.5 bg-rose-300 text-white font-bold rounded-[14px] active:scale-95 transition-transform shadow-md">更新记录</button>
                 </div>
             </div>
         </div>

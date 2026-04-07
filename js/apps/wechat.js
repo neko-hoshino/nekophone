@@ -4228,6 +4228,11 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
                 
                 <div class="border-b-2 border-dashed ${isUnpaid ? 'border-orange-200' : 'border-gray-300'} w-full my-4"></div>
                 
+                <div class="flex justify-between font-bold text-gray-600 text-[12px] w-full mb-2 px-1">
+                    <span>RECIPIENT</span>
+                    <span class="text-gray-800">${data?.recipient || '未知'}</span>
+                </div>
+                
                 <div class="flex justify-between font-black text-gray-950 text-[15px] w-full mb-5 px-1">
                     <span>${isUnpaid ? 'PENDING TOTAL' : 'GRAND TOTAL'}</span>
                     <span class="${isUnpaid ? 'text-orange-500' : ''}">¥${data?.totalPriceStr || '0.00'}</span>
@@ -4647,7 +4652,7 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
               // 🌟 动态监控顶栏打字状态
               let isAnyTyping = false;
               let typingText = '';
-              let titleText = isGroup ? `${chatData.groupName} (${chatData.memberIds.length})` : char?.name;
+              let titleText = isGroup ? `${chatData.groupName} (${chatData.memberIds.length})` : (chatData.charRemark || char?.name);
               
               if (isGroup) {
                   // 🌟 核心修复 5：群聊顶栏精确读取当前群的状态
