@@ -711,7 +711,7 @@ if (!window.shoppingActions) {
             // 4. 合并生成唯一订单存入历史
             const orderNum = (isFoodOrder ? 'WM' : 'TB') + Date.now().toString().slice(-8) + Math.floor(Math.random() * 1000);
             const nowTime = Date.now();
-            const deliveryMs = isFoodOrder ? (30 * 60 * 1000) : (2 * 24 * 60 * 60 * 1000); 
+            const deliveryMs = isFoodOrder ? (20 * 60 * 1000) : (2 * 24 * 60 * 60 * 1000); 
 
             const newOrder = {
                 orderNum: orderNum,

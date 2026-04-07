@@ -4315,6 +4315,25 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
                 </div>
             </div>
             `;
+      // 👇 🌟 新增：Sync 博主共创邀请卡片
+        } else if (msg.msgType === 'sync_invite_card') {
+            maxWidthClass = 'max-w-[260px]';
+            bubbleClass = 'bg-transparent shadow-none p-0 m-0 border-0'; 
+            bubbleStyle = ''; 
+            contentHtml = `
+            <div class="w-[240px] bg-[#fcfcfc] rounded-[12px] border border-gray-200 p-6 shadow-sm select-none flex flex-col items-center justify-center relative overflow-hidden">
+                <div class="absolute top-0 left-0 w-full h-[3px] bg-gray-900"></div>
+                
+                <i data-lucide="infinity" class="w-7 h-7 text-gray-900 mb-3 opacity-90"></i>
+                <span class="text-[16px] font-black tracking-[0.2em] leading-snug text-center font-serif text-gray-900 mb-1 uppercase">Sync.</span>
+                <span class="text-[9px] text-gray-400 tracking-[0.2em] uppercase mb-5">Invitation</span>
+                
+                <div class="text-[12px] font-bold text-gray-600 text-center leading-relaxed font-serif">
+                    <span class="text-gray-900 border-b border-gray-300 pb-0.5 px-1">${msg.sender}</span><br>
+                    <span class="text-[11px] opacity-80 mt-2 block font-sans tracking-wide">invited you to co-create</span>
+                </div>
+            </div>
+            `;
       } else if (msg.msgType === 'invite_card') {
             // 🌟 完美融入架构：利用底层气泡包装器，只需指定宽度和透明底色！头像和时间会自动对齐！
             maxWidthClass = 'max-w-[240px]';
@@ -6235,18 +6254,46 @@ if (/\[(?:退回转账|退还转账)\]/.test(remainingText)) {
             remainingText = remainingText.replace(/\[(?:发送好友申请|请求添加好友)\][:：]?\s*/g, '').trim(); hasSystemAction = true;
         }
 
-        // 🌟 物理拦截 AI 的接受邀请指令，转为绝美卡片并开通空间！
+        // 🌟 物理拦截情侣空间邀请
         if (/\[(?:接受|同意)邀请\]/.test(remainingText)) {
             msgsToPush.push({ msgType: 'accept_card', text: '[已接受邀请]' });
             remainingText = remainingText.replace(/\[(?:接受|同意)邀请\][:：]?\s*/g, '').trim();
-            
-            // 物理开通情侣空间！
             store.coupleSpaces = store.coupleSpaces || [];
-            if (!store.coupleSpaces.includes(char.id)) {
-                store.coupleSpaces.push(char.id);
-            }
+            if (!store.coupleSpaces.includes(char.id)) store.coupleSpaces.push(char.id);
             hasSystemAction = true;
         }
+
+        // 👇 🌟 【新增】：物理拦截 Sync 博主邀请！
+        if (/\[(?:接受|同意)Sync邀请\]/i.test(remainingText)) {
+            // 1. 发送一张炫酷的已同意卡片（或者直接用系统提示）
+            chat.messages.push({ 
+                id: Date.now() + sysMsgOffset++, sender: 'system', 
+                text: `${char.name} 已接受邀请，你们的 Sync 账号已正式建立！`, 
+                isMe: false, source: 'wechat', msgType: 'system', time: cloudTime, timestamp: Date.now() + sysMsgOffset 
+            });
+            remainingText = remainingText.replace(/\[(?:接受|同意)Sync邀请\][:：]?\s*/gi, '').trim();
+            
+            // 2. 物理开通 Sync 账号！
+            store.syncAccounts = store.syncAccounts || [];
+            // 防止重复开通
+            if (!store.syncAccounts.find(a => a.charId === char.id)) {
+                const pId = chat.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+                const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
+                
+                store.syncAccounts.push({
+                    id: 'sync_' + Date.now(),
+                    charId: char.id,
+                    name: `${boundPersona.name} & ${char.name}`, // 初始默认名字
+                    avatar: char.avatar, // 初始默认用他的头像
+                    followers: Math.floor(Math.random() * 200) + 50, // 初始给点僵尸粉
+                    posts: [], // 帖子列表
+                    drafts: [] // 草稿箱
+                });
+            }
+            hasSystemAction = true;
+            if (typeof window.actions?.saveStore === 'function') window.actions.saveStore();
+        }
+
         // 👇 🌟 新增：解析手机权限请求反馈！
         if (/\[同意\]/.test(remainingText)) {
             // 1. 永久授权钢印
@@ -6437,10 +6484,11 @@ if (cleanedBeforeText.trim()) {
             msgsToPush.push({ sender: currentSpeakerName, msgType: 'call_action', callType: callType, text: content });
         // 👆 新增结束
         } else if (type === '下单') {
-            // 🌟 史诗级升级：精准剥离出店名、价格、备注、菜品明细！
+            // 🌟 史诗级升级：精准剥离出店名、价格、备注、收件人、菜品明细！
             let storeName = '未知店铺';
             let totalPriceStr = '0.00';
             let personalNote = 'Enjoy your food!'; // 兜底备注
+            let recipientName = '你'; // 🌟 新增：兜底收件人
             let foodItemsArr = [];
             
             if (content.includes('|')) {
@@ -6449,7 +6497,20 @@ if (cleanedBeforeText.trim()) {
                 totalPriceStr = (parts[1] || '0.00').replace(/S\$/i, ''); // 抹除价格前缀
                 personalNote = parts[2] || 'Enjoy your cyber food!';
                 
-                const foodItemsRaw = parts.slice(3).join('|'); // 剩下的全是菜品
+                let foodItemsRaw = '';
+                
+                // 🌟 新增防弹逻辑：判断他是写了新指令还是忘写了
+                if (parts.length >= 5) {
+                    // 如果切出5块及以上，说明第4块（索引3）就是收件人
+                    recipientName = parts[3] || '你';
+                    foodItemsRaw = parts.slice(4).join('|'); // 剩下的全是菜品
+                } else {
+                    // 如果他忘了写收件人，自动抓取当前你的设定名字当兜底
+                    const boundPersona = store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas.find(p => p.isCurrent) || store.personas[0];
+                    recipientName = boundPersona?.name || '你';
+                    foodItemsRaw = parts.slice(3).join('|'); 
+                }
+                
                 const rawArr = foodItemsRaw.split(/[,，]/).map(f => f.trim()).filter(Boolean);
                 
                 // 🌟 数据清洗魔法：自动生成逼真的数量(1x)和金额分布
@@ -6475,14 +6536,18 @@ if (cleanedBeforeText.trim()) {
                 
             } else {
                 storeName = content.trim(); // 万一 AI 漏了竖线，做个兜底
+                const boundPersona = store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas.find(p => p.isCurrent) || store.personas[0];
+                recipientName = boundPersona?.name || '你';
             }
 
             msgsToPush.push({ 
                 sender: currentSpeakerName, 
                 msgType: 'takeaway_card', 
                 text: `[为你点了一份外卖]`, // 兜底文字，供列表预览用
-                takeawayData: { storeName, totalPriceStr, personalNote, foodItemsArr } 
+                // 🌟 把收件人姓名塞进 takeawayData 中，供 UI 渲染提取！
+                takeawayData: { storeName, totalPriceStr, personalNote, foodItemsArr, recipient: recipientName } 
             });
+            
             // 🌟 将 TA 的外卖单写入系统
             if (typeof store !== 'undefined' && store.shoppingData) {
                 const deliveryMs = 30 * 60 * 1000; 
@@ -6491,7 +6556,8 @@ if (cleanedBeforeText.trim()) {
                     time: new Date().toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}),
                     timestamp: Date.now(), deliveryTime: Date.now() + deliveryMs,
                     type: 'food', storeName: storeName, items: foodItemsArr, totalPrice: totalPriceStr,
-                    status: '骑手赶往中', recipient: (store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas.find(p => p.isCurrent) || store.personas[0])?.name || '你',
+                    status: '骑手赶往中', 
+                    recipient: recipientName, // 🌟 这里直接使用解析出来的收件人
                     targetCharId: char.id, buyFor: 'user_by_ta'
                 });
                 if (window.actions?.saveStore) window.actions.saveStore();

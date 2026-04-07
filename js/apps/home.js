@@ -368,7 +368,7 @@ export function renderHomeApp(store) {
                     <div class="grid grid-cols-2 gap-y-4 gap-x-4 pb-24 mt-2">
                        ${createAppIcon('message-circle', '微信', "window.actions.setCurrentApp('wechat')", 'mc-icon-wechat', isDark)}
                        ${createAppIcon('messages-square', '论坛', "window.actions.setCurrentApp('forum')", 'mc-icon-forum', isDark)}
-                       ${createAppIcon('twitter', 'X', "window.actions.showToast('打开X')", 'mc-icon-x', isDark)}
+                       ${createAppIcon('infinity', 'Sync', "window.actions.setCurrentApp('blogger')", 'mc-icon-sync', isDark)}
                        ${createAppIcon('book-heart', '情侣空间', "window.actions.setCurrentApp('couple')", 'mc-icon-diary', isDark)}
                     </div>
                  </div>

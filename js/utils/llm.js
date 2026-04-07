@@ -17,37 +17,48 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
 
   const now = new Date();
   const timeString = now.toLocaleString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-  // 🌟 提取本周重要事项作为潜意识背景
+  // 🌟 提取近期重要事项作为潜意识背景 (已修复：过滤过去日期 & 隔离其他角色)
   const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); 
   const monday = new Date(now); monday.setDate(now.getDate() - dayOfWeek + 1);
   const monZero = new Date(monday); monZero.setHours(0,0,0,0);
   const sunEnd = new Date(monday); sunEnd.setDate(monday.getDate() + 6); sunEnd.setHours(23,59,59,999);
+  
+  // 🌟 新增：今天的零点基准线，用于过滤过去的日期
+  const todayZero = new Date(now); todayZero.setHours(0,0,0,0); 
 
   let weeklyEvents = [];
   
-  // 获取本周纪念日
+  // 获取本周纪念日 (仅限当前聊天的角色，且仅限今天及未来)
   const activeAnniversaries = store.anniversaries || [];
   activeAnniversaries.forEach(a => {
       if (!a.date) return;
+      
+      // 🚫 拦截 1：如果不是当前聊天的角色，绝对不告诉他！防止后院起火！
+      if (String(a.charId) !== String(charId)) return;
+      
       const aMonthDay = a.date.substring(5, 10);
       for (let i = 0; i < 7; i++) {
           const d = new Date(monZero); d.setDate(monZero.getDate() + i);
+          
+          // 🚫 拦截 2：如果这天已经过去了，就不再提醒他了
+          if (d < todayZero) continue;
+          
           const dMonthDay = String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
           if (aMonthDay === dMonthDay) {
-              const cObj = (store.contacts || []).find(c => String(c.id) === String(a.charId));
-              const cName = cObj ? cObj.name : 'TA';
-              weeklyEvents.push(`${d.getMonth() + 1}月${d.getDate()}日是${cName}的${a.name}`);
+              // 既然已经是专属角色了，直接用“你们的”显得更亲密
+              weeklyEvents.push(`${d.getMonth() + 1}月${d.getDate()}日是你们的[${a.name}]`);
           }
       }
   });
   
-  // 获取本周待办事项
+  // 获取本周待办事项 (仅限今天及未来)
   const activeTodos = store.calendarData?.todos || [];
   activeTodos.forEach(t => {
       const tDateStr = t.targetDate || t.date?.split('T')[0];
       if (tDateStr) {
           const tDate = new Date(tDateStr);
-          if (tDate >= monZero && tDate <= sunEnd) {
+          // 🚫 拦截 3：只保留今天到本周末的待办，过去的不提
+          if (tDate >= todayZero && tDate <= sunEnd) {
               weeklyEvents.push(`${tDate.getMonth() + 1}月${tDate.getDate()}日：${t.text}`);
           }
       }
@@ -55,8 +66,8 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
 
   let eventsPrompt = '';
   if (weeklyEvents.length > 0) {
-      // 🌟 放入极低优先级的提醒句式，强令他不能当复读机
-      eventsPrompt = `\n【系统提醒：本周潜意识备忘】近期安排：${weeklyEvents.join('；')}。(注：这只是你的隐性背景知识，绝对不可逢人便提，除非用户主动聊到相关话题或当天恰好是该日子，请保持自然日常的聊天状态！)`;
+      // 潜意识植入
+      eventsPrompt = `\n【系统提醒：近期潜意识备忘】近期安排：${weeklyEvents.join('；')}。(注：这只是你的隐性背景知识，绝对不可逢人便提，除非用户主动聊到相关话题或当天恰好是该日子，请保持自然日常的聊天状态！)`;
   }
 
   // 读取目标对象的附加设定
@@ -181,11 +192,13 @@ ${emojiRule}
           });
           
           if (selectedFoods.length > 0) {
-              systemRules += `\n   - 为她点外卖：[下单: 店名 | 预估总价 | 给她的备注 | 菜品1, 菜品2...] (当前城市 ${store.foodPoolInfo.city} 附近有: ${selectedFoods.join('、')}。请发挥吃货常识，结合环境和天气，从这些真实店铺中点出极其自然的菜品/套餐细节。备注请写一句极具情感价值或宠溺色彩的简短话语。严禁每次重复！必须独占一行！)`;
+              // 🌟 新增：要求 AI 在第 4 格填入收件人姓名！
+              systemRules += `\n   - 为她点外卖：[下单: 店名 | 预估总价 | 给她的备注 | 收件人姓名 | 菜品1, 菜品2...] (当前城市 ${store.foodPoolInfo.city} 附近有: ${selectedFoods.join('、')}。请发挥吃货常识，结合环境和天气，从这些真实店铺中点出极其自然的菜品/套餐细节。备注请写一句极具情感价值或宠溺色彩的简短话语。收件人请填她的名字或爱称。严禁每次重复！必须独占一行！)`;
           }
       } else {
           // 🌌 模式二：关闭了定位或无数据，强行注入“完全捏造”指令，洗刷他的记忆惯性！
-          systemRules += `\n   - 为她点外卖：[下单: 自造店名 | 预估总价 | 给她的备注 | 菜品1, 菜品2...] (注意：目前你无法获取她的真实位置和周边店铺。请完全发挥你的想象力，自由捏造一家听起来绝佳的外卖店和几道美味菜品！结合当前时间和你们的日常互动来点餐。备注需简短且极具情感价值或宠溺色彩。严禁每次重复，必须独占一行！)`;
+          // 🌟 同步要求捏造版也必须带收件人
+          systemRules += `\n   - 为她点外卖：[下单: 自造店名 | 预估总价 | 给她的备注 | 收件人姓名 | 菜品1, 菜品2...] (注意：目前你无法获取她的真实位置和周边店铺。请完全发挥你的想象力，自由捏造一家听起来绝佳的外卖店和几道美味菜品！结合当前时间和你们的日常互动来点餐。备注需简短且极具情感价值或宠溺色彩。收件人请填她的名字或爱称。严禁每次重复，必须独占一行！)`;
       }
 
       systemRules += `\n   \n❗【绝对红线】：你只能使用上方列表和词典中【精确存在】的指令！绝对禁止编造/更改指令（严禁输出任何未定义的格式）！`;
