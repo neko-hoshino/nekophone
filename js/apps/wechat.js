@@ -4258,9 +4258,9 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
             const itemsHtml = data.items.map(item => `
                 <div style="padding:16px;border-bottom:1px solid #f0f0f0">
                     <div style="display:flex;gap:12px">
-                        <div style="width:80px;height:80px;border-radius:8px;background:#FFF5F0;display:flex;align-items:center;justify-content:center;flex-shrink:0">
-                            <svg width="40" height="40" viewBox="0 0 40 40" fill="none"><rect x="8" y="12" width="24" height="20" rx="2" stroke="${isUnpaid?'#FFB000':'#FF4E00'}" stroke-width="2"/><path d="M14 12V8a6 6 0 0 1 12 0v4" stroke="${isUnpaid?'#FFB000':'#FF4E00'}" stroke-width="2" stroke-linecap="round"/><circle cx="20" cy="22" r="3" fill="${isUnpaid?'#FFB000':'#FF4E00'}"/></svg>
-                        </div>
+                        <div style="width:80px;height:80px;border-radius:8px;background:#f9fafb;display:flex;align-items:center;justify-content:center;flex-shrink:0;border:1px solid #f0f0f0">
+    <i data-lucide="package" style="width:40px;height:40px;color:#ccc"></i>
+</div>
                         <div style="flex:1;min-width:0">
                             <div style="font-size:14px;color:#333;font-weight:500;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${item.name}</div>
                             <div style="font-size:12px;color:#999;margin-top:6px">默认规格</div>

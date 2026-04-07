@@ -293,6 +293,7 @@ if (!window.shoppingState) {
         searchQuery: '',
         searchResults: null,
         isSearching: false,
+        isFetchingMenu: false,
         customLocation: '',
         showSharePopup: false,
         showCheckoutPopup: false,
@@ -304,6 +305,57 @@ if (!window.shoppingState) {
 // 2. 初始化全局动作 (挂载到 window 供 onclick 调用)
 if (!window.shoppingActions) {
     window.shoppingActions = {
+        // 🌟 动作：打开手动加购弹窗
+        manualAddToCart: () => {
+            // 初始化一个干净的表单状态
+            window.shoppingState.customItemData = { name: '', price: '', desc: '' };
+            window.shoppingState.showAddCustomItemPopup = true;
+            if (window.render) window.render();
+        },
+        // 关闭弹窗
+        closeAddCustomItemPopup: () => {
+            window.shoppingState.showAddCustomItemPopup = false;
+            if (window.render) window.render();
+        },
+        // 静默更新输入内容 (不触发全局刷新，防止输入法掉焦点)
+        updateCustomItemField: (field, value) => {
+            if (!window.shoppingState.customItemData) window.shoppingState.customItemData = {};
+            window.shoppingState.customItemData[field] = value;
+        },
+        // 确认提交！
+        confirmAddCustomItem: () => {
+            const data = window.shoppingState.customItemData || {};
+            const name = (data.name || '').trim();
+            const priceVal = parseFloat(data.price);
+            
+            if (!name) return window.actions?.showToast('请输入商品名称哦');
+            if (isNaN(priceVal) || priceVal < 0) return window.actions?.showToast('请输入有效的价格 (纯数字)');
+
+            const item = { 
+                name: name, 
+                price: priceVal.toFixed(2), 
+                desc: (data.desc || '').trim() || '自定义添加', 
+                type: 'shop', 
+                selected: true, 
+                qty: 1 
+            };
+            
+            if (!currentStore.shoppingData) currentStore.shoppingData = { cart: [], orders: [] };
+            currentStore.shoppingData.cart.unshift(item); // 放在最前面
+            
+            window.shoppingState.showAddCustomItemPopup = false; // 关闭弹窗
+            if (window.actions?.saveStore) window.actions.saveStore();
+            if (window.render) window.render();
+            if (window.actions?.showToast) window.actions.showToast('✅ 已手动加入购物车');
+        },
+
+        // 🌟 动作：清除搜索并返回首页
+        clearSearch: () => {
+            window.shoppingState.searchResults = null;
+            window.shoppingState.searchQuery = '';
+            window.shoppingState.isSearching = false;
+            if (window.render) window.render();
+        },
         // 🌟 外卖店铺与菜单控制
         switchFoodCategory: (cat) => {
             window.shoppingState.foodCategory = cat;
@@ -373,86 +425,103 @@ if (!window.shoppingActions) {
         updateSearch: (val) => { 
             window.shoppingState.searchQuery = val; 
         },
+        // 🌟 1. 独立暂存的手动定位系统 (绝对不污染雷达的真实IP)
         setLocation: () => {
-            const loc = prompt("请输入你要定位的城市或区域（如：北京市朝阳区，或 纽约市）。\n留空则自动使用您当前的真实网络 IP 定位：");
+            const loc = prompt("请输入你要定位的城市/区域（如：上海市陆家嘴）：", currentStore.shoppingData?.customLocation || window.shoppingState.customLocation || '');
             if (loc !== null) {
                 window.shoppingState.customLocation = loc.trim();
+                if (!currentStore.shoppingData) currentStore.shoppingData = { cart: [], orders: [] };
+                currentStore.shoppingData.customLocation = loc.trim(); // 永久存入数据
+                if (window.actions?.saveStore) window.actions.saveStore();
                 if (window.render) window.render();
-                if(window.actions?.showToast) window.actions.showToast(loc ? `📍 定位已切换至：${loc}` : '📍 已恢复为自动获取真实定位');
+                if (window.actions?.showToast) window.actions.showToast('✅ 定位已更新');
             }
         },
-        // 🧠 AI + 真实后端 双通道搜索引擎
+
+        // 🌟 2. 史诗级双核搜索引擎 (外卖搜店铺，淘宝搜商品)
         searchItems: async () => {
             const state = window.shoppingState;
-            const query = state.searchQuery.trim();
-            if (!query) return;
-
+            if (!state.searchQuery.trim()) return;
             state.isSearching = true;
+            state.searchResults = null; 
             if (window.render) window.render();
 
-            const isFood = state.homeTab === 'food';
-
-            // 🍔 通道一：外卖走真实高德后端！
-            if (isFood) {
-                let finalLocation = state.customLocation;
-                // 如果没有手动设置，自动获取真实 IP 城市
-                if (!finalLocation) {
-                    if (window.actions?.showToast) window.actions.showToast('正在获取真实定位...');
-                    try {
-                        const ipRes = await fetch('https://ipapi.co/json/');
-                        const ipJson = await ipRes.json();
-                        if (ipJson && ipJson.city) finalLocation = ipJson.city;
-                    } catch (e) {
-                        finalLocation = '上海市'; // 获取失败兜底
-                    }
-                }
-
-                try {
-                    // 🌟 直接调用你的专属域名接口！
-                    const serverUrl = 'https://neko-hoshino.duckdns.org/search-food';
-                    const res = await fetch(serverUrl, {
-                        method: 'POST',
-                        headers: { 
-                            'Content-Type': 'application/json',
-                            'x-secret-token': 'EAAF99' // 对应你服务器的口令
-                        },
-                        body: JSON.stringify({ keyword: query, location: finalLocation })
-                    });
-                    const realData = await res.json();
-                    if (realData.items) {
-                        state.searchResults = realData.items.slice(0, 4); // 取前4个展示
-                    }
-                } catch (e) {
-                    console.error(e);
-                    if(window.actions?.showToast) window.actions.showToast('连接外卖服务器失败，请检查后端');
-                } finally {
-                    state.isSearching = false;
-                    if (window.render) window.render();
-                }
-
-            } 
-            // 🛒 通道二：淘宝继续走纯净大模型脑补！
-            else {
-                const prompt = `用户在淘宝购物搜索了"${query}"。
-请生成 4 个极其逼真的商品结果。
-返回格式：[{"name": "商品标题(尽量长且真实)", "price": "价格(纯数字)", "sales": "已售1万+", "desc": "发货地/参数", "type": "shop"}]
-只返回 JSON 数组，绝不输出其他文字或markdown符号！`;
-
-                try {
-                    const res = await fetch(`${currentStore.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                        method: 'POST', 
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentStore.apiConfig.apiKey}` },
-                        body: JSON.stringify({ model: currentStore.apiConfig.model, messages: [{ role: 'user', content: prompt }], temperature: 0.7 })
+            try {
+                const apiKey = currentStore.apiConfig.apiKey;
+                const baseUrl = currentStore.apiConfig.baseUrl.replace(/\/+$/, '');
+                const model = currentStore.apiConfig.model;
+                
+                if (state.homeTab === 'food') {
+                    // 🍔 外卖模式：只搜店铺！
+                    const loc = currentStore.shoppingData?.customLocation || window.shoppingState.customLocation || '当前位置';
+                    const promptStr = `用户在“${loc}”搜索外卖：“${state.searchQuery}”。请生成3到5家相关的本地外卖店铺。
+返回严格的JSON数组格式：[{"storeName": "店名(不要有特殊符号)", "desc": "一句话描述(如: 品牌火锅 极速送达)", "rating": "4.8", "sales": "月售1000+"}]。绝不输出其他文字！`;
+                    
+                    const res = await fetch(`${baseUrl}/chat/completions`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                        body: JSON.stringify({ model: model, messages: [{ role: 'user', content: promptStr }], temperature: 0.5 })
                     });
                     const data = await res.json();
                     const reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json/gi, '').replace(/```/g, '').trim();
-                    state.searchResults = JSON.parse(reply);
-                } catch (e) {
-                    if(window.actions?.showToast) window.actions.showToast('淘宝搜索超时');
-                } finally {
-                    state.isSearching = false;
-                    if (window.render) window.render();
+                    
+                    // 🌟 防弹装甲：确保解析出来的是数组
+                    let parsed = JSON.parse(reply);
+                    if (!Array.isArray(parsed)) parsed = [];
+                    state.searchResults = parsed.map(s => ({ ...s, isDynamic: true }));
+                    
+                } else {
+                    // 🛍️ 淘宝模式：正常搜商品
+                    const promptStr = `用户搜索淘宝商品：“${state.searchQuery}”。请生成6个相关商品。
+返回严格的JSON数组：[{"name": "商品标题(尽量详细)", "price": "价格(纯数字)", "sales": "月售100+", "desc": "发货地"}]。绝不输出其他文字！`;
+                    const res = await fetch(`${baseUrl}/chat/completions`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+                        body: JSON.stringify({ model: model, messages: [{ role: 'user', content: promptStr }], temperature: 0.5 })
+                    });
+                    const data = await res.json();
+                    const reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json/gi, '').replace(/```/g, '').trim();
+                    
+                    // 🌟 防弹装甲：确保解析出来的是数组
+                    let parsed = JSON.parse(reply);
+                    state.searchResults = Array.isArray(parsed) ? parsed : [];
                 }
+            } catch (e) {
+                if (window.actions?.showToast) window.actions.showToast('搜索失败，请重试');
+            } finally {
+                state.isSearching = false;
+                if (window.render) window.render();
+            }
+        },
+
+        // 🌟 3. 动态生成专属菜单引擎
+        openSearchedFoodStore: async (storeStr) => {
+            const storeObj = JSON.parse(decodeURIComponent(storeStr));
+            const state = window.shoppingState;
+            
+            // 建立一个空的动态店铺，并开启 loading 状态
+            state.activeFoodStore = { isDynamic: true, storeName: storeObj.storeName, desc: storeObj.desc, sales: storeObj.sales, items: [] };
+            state.isFetchingMenu = true;
+            if (window.render) window.render();
+
+            try {
+                const promptStr = `你是一家名为“${storeObj.storeName}”的外卖店(${storeObj.desc})。请生成10个你店里的招牌菜品/主食/饮品。
+返回严格的JSON数组格式：[{"name": "菜品名称(不带店名)", "price": "价格(纯数字，如28.50)"}]。绝不输出其他文字！`;
+                
+                const res = await fetch(`${currentStore.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${currentStore.apiConfig.apiKey}` },
+                    body: JSON.stringify({ model: currentStore.apiConfig.model, messages: [{ role: 'user', content: promptStr }], temperature: 0.5 })
+                });
+                const data = await res.json();
+                const reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json/gi, '').replace(/```/g, '').trim();
+                
+                // 获取菜品后，塞入店铺
+                let parsed = JSON.parse(reply);
+                state.activeFoodStore.items = Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                if (window.actions?.showToast) window.actions.showToast('菜单获取失败');
+                state.activeFoodStore = null; // 失败则退回
+            } finally {
+                state.isFetchingMenu = false;
+                if (window.render) window.render();
             }
         },
 
@@ -582,7 +651,7 @@ if (!window.shoppingActions) {
             window.shoppingActions.executeCheckout();
         },
 
-        // 🚀 终极斩杀：执行多步结算逻辑 (合并订单版)
+        // 🚀 终极斩杀：执行多步结算逻辑 (支持自定义备注 & AI 明文解析)
         executeCheckout: () => {
             const state = window.shoppingState;
             const data = state.checkoutData;
@@ -594,7 +663,15 @@ if (!window.shoppingActions) {
             const isUnpaid = data.payMethod === 'ta'; // 找人代付 = 未结账
             const isFoodOrder = itemsToBuy[0].type === 'food';
 
-            // 1. 验证余额扣款
+            // 🌟 1. 拦截输入：如果是外卖，让用户自己写备注！
+            let customNote = '无';
+            if (isFoodOrder) {
+                const noteInput = prompt("请输入外卖订单备注（选填，留空则默认为无）：");
+                if (noteInput === null) return; // 如果用户点了取消，直接中止结算
+                customNote = noteInput.trim() !== '' ? noteInput.trim() : '无';
+            }
+
+            // 2. 验证余额扣款 (仅限余额结账)
             if (!isUnpaid) {
                 if ((currentStore.wallet?.balance || 0) < total) {
                     return window.actions?.showToast('余额不足，请充值或选择代付！');
@@ -603,7 +680,7 @@ if (!window.shoppingActions) {
                 currentStore.wallet.transactions.push({ type: 'out', amount: total, title: isFoodOrder ? '外卖订单' : '淘宝购物', date: new Date().toISOString() });
             }
 
-            // 2. 确立收件人与通知对象
+            // 3. 确立收件人与通知对象
             let targetChar = null; 
             if (data.buyFor === 'ta') {
                 targetChar = currentStore.contacts.find(c => c.id === data.buyForCharId);
@@ -613,57 +690,66 @@ if (!window.shoppingActions) {
             
             const payChar = currentStore.contacts.find(c => c.id === data.payCharId);
 
-            // 🌟 核心修复：寻找在这个订单里，你主要在和谁互动，取对应的绑定马甲
+            // 获取发送卡片的马甲名称
             const referenceChar = targetChar || payChar || currentStore.contacts[0];
             const boundPersona = currentStore.personas.find(p => String(p.id) === String(referenceChar?.boundPersonaId)) || currentStore.personas.find(p => p.isCurrent) || currentStore.personas[0];
             const myName = boundPersona.name;
 
-            // 如果是给TA买，收件人是TA；如果是给自己买，收件人是你自己的马甲名
             let recipientName = myName; 
             if (data.buyFor === 'ta' && targetChar) recipientName = targetChar.name;
 
-            // 🌟 3. 核心：合并生成唯一订单！
+            // 4. 合并生成唯一订单存入历史
             const orderNum = (isFoodOrder ? 'WM' : 'TB') + Date.now().toString().slice(-8) + Math.floor(Math.random() * 1000);
             const nowTime = Date.now();
-            // 物流时间：外卖30分钟，淘宝2天 (可修改)
-            const deliveryMs = isFoodOrder ? (30 * 60 * 1000) : (2 * 24 * 60 * 60 * 1000); 
+            const deliveryMs = isFoodOrder ? (1 * 60 * 1000) : (2 * 24 * 60 * 60 * 1000); 
 
             const newOrder = {
                 orderNum: orderNum,
                 time: new Date(nowTime).toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}),
                 timestamp: nowTime,
-                deliveryTime: nowTime + deliveryMs, // 🌟 预计送达时间戳
+                deliveryTime: nowTime + deliveryMs,
                 type: isFoodOrder ? 'food' : 'shop',
                 storeName: isFoodOrder ? (itemsToBuy[0].desc || '神秘美食') : '淘宝合并订单',
                 items: itemsToBuy.map(i => ({ name: i.name.replace(/^【.*?】/, ''), price: parseFloat(i.price).toFixed(2), qty: i.qty || 1 })),
                 totalPrice: total.toFixed(2),
                 status: isUnpaid ? '未结账' : (isFoodOrder ? '骑手赶往中' : '卖家已发货'),
                 recipient: recipientName,
-                targetCharId: targetChar ? targetChar.id : null, // 到货后通知谁
-                buyFor: data.buyFor // 'self' 还是 'ta'
+                targetCharId: targetChar ? targetChar.id : null,
+                buyFor: data.buyFor 
             };
 
             currentStore.shoppingData.orders = [newOrder, ...(currentStore.shoppingData.orders || [])];
             currentStore.shoppingData.cart = cart.filter(i => !i.selected); 
             state.showCheckoutPopup = false;
 
-            // 4. 智能分流：外卖生成小票，淘宝生成订单
+            // 🌟 5. 智能分流：生成带有“明文翻译”的卡片，给 AI 戴上眼镜！
             const deliveryDate = new Date(nowTime + deliveryMs);
             let orderMsg = {
-                id: Date.now(), sender: myName, isMe: true, // 🌟 替换为 myName
+                id: Date.now(), sender: myName, isMe: true,
                 time: new Date(nowTime).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}), timestamp: Date.now()
             };
 
             if (isFoodOrder) {
-                orderMsg = { ...orderMsg, msgType: 'takeaway_card', text: isUnpaid ? '[外卖代付订单]' : '[外卖订单]', 
+                const itemNamesText = newOrder.items.map(i => i.name).join('、');
+                // 让大模型清清楚楚地看到卡片里装了什么！
+                const aiReadableText = isUnpaid 
+                    ? `[发起外卖代付请求：店铺“${newOrder.storeName}”，包含 ${itemNamesText}，总计 ¥${total.toFixed(2)}，备注：${customNote}]`
+                    : `[展示了一份外卖订单：店铺“${newOrder.storeName}”，包含 ${itemNamesText}，总计 ¥${total.toFixed(2)}，备注：${customNote}]`;
+
+                orderMsg = { ...orderMsg, msgType: 'takeaway_card', text: aiReadableText, 
                     takeawayData: {
                         storeName: newOrder.storeName, totalPriceStr: total.toFixed(2),
-                        personalNote: isUnpaid ? '宝宝，帮我付一下这份外卖嘛！饿饿！' : (data.buyFor === 'ta' ? '给你点的好吃的，趁热吃！' : '我的快乐夜宵到了！'),
+                        personalNote: customNote, // 🌟 使用用户自己填写的备注！
                         foodItemsArr: newOrder.items, paymentState: isUnpaid ? 'unpaid' : 'paid', orderNum: orderNum 
                     }
                 };
             } else {
-                orderMsg = { ...orderMsg, msgType: 'taobao_card', text: isUnpaid ? '[代付订单]' : '[淘宝订单]', 
+                const itemNamesText = newOrder.items.map(i => i.name).join('、');
+                const aiReadableText = isUnpaid 
+                    ? `[发起淘宝代付请求：包含 ${itemNamesText}，总计 ¥${total.toFixed(2)}]`
+                    : `[展示了一份淘宝订单：包含 ${itemNamesText}，总计 ¥${total.toFixed(2)}]`;
+
+                orderMsg = { ...orderMsg, msgType: 'taobao_card', text: aiReadableText, 
                     taobaoData: {
                         items: newOrder.items, totalPrice: total.toFixed(2), orderNum: orderNum, 
                         orderTime: new Date(nowTime).toLocaleString('zh-CN', { hour12: false }),
@@ -673,13 +759,15 @@ if (!window.shoppingActions) {
                 };
             }
 
-            // 5. 微信联动派遣引擎
+            // 6. 微信联动派遣引擎
             if (isUnpaid) {
                 if (payChar) {
                     const payChat = currentStore.chats.find(c => c.charId === payChar.id);
                     if (payChat) {
                         payChat.messages.push({ ...orderMsg });
-                        payChat.messages.push({ id: Date.now()+2, sender: 'system', text: `[系统/动作记录：用户刚刚给你发送了一笔代付订单，总计 ¥${total.toFixed(2)}。请你决定是否帮ta付款。如果同意付款，请在回复的最末尾独占一行输出 [付款] 指令！]`, isMe: true, isHidden: true, msgType: 'text', time: orderMsg.time, timestamp: Date.now()+2 });
+                        payChat.messages.push({
+                            id: Date.now()+2, sender: 'system', text: `[系统/动作记录：用户刚刚发来一笔代付，详情见上方卡片信息。请结合自己的性格决定是否宠溺地帮ta付款。若同意付款，请在回复末尾独占一行输出 [付款] 指令！]`, isMe: true, isHidden: true, msgType: 'text', time: orderMsg.time, timestamp: Date.now()+2
+                        });
                     }
                 }
             } else if (targetChar) {
@@ -765,22 +853,40 @@ export function renderShoppingApp(store) {
         const currentFoodCat = state.foodCategory || '美食';
         const hotItemsToRender = defaultProducts[currentCat] || [];
         
-        // 🌟 淘宝顶栏 (带返回)
-        let topBarCenterHtml = `
-            <div class="cursor-pointer pb-1 px-1 transition-all ${!isFood ? 'text-[#ff5000] border-b-[3px] border-[#ff5000]' : 'text-gray-500 hover:text-gray-800'}" onclick="window.shoppingActions.switchHomeTab('shop')">淘宝购物</div>
-            <div class="cursor-pointer pb-1 px-1 transition-all ${isFood ? 'text-[#ff5000] border-b-[3px] border-[#ff5000]' : 'text-gray-500 hover:text-gray-800'}" onclick="window.shoppingActions.switchHomeTab('food')">同城外卖</div>
-        `;
-        let handleBack = `window.actions.setCurrentApp(null)`;
+        // 🌟 判断当前是否处于“搜索模式”（如果进了具体的店铺，就覆盖搜索视图）
+        const isSearchingView = (state.isSearching || (state.searchResults !== null && state.searchQuery !== '')) && !state.activeFoodStore;
 
-        // 🌟 如果进入了外卖店铺菜单，顶栏变化
-        if (isFood && state.activeFoodStore) {
-            const sData = defaultFoodStores[state.activeFoodStore.cat][state.activeFoodStore.storeIndex];
-            topBarCenterHtml = `<div class="text-[18px] font-black text-gray-900">${sData.storeName}</div>`;
-            handleBack = `window.shoppingActions.closeFoodStore()`; // 返回外卖列表，而不是退出 App
+        let topBarCenterHtml = '';
+        let handleBack = `window.actions.setCurrentApp(null)`;
+        let topBarRightHtml = '';
+
+        // 🌟 读取专属暂存定位 (与IP无关)
+        const customLoc = currentStore.shoppingData?.customLocation || state.customLocation || '手动定位';
+
+        if (isSearchingView) {
+            topBarCenterHtml = `<div class="text-[16px] font-black text-gray-900">搜索结果</div>`;
+            topBarRightHtml = `<div class="text-[13px] font-bold text-[#ff5000] cursor-pointer active:opacity-50" onclick="window.shoppingActions.clearSearch()">退出</div>`;
+            handleBack = `window.shoppingActions.clearSearch()`; 
+        } else if (isFood && state.activeFoodStore) {
+            const sData = state.activeFoodStore.isDynamic ? state.activeFoodStore : defaultFoodStores[state.activeFoodStore.cat][state.activeFoodStore.storeIndex];
+            topBarCenterHtml = `<div class="text-[17px] font-black text-gray-900">${sData.storeName}</div>`;
+            handleBack = `window.shoppingActions.closeFoodStore()`;
+            topBarRightHtml = '';
+        } else {
+            topBarCenterHtml = `
+                <div class="cursor-pointer pb-1 px-1 transition-all ${!isFood ? 'text-[#ff5000] border-b-[3px] border-[#ff5000]' : 'text-gray-500 hover:text-gray-800'}" onclick="window.shoppingActions.switchHomeTab('shop')">淘宝购物</div>
+                <div class="cursor-pointer pb-1 px-1 transition-all ${isFood ? 'text-[#ff5000] border-b-[3px] border-[#ff5000]' : 'text-gray-500 hover:text-gray-800'}" onclick="window.shoppingActions.switchHomeTab('food')">同城外卖</div>
+            `;
+            // 🌟 在定位图标左侧加入文本显示
+            topBarRightHtml = isFood ? `
+                <div class="flex items-center text-gray-600 cursor-pointer active:scale-95" onclick="window.shoppingActions.setLocation()">
+                    <span class="text-[12px] font-bold mr-1 truncate max-w-[60px]">${customLoc}</span>
+                    <i data-lucide="map-pin" class="w-4 h-4 ${currentStore.shoppingData?.customLocation ? 'text-[#ff5000]' : ''}"></i>
+                </div>
+            ` : '';
         }
 
-        // 淘宝分类胶囊
-        const categoryBarHtml = (!isFood && !state.isSearching && !state.searchResults) ? `
+        const categoryBarHtml = `
             <div class="w-full bg-[#fff] px-3 pb-2 pt-1 border-b border-gray-100 z-10 shrink-0 overflow-x-auto hide-scrollbar">
                 <div class="flex space-x-3 w-max">
                     ${Object.keys(defaultProducts).map(cat => `
@@ -788,10 +894,9 @@ export function renderShoppingApp(store) {
                     `).join('')}
                 </div>
             </div>
-        ` : '';
+        `;
 
-        // 外卖分类胶囊
-        const foodCategoryBarHtml = (isFood && !state.activeFoodStore && !state.isSearching && !state.searchResults) ? `
+        const foodCategoryBarHtml = `
             <div class="w-full bg-[#fff] px-3 pb-2 pt-1 border-b border-gray-100 z-10 shrink-0 overflow-x-auto hide-scrollbar">
                 <div class="flex space-x-3 w-max">
                     ${Object.keys(defaultFoodStores).map(cat => `
@@ -799,9 +904,8 @@ export function renderShoppingApp(store) {
                     `).join('')}
                 </div>
             </div>
-        ` : '';
+        `;
 
-        // 渲染商品网格 (复用)
         const renderProductGrid = (items) => {
             return `
             <div class="grid grid-cols-2 gap-3">
@@ -809,12 +913,12 @@ export function renderShoppingApp(store) {
                     const encodedItem = encodeURIComponent(JSON.stringify(item));
                     return `
                     <div class="bg-[#fff] rounded-[12px] overflow-hidden shadow-sm border border-gray-100 flex flex-col cursor-pointer active:scale-95 transition-transform">
-                        <div class="w-full aspect-square bg-gray-50 flex items-center justify-center text-gray-300 relative">
+                        <div class="w-full aspect-square bg-[#f9fafb] flex items-center justify-center border-b border-[#f0f0f0] relative">
                             <i data-lucide="package" class="w-10 h-10 text-gray-300"></i>
                         </div>
                         <div class="p-2 flex flex-col flex-1">
                             <div class="text-[13px] text-gray-800 font-medium line-clamp-2 leading-snug mb-1 flex-1">${item.name}</div>
-                            <div class="text-[10px] text-gray-400 mb-1">${item.sales}</div>
+                            <div class="text-[10px] text-gray-400 mb-1">${item.sales || '已售100+'}</div>
                             <div class="flex justify-between items-end">
                                 <span class="text-[15px] font-black text-[#ff5000]"><span class="text-[11px]">¥</span>${item.price}</span>
                                 <div class="w-6 h-6 border border-[#ff5000] text-[#ff5000] rounded-full flex items-center justify-center cursor-pointer hover:bg-[#ff5000] hover:text-white transition-colors" onclick="event.stopPropagation(); window.shoppingActions.addToCart('${encodedItem}')"><i data-lucide="shopping-cart" class="w-3 h-3"></i></div>
@@ -825,147 +929,156 @@ export function renderShoppingApp(store) {
             </div>`;
         };
 
-        // ==========================================
-        // 🌟 外卖店铺或菜单渲染
-        // ==========================================
+        // 🌟 外卖渲染逻辑
         let foodContentHtml = '';
-        let bottomFoodCartHtml = ''; // 悬浮购物车
+        let bottomFoodCartHtml = ''; 
 
         if (state.activeFoodStore) {
-            // 1. 获取当前店铺数据与已点菜品
-            const sData = defaultFoodStores[state.activeFoodStore.cat][state.activeFoodStore.storeIndex];
-            const storeCart = (currentStore.shoppingData?.cart || []).filter(i => i.type === 'food' && i.desc === sData.storeName);
-            const storeTotalQty = storeCart.reduce((acc, item) => acc + (item.qty || 1), 0);
-            const storeTotalPrice = storeCart.reduce((acc, item) => acc + (parseFloat(item.price) || 0) * (item.qty || 1), 0).toFixed(2);
-
-            // 2. 渲染菜品列表
-            foodContentHtml = `
-                <div class="p-4 bg-[#fff] mb-2 flex items-center shadow-sm">
-                    <div class="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center text-gray-400 mr-3"><i data-lucide="${state.activeFoodStore.cat === '药品'?'pill':'store'}" class="w-8 h-8"></i></div>
-                    <div>
-                        <div class="text-[18px] font-black text-gray-800">${sData.storeName}</div>
-                        <div class="text-[11px] text-gray-500 mt-1">${sData.desc} | ${sData.sales}</div>
+            // 🌟 动态等待菜单生成
+            if (state.isFetchingMenu) {
+                foodContentHtml = `
+                    <div class="flex flex-col items-center justify-center pt-32 text-gray-400">
+                        <i data-lucide="loader" class="w-8 h-8 animate-spin text-[#ff5000] mb-3"></i>
+                        <span class="text-[13px] font-bold">正在向商家索取菜单...</span>
                     </div>
-                </div>
-                <div class="text-[13px] font-black text-gray-800 mb-2 px-2 pt-2">热销商品</div>
-                <div class="flex flex-col space-y-3 px-2">
-                    ${sData.items.map(item => {
-                        const cartItem = { name: `【${sData.storeName}】${item.name}`, price: item.price, type: 'food', desc: sData.storeName };
-                        const encodedItem = encodeURIComponent(JSON.stringify(cartItem));
-                        
-                        // 🌟 动态匹配购物车里有没有这个菜
-                        const inCart = storeCart.find(i => i.name === cartItem.name);
-                        const qty = inCart ? (inCart.qty || 1) : 0;
+                `;
+            } else {
+                // 提取统一的数据源 (动态或静态)
+                const sData = state.activeFoodStore.isDynamic ? state.activeFoodStore : defaultFoodStores[state.activeFoodStore.cat][state.activeFoodStore.storeIndex];
+                const storeCart = (currentStore.shoppingData?.cart || []).filter(i => i.type === 'food' && i.desc === sData.storeName);
+                const storeTotalQty = storeCart.reduce((acc, item) => acc + (item.qty || 1), 0);
+                const storeTotalPrice = storeCart.reduce((acc, item) => acc + (parseFloat(item.price) || 0) * (item.qty || 1), 0).toFixed(2);
 
-                        return `
-                        <div class="bg-[#fff] rounded-[12px] p-3 flex shadow-sm border border-gray-100">
-                            <div class="w-20 h-20 bg-orange-50 rounded-[8px] flex items-center justify-center flex-shrink-0 text-orange-400"><i data-lucide="${state.activeFoodStore.cat === '药品'?'cross':'coffee'}" class="w-8 h-8"></i></div>
-                            <div class="ml-3 flex-1 flex flex-col justify-between overflow-hidden">
-                                <div class="font-bold text-gray-900 text-[15px] truncate">${item.name}</div>
-                                <div class="text-[11px] text-gray-500 truncate mt-1">月售999+ | 好评度99%</div>
-                                <div class="flex justify-between items-end mt-2">
-                                    <span class="text-[14px] font-black text-[#ff5000]"><span class="text-[10px]">¥</span>${item.price}</span>
-                                    
-                                    ${qty > 0 ? `
-                                        <div class="flex items-center space-x-2.5">
-                                            <div class="w-6 h-6 border border-gray-300 rounded-full flex items-center justify-center text-gray-500 cursor-pointer active:bg-gray-100" onclick="window.shoppingActions.updateFoodQty('${encodedItem}', -1)"><i data-lucide="minus" class="w-3.5 h-3.5"></i></div>
-                                            <span class="text-[13px] font-bold text-gray-800 w-3 text-center">${qty}</span>
-                                            <div class="w-6 h-6 bg-[#ff5000] rounded-full flex items-center justify-center text-white cursor-pointer active:scale-95 shadow-sm" onclick="window.shoppingActions.updateFoodQty('${encodedItem}', 1)"><i data-lucide="plus" class="w-3.5 h-3.5"></i></div>
-                                        </div>
-                                    ` : `
-                                        <div class="w-6 h-6 bg-[#ff5000] rounded-full flex items-center justify-center text-white cursor-pointer shadow-sm active:scale-95" onclick="window.shoppingActions.updateFoodQty('${encodedItem}', 1)"><i data-lucide="plus" class="w-4 h-4"></i></div>
-                                    `}
+                foodContentHtml = `
+                    <div class="p-4 bg-[#fff] mb-2 flex items-center shadow-sm">
+                        <div class="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center text-gray-400 mr-3"><i data-lucide="${sData.cat === '药品'?'pill':'store'}" class="w-8 h-8"></i></div>
+                        <div>
+                            <div class="text-[18px] font-black text-gray-800">${sData.storeName}</div>
+                            <div class="text-[11px] text-gray-500 mt-1">${sData.desc || '为您现做的美味'} | ${sData.sales || '月售999+'}</div>
+                        </div>
+                    </div>
+                    <div class="text-[13px] font-black text-gray-800 mb-2 px-2 pt-2">热销商品</div>
+                    <div class="flex flex-col space-y-3 px-2">
+                        ${(sData.items || []).map(item => {
+                            const cartItem = { name: `【${sData.storeName}】${item.name}`, price: item.price, type: 'food', desc: sData.storeName };
+                            const encodedItem = encodeURIComponent(JSON.stringify(cartItem));
+                            const inCart = storeCart.find(i => i.name === cartItem.name);
+                            const qty = inCart ? (inCart.qty || 1) : 0;
+
+                            return `
+                            <div class="bg-[#fff] rounded-[12px] p-3 flex shadow-sm border border-gray-100">
+                                <div class="w-20 h-20 bg-orange-50 rounded-[8px] flex items-center justify-center flex-shrink-0 text-orange-400"><i data-lucide="${sData.cat === '药品'?'cross':'coffee'}" class="w-8 h-8"></i></div>
+                                <div class="ml-3 flex-1 flex flex-col justify-between overflow-hidden">
+                                    <div class="font-bold text-gray-900 text-[15px] truncate">${item.name}</div>
+                                    <div class="text-[11px] text-gray-500 truncate mt-1">月售999+ | 好评度99%</div>
+                                    <div class="flex justify-between items-end mt-2">
+                                        <span class="text-[14px] font-black text-[#ff5000]"><span class="text-[10px]">¥</span>${item.price}</span>
+                                        ${qty > 0 ? `
+                                            <div class="flex items-center space-x-2.5">
+                                                <div class="w-6 h-6 border border-gray-300 rounded-full flex items-center justify-center text-gray-500 cursor-pointer active:bg-gray-100" onclick="window.shoppingActions.updateFoodQty('${encodedItem}', -1)"><i data-lucide="minus" class="w-3.5 h-3.5"></i></div>
+                                                <span class="text-[13px] font-bold text-gray-800 w-3 text-center">${qty}</span>
+                                                <div class="w-6 h-6 bg-[#ff5000] rounded-full flex items-center justify-center text-white cursor-pointer active:scale-95 shadow-sm" onclick="window.shoppingActions.updateFoodQty('${encodedItem}', 1)"><i data-lucide="plus" class="w-3.5 h-3.5"></i></div>
+                                            </div>
+                                        ` : `
+                                            <div class="w-6 h-6 bg-[#ff5000] rounded-full flex items-center justify-center text-white cursor-pointer shadow-sm active:scale-95" onclick="window.shoppingActions.updateFoodQty('${encodedItem}', 1)"><i data-lucide="plus" class="w-4 h-4"></i></div>
+                                        `}
+                                    </div>
+                                </div>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                    <div class="h-[100px]"></div>
+                `;
+
+                bottomFoodCartHtml = `
+                    ${state.showFoodCartDetail && storeTotalQty > 0 ? `
+                        <div class="absolute inset-0 z-[50] bg-black/40 backdrop-blur-sm animate-in fade-in duration-200" onclick="window.shoppingActions.toggleFoodCartDetail()"></div>
+                        <div class="absolute bottom-[60px] left-0 right-0 bg-[#f4f4f4] rounded-t-[16px] z-[51] flex flex-col max-h-[60vh] shadow-[0_-10px_20px_rgba(0,0,0,0.1)] pb-2 animate-in slide-in-from-bottom-8 duration-200" onclick="event.stopPropagation()">
+                            <div class="px-4 py-3 bg-orange-50 rounded-t-[16px] flex justify-between items-center border-b border-orange-100">
+                                <span class="text-[12px] text-gray-600 font-bold">已选商品</span>
+                                <div class="flex items-center text-gray-500 cursor-pointer active:opacity-50" onclick="window.shoppingActions.clearFoodCart('${sData.storeName}')">
+                                    <i data-lucide="trash-2" class="w-3.5 h-3.5 mr-1"></i><span class="text-[12px]">清空</span>
                                 </div>
                             </div>
-                        </div>`;
-                    }).join('')}
-                </div>
-                <div class="h-[100px]"></div>
-            `;
-
-            // 3. 组装底部悬浮购物车 (完美复刻美团)
-            bottomFoodCartHtml = `
-                ${state.showFoodCartDetail && storeTotalQty > 0 ? `
-                    <div class="absolute inset-0 z-[50] bg-black/40 backdrop-blur-sm animate-in fade-in duration-200" onclick="window.shoppingActions.toggleFoodCartDetail()"></div>
-                    <div class="absolute bottom-[60px] left-0 right-0 bg-[#f4f4f4] rounded-t-[16px] z-[51] flex flex-col max-h-[60vh] shadow-[0_-10px_20px_rgba(0,0,0,0.1)] pb-2 animate-in slide-in-from-bottom-8 duration-200" onclick="event.stopPropagation()">
-                        <div class="px-4 py-3 bg-orange-50 rounded-t-[16px] flex justify-between items-center border-b border-orange-100">
-                            <span class="text-[12px] text-gray-600 font-bold">已选商品</span>
-                            <div class="flex items-center text-gray-500 cursor-pointer active:opacity-50" onclick="window.shoppingActions.clearFoodCart('${sData.storeName}')">
-                                <i data-lucide="trash-2" class="w-3.5 h-3.5 mr-1"></i><span class="text-[12px]">清空</span>
+                            <div class="flex-1 overflow-y-auto px-4 py-2 space-y-4 bg-[#fff]">
+                                ${storeCart.map(i => {
+                                    const iEncoded = encodeURIComponent(JSON.stringify({name: i.name, price: i.price, type: 'food', desc: i.desc}));
+                                    return `
+                                    <div class="flex justify-between items-center">
+                                        <div class="flex flex-col flex-1 truncate pr-4">
+                                            <span class="text-[14px] font-bold text-gray-800 truncate">${i.name.replace(`【${sData.storeName}】`, '')}</span>
+                                            <span class="text-[14px] font-black text-[#ff5000]">¥${i.price}</span>
+                                        </div>
+                                        <div class="flex items-center space-x-2.5 shrink-0">
+                                            <div class="w-6 h-6 border border-gray-300 rounded-full flex items-center justify-center text-gray-500 cursor-pointer" onclick="window.shoppingActions.updateFoodQty('${iEncoded}', -1)"><i data-lucide="minus" class="w-3.5 h-3.5"></i></div>
+                                            <span class="text-[13px] font-bold text-gray-800 w-3 text-center">${i.qty}</span>
+                                            <div class="w-6 h-6 bg-[#ff5000] rounded-full flex items-center justify-center text-white cursor-pointer" onclick="window.shoppingActions.updateFoodQty('${iEncoded}', 1)"><i data-lucide="plus" class="w-3.5 h-3.5"></i></div>
+                                        </div>
+                                    </div>`;
+                                }).join('')}
                             </div>
                         </div>
-                        <div class="flex-1 overflow-y-auto px-4 py-2 space-y-4 bg-[#fff]">
-                            ${storeCart.map(i => {
-                                const iEncoded = encodeURIComponent(JSON.stringify({name: i.name, price: i.price, type: 'food', desc: i.desc}));
-                                return `
-                                <div class="flex justify-between items-center">
-                                    <div class="flex flex-col flex-1 truncate pr-4">
-                                        <span class="text-[14px] font-bold text-gray-800 truncate">${i.name.replace(`【${sData.storeName}】`, '')}</span>
-                                        <span class="text-[14px] font-black text-[#ff5000]">¥${i.price}</span>
-                                    </div>
-                                    <div class="flex items-center space-x-2.5 shrink-0">
-                                        <div class="w-6 h-6 border border-gray-300 rounded-full flex items-center justify-center text-gray-500 cursor-pointer" onclick="window.shoppingActions.updateFoodQty('${iEncoded}', -1)"><i data-lucide="minus" class="w-3.5 h-3.5"></i></div>
-                                        <span class="text-[13px] font-bold text-gray-800 w-3 text-center">${i.qty}</span>
-                                        <div class="w-6 h-6 bg-[#ff5000] rounded-full flex items-center justify-center text-white cursor-pointer" onclick="window.shoppingActions.updateFoodQty('${iEncoded}', 1)"><i data-lucide="plus" class="w-3.5 h-3.5"></i></div>
-                                    </div>
-                                </div>`;
-                            }).join('')}
-                        </div>
-                    </div>
-                ` : ''}
+                    ` : ''}
 
-                <div class="absolute bottom-0 left-0 right-0 h-[60px] bg-[#fff] border-t border-gray-200 flex items-center justify-between px-4 z-[52] pb-safe shadow-[0_-4px_15px_rgba(0,0,0,0.06)]">
-                    <div class="relative flex-1 flex items-center cursor-pointer h-full" onclick="window.shoppingActions.toggleFoodCartDetail()">
-                        <div class="relative w-12 h-12 rounded-full flex items-center justify-center -mt-6 border-[3px] border-[#fff] shadow-md z-10 transition-colors ${storeTotalQty > 0 ? 'bg-[#ff5000]' : 'bg-gray-700'}">
-                            <i data-lucide="shopping-bag" class="w-6 h-6 text-white ${storeTotalQty > 0 ? '' : 'opacity-60'}"></i>
-                            ${storeTotalQty > 0 ? `<div class="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold px-1.5 min-w-[18px] h-[18px] rounded-full flex items-center justify-center border border-[#fff] shadow-sm">${storeTotalQty}</div>` : ''}
+                    <div class="absolute bottom-0 left-0 right-0 h-[60px] bg-[#fff] border-t border-gray-200 flex items-center justify-between px-4 z-[52] pb-safe shadow-[0_-4px_15px_rgba(0,0,0,0.06)]">
+                        <div class="relative flex-1 flex items-center cursor-pointer h-full" onclick="window.shoppingActions.toggleFoodCartDetail()">
+                            <div class="relative w-12 h-12 rounded-full flex items-center justify-center -mt-6 border-[3px] border-[#fff] shadow-md z-10 transition-colors ${storeTotalQty > 0 ? 'bg-[#ff5000]' : 'bg-gray-700'}">
+                                <i data-lucide="shopping-bag" class="w-6 h-6 text-white ${storeTotalQty > 0 ? '' : 'opacity-60'}"></i>
+                                ${storeTotalQty > 0 ? `<div class="absolute -top-1.5 -right-1.5 bg-rose-500 text-white text-[10px] font-bold px-1.5 min-w-[18px] h-[18px] rounded-full flex items-center justify-center border border-[#fff] shadow-sm">${storeTotalQty}</div>` : ''}
+                            </div>
+                            <div class="ml-3 flex flex-col justify-center">
+                                ${storeTotalQty > 0 ? `
+                                    <span class="text-[18px] font-black text-gray-900 leading-none mb-1">¥${storeTotalPrice}</span>
+                                    <span class="text-[10px] text-gray-500 leading-none">另需配送费 ¥0 | 支持自取</span>
+                                ` : `
+                                    <span class="text-[13px] text-gray-400 font-bold mb-1">未选购商品</span>
+                                    <span class="text-[10px] text-gray-400 leading-none">另需配送费 ¥0</span>
+                                `}
+                            </div>
                         </div>
-                        <div class="ml-3 flex flex-col justify-center">
-                            ${storeTotalQty > 0 ? `
-                                <span class="text-[18px] font-black text-gray-900 leading-none mb-1">¥${storeTotalPrice}</span>
-                                <span class="text-[10px] text-gray-500 leading-none">另需配送费 ¥0 | 支持自取</span>
-                            ` : `
-                                <span class="text-[13px] text-gray-400 font-bold mb-1">未选购商品</span>
-                                <span class="text-[10px] text-gray-400 leading-none">另需配送费 ¥0</span>
-                            `}
-                        </div>
+                        ${storeTotalQty > 0 ? `
+                            <button class="bg-gradient-to-r from-[#ff9000] to-[#ff5000] text-white h-[42px] px-7 rounded-full font-bold text-[15px] active:scale-95 transition-transform shadow-md ml-2" onclick="window.shoppingActions.checkoutFoodStore('${sData.storeName}')">去结算</button>
+                        ` : `
+                            <button class="bg-gray-200 text-gray-400 h-[42px] px-6 rounded-full font-bold text-[14px] cursor-not-allowed ml-2">¥15起送</button>
+                        `}
                     </div>
-                    ${storeTotalQty > 0 ? `
-                        <button class="bg-gradient-to-r from-[#ff9000] to-[#ff5000] text-white h-[42px] px-7 rounded-full font-bold text-[15px] active:scale-95 transition-transform shadow-md ml-2" onclick="window.shoppingActions.checkoutFoodStore('${sData.storeName}')">去结算</button>
-                    ` : `
-                        <button class="bg-gray-200 text-gray-400 h-[42px] px-6 rounded-full font-bold text-[14px] cursor-not-allowed ml-2">¥15起送</button>
-                    `}
-                </div>
-            `;
+                `;
+            }
         } else {
-            // 显示外卖店铺列表
-            const stores = defaultFoodStores[currentFoodCat] || [];
+            // 🌟 外卖店铺列表（复用给首页静态和搜索结果动态店铺）
+            const storesToRender = isSearchingView ? (state.searchResults || []) : (defaultFoodStores[currentFoodCat] || []);
+            
             foodContentHtml = `
                 <div class="flex flex-col space-y-3">
-                    ${stores.map((store, idx) => `
-                        <div class="bg-[#fff] rounded-[12px] p-3 flex shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-transform" onclick="window.shoppingActions.openFoodStore('${currentFoodCat}', ${idx})">
-                            <div class="w-20 h-20 bg-orange-50 rounded-[8px] flex items-center justify-center flex-shrink-0 text-orange-500"><i data-lucide="${currentFoodCat === '药品'?'pill':'store'}" class="w-8 h-8"></i></div>
+                    ${storesToRender.map((store, idx) => {
+                        const storeStr = encodeURIComponent(JSON.stringify(store));
+                        // 静态传 idx，动态搜出来的传序列化字符串
+                        const onclickAction = isSearchingView ? `window.shoppingActions.openSearchedFoodStore('${storeStr}')` : `window.shoppingActions.openFoodStore('${currentFoodCat}', ${idx})`;
+
+                        return `
+                        <div class="bg-[#fff] rounded-[12px] p-3 flex shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-transform" onclick="${onclickAction}">
+                            <div class="w-20 h-20 bg-orange-50 rounded-[8px] flex items-center justify-center flex-shrink-0 text-orange-500"><i data-lucide="${store.storeName.includes('药')?'pill':'store'}" class="w-8 h-8"></i></div>
                             <div class="ml-3 flex-1 flex flex-col justify-center overflow-hidden">
                                 <div class="font-bold text-gray-900 text-[16px] truncate mb-1">${store.storeName}</div>
                                 <div class="text-[11px] text-gray-500 truncate mb-1">${store.desc}</div>
-                                <div class="text-[11px] text-orange-500 bg-orange-50 self-start px-1.5 py-0.5 rounded">评分 ${store.rating} | ${store.sales}</div>
+                                <div class="text-[11px] text-orange-500 bg-orange-50 self-start px-1.5 py-0.5 rounded">评分 ${store.rating || '4.8'} | ${store.sales || '月售999+'}</div>
                             </div>
                         </div>
-                    `).join('')}
+                    `}).join('')}
                 </div>
             `;
         }
 
         pageContentHtml = `
             <div class="pt-12 pb-3 px-4 flex items-center bg-[#fff] z-40 relative shadow-sm shrink-0">
-                <div class="w-10 flex items-center cursor-pointer active:opacity-50 text-gray-800" onclick="${handleBack}">
+                <div class="w-[80px] flex items-center cursor-pointer active:opacity-50 text-gray-800" onclick="${handleBack}">
                     <i data-lucide="chevron-left" class="w-7 h-7 -ml-2"></i>
                 </div>
-                <div class="flex-1 flex justify-center space-x-8 font-bold text-[16px]">
+                <div class="flex-1 flex justify-center space-x-8 font-bold">
                     ${topBarCenterHtml}
                 </div>
-                <div class="w-10 flex justify-end">
-                    ${isFood && !state.activeFoodStore ? `<i data-lucide="map-pin" class="w-5 h-5 cursor-pointer active:scale-90 transition-transform ${state.customLocation ? 'text-[#ff5000]' : 'text-gray-600'}" onclick="window.shoppingActions.setLocation()" title="更改定位"></i>` : ''}
+                <div class="w-[80px] flex justify-end items-center">
+                    ${topBarRightHtml}
                 </div>
             </div>
             
@@ -973,27 +1086,28 @@ export function renderShoppingApp(store) {
             <div class="bg-[#fff] px-4 py-2 pb-2 shadow-sm z-10 relative shrink-0">
                 <div class="flex items-center bg-[#f4f4f4] rounded-full border border-gray-200 overflow-hidden pr-1">
                     <i data-lucide="search" class="w-5 h-5 text-gray-400 ml-3"></i>
-                    <input type="text" value="${state.searchQuery}" oninput="window.shoppingActions.updateSearch(this.value)" onkeydown="if(event.key==='Enter') window.shoppingActions.searchItems()" placeholder="${isFood ? '搜附近美食、奶茶...' : '搜索你要给 TA 买的礼物...'}" class="flex-1 bg-transparent h-10 px-2 outline-none text-[14px] text-gray-800" />
+                    <input type="text" value="${state.searchQuery}" oninput="window.shoppingActions.updateSearch(this.value)" onkeydown="if(event.key==='Enter') window.shoppingActions.searchItems()" placeholder="${isFood ? '搜附近美食...' : '搜索惊喜礼物...'}" class="flex-1 bg-transparent h-10 px-2 outline-none text-[14px] text-gray-800" />
                     <button class="bg-[#ff5000] text-white px-4 h-8 rounded-full text-[13px] font-bold active:scale-95 transition-transform" onclick="window.shoppingActions.searchItems()">搜索</button>
                 </div>
             </div>
             ` : ''}
 
-            ${!isFood ? categoryBarHtml : foodCategoryBarHtml}
+            ${(!isSearchingView && !state.activeFoodStore) ? (!isFood ? categoryBarHtml : foodCategoryBarHtml) : ''}
 
             <div id="shopping-home-scroll" class="flex-1 overflow-y-auto bg-[#f4f4f4] px-0 pt-0 pb-0 hide-scrollbar relative">
                 ${state.isSearching ? `
                     <div class="flex flex-col items-center justify-center pt-20 text-gray-400">
                         <i data-lucide="loader" class="w-8 h-8 animate-spin text-[#ff5000] mb-3"></i><span class="text-[13px]">正在寻找目标...</span>
                     </div>
-                ` : (state.searchQuery.trim() !== '' && state.searchResults ? `
-                    <div class="p-3"><div class="text-[12px] text-gray-400 mb-2 font-bold flex items-center"><i data-lucide="search" class="w-3.5 h-3.5 mr-1"></i>搜索结果</div>
-                    ${state.searchResults.length > 0 ? (!isFood ? renderProductGrid(state.searchResults) : foodContentHtml) : '<div class="text-center text-gray-400 mt-20 text-[13px]">未找到相关商品</div>'}</div>
+                ` : (isSearchingView ? `
+                    <div class="p-3">
+                        <div class="text-[12px] text-gray-400 mb-2 font-bold flex items-center"><i data-lucide="search" class="w-3.5 h-3.5 mr-1"></i>"${state.searchQuery}" 的搜索结果</div>
+                        ${(state.searchResults && state.searchResults.length > 0) ? (!isFood ? renderProductGrid(state.searchResults) : foodContentHtml) : '<div class="text-center text-gray-400 mt-20 text-[13px]">未找到相关商品或店铺</div>'}
+                    </div>
                 ` : `
                     ${!isFood ? `<div class="p-3"><div class="text-[13px] font-black text-gray-800 mb-3 flex items-center"><div class="w-1 h-3 bg-[#ff5000] rounded-full mr-2"></div>${currentCat} 热销好物榜</div>${renderProductGrid(hotItemsToRender)}</div>` : `<div class="p-3 pb-0">${foodContentHtml}</div>`}
                 `)}
             </div>
-            
             ${bottomFoodCartHtml}
         `;
     }
@@ -1006,11 +1120,13 @@ export function renderShoppingApp(store) {
 
         pageContentHtml = `
             <div class="pt-12 pb-3 px-4 flex items-center bg-[#fff] z-40 relative shadow-sm shrink-0">
-                <div class="w-16 flex items-center cursor-pointer active:opacity-50 text-gray-800" onclick="window.actions.setCurrentApp(null)">
+                <div class="w-12 flex items-center cursor-pointer active:opacity-50 text-gray-800" onclick="window.actions.setCurrentApp(null)">
                     <i data-lucide="chevron-left" class="w-7 h-7 -ml-2"></i>
                 </div>
                 <div class="flex-1 text-center text-[18px] font-black text-gray-900">购物车 (${shopData.cart.length})</div>
-                <div class="w-16"></div>
+                <div class="w-12 flex justify-end items-center cursor-pointer active:scale-90" onclick="window.shoppingActions.manualAddToCart()">
+                    <i data-lucide="plus" class="w-6 h-6 text-[#ff5000]"></i>
+                </div>
             </div>
             
             <div id="shopping-cart-scroll" class="flex-1 overflow-y-auto bg-[#f4f4f4] px-3 pt-3 pb-[100px] hide-scrollbar relative">
@@ -1230,6 +1346,34 @@ export function renderShoppingApp(store) {
                                 </div>
                             </div>
                         `).join('')}
+                    </div>
+                </div>
+            </div>
+        ` : ''}
+
+        ${state.showAddCustomItemPopup ? `
+            <div class="absolute inset-0 z-[99999] bg-black/50 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200" onclick="window.shoppingActions.closeAddCustomItemPopup()">
+                <div class="w-[85%] max-w-[320px] bg-[#fff] rounded-[24px] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 duration-300" onclick="event.stopPropagation()">
+                    <div class="p-4 font-black text-center text-[16px] text-gray-900 border-b border-gray-100 relative bg-[#fff]">
+                        添加自定义商品
+                        <i data-lucide="x" class="absolute right-4 top-4 w-5 h-5 text-gray-400 cursor-pointer active:scale-90" onclick="window.shoppingActions.closeAddCustomItemPopup()"></i>
+                    </div>
+                    <div class="p-5 space-y-4 bg-[#f9fafb]">
+                        <div>
+                            <label class="block text-[12px] font-bold text-gray-600 mb-1.5 ml-1">商品名称 <span class="text-rose-500">*</span></label>
+                            <input type="text" placeholder="输入你买的东西" class="w-full bg-[#fff] border border-gray-200 rounded-[12px] px-3 py-2.5 text-[14px] outline-none focus:border-[#ff5000] transition-colors shadow-sm" value="${state.customItemData?.name || ''}" oninput="window.shoppingActions.updateCustomItemField('name', this.value)">
+                        </div>
+                        <div class="flex space-x-3">
+                            <div class="flex-1">
+                                <label class="block text-[12px] font-bold text-gray-600 mb-1.5 ml-1">预估价格 (¥) <span class="text-rose-500">*</span></label>
+                                <input type="number" placeholder="99.00" class="w-full bg-[#fff] border border-gray-200 rounded-[12px] px-3 py-2.5 text-[14px] outline-none focus:border-[#ff5000] transition-colors shadow-sm" value="${state.customItemData?.price || ''}" oninput="window.shoppingActions.updateCustomItemField('price', this.value)">
+                            </div>
+                            <div class="flex-1">
+                                <label class="block text-[12px] font-bold text-gray-600 mb-1.5 ml-1">规格描述</label>
+                                <input type="text" placeholder="如: 默认规格" class="w-full bg-[#fff] border border-gray-200 rounded-[12px] px-3 py-2.5 text-[14px] outline-none focus:border-[#ff5000] transition-colors shadow-sm" value="${state.customItemData?.desc || ''}" oninput="window.shoppingActions.updateCustomItemField('desc', this.value)">
+                            </div>
+                        </div>
+                        <button class="w-full bg-gradient-to-r from-[#ff9000] to-[#ff5000] text-white font-bold text-[15px] py-3 rounded-full mt-2 active:scale-95 transition-transform shadow-md" onclick="window.shoppingActions.confirmAddCustomItem()">确认添加</button>
                     </div>
                 </div>
             </div>
