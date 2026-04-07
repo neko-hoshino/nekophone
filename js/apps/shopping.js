@@ -910,17 +910,24 @@ export function renderShoppingApp(store) {
             return `
             <div class="grid grid-cols-2 gap-3">
                 ${items.map(item => {
-                    const encodedItem = encodeURIComponent(JSON.stringify(item));
+                    // 🌟 防弹衣：兼容大模型胡乱起名字 (name / title)，兜底为 '神秘惊喜'
+                    const itemName = item.name || item.title || '神秘惊喜';
+                    const itemPrice = item.price || '99.00';
+                    
+                    // 保证加购时传过去的是安全数据
+                    const safeItem = { ...item, name: itemName, price: itemPrice };
+                    const encodedItem = encodeURIComponent(JSON.stringify(safeItem));
+                    
                     return `
                     <div class="bg-[#fff] rounded-[12px] overflow-hidden shadow-sm border border-gray-100 flex flex-col cursor-pointer active:scale-95 transition-transform">
                         <div class="w-full aspect-square bg-[#f9fafb] flex items-center justify-center border-b border-[#f0f0f0] relative">
                             <i data-lucide="package" class="w-10 h-10 text-gray-300"></i>
                         </div>
                         <div class="p-2 flex flex-col flex-1">
-                            <div class="text-[13px] text-gray-800 font-medium line-clamp-2 leading-snug mb-1 flex-1">${item.name}</div>
+                            <div class="text-[13px] text-gray-800 font-medium line-clamp-2 leading-snug mb-1 flex-1">${itemName}</div>
                             <div class="text-[10px] text-gray-400 mb-1">${item.sales || '已售100+'}</div>
                             <div class="flex justify-between items-end">
-                                <span class="text-[15px] font-black text-[#ff5000]"><span class="text-[11px]">¥</span>${item.price}</span>
+                                <span class="text-[15px] font-black text-[#ff5000]"><span class="text-[11px]">¥</span>${itemPrice}</span>
                                 <div class="w-6 h-6 border border-[#ff5000] text-[#ff5000] rounded-full flex items-center justify-center cursor-pointer hover:bg-[#ff5000] hover:text-white transition-colors" onclick="event.stopPropagation(); window.shoppingActions.addToCart('${encodedItem}')"><i data-lucide="shopping-cart" class="w-3 h-3"></i></div>
                             </div>
                         </div>
@@ -1051,16 +1058,22 @@ export function renderShoppingApp(store) {
             foodContentHtml = `
                 <div class="flex flex-col space-y-3">
                     ${storesToRender.map((store, idx) => {
-                        const storeStr = encodeURIComponent(JSON.stringify(store));
-                        // 静态传 idx，动态搜出来的传序列化字符串
+                        // 🌟 防弹衣：兼容大模型把店名写成了 name 甚至 title
+                        const sName = store.storeName || store.name || store.title || '未知店铺';
+                        const safeStore = { ...store, storeName: sName };
+                        
+                        const storeStr = encodeURIComponent(JSON.stringify(safeStore));
                         const onclickAction = isSearchingView ? `window.shoppingActions.openSearchedFoodStore('${storeStr}')` : `window.shoppingActions.openFoodStore('${currentFoodCat}', ${idx})`;
+
+                        // 安全地使用 sName.includes
+                        const iconName = sName.includes('药') ? 'pill' : 'store';
 
                         return `
                         <div class="bg-[#fff] rounded-[12px] p-3 flex shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-transform" onclick="${onclickAction}">
-                            <div class="w-20 h-20 bg-orange-50 rounded-[8px] flex items-center justify-center flex-shrink-0 text-orange-500"><i data-lucide="${store.storeName.includes('药')?'pill':'store'}" class="w-8 h-8"></i></div>
+                            <div class="w-20 h-20 bg-orange-50 rounded-[8px] flex items-center justify-center flex-shrink-0 text-orange-500"><i data-lucide="${iconName}" class="w-8 h-8"></i></div>
                             <div class="ml-3 flex-1 flex flex-col justify-center overflow-hidden">
-                                <div class="font-bold text-gray-900 text-[16px] truncate mb-1">${store.storeName}</div>
-                                <div class="text-[11px] text-gray-500 truncate mb-1">${store.desc}</div>
+                                <div class="font-bold text-gray-900 text-[16px] truncate mb-1">${sName}</div>
+                                <div class="text-[11px] text-gray-500 truncate mb-1">${store.desc || '为您提供美味'}</div>
                                 <div class="text-[11px] text-orange-500 bg-orange-50 self-start px-1.5 py-0.5 rounded">评分 ${store.rating || '4.8'} | ${store.sales || '月售999+'}</div>
                             </div>
                         </div>
