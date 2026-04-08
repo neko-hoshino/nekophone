@@ -410,7 +410,8 @@ if (!window.bloggerActions) {
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                 const text = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 const cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
-                acc.qaBox = acc.qaBox || []; acc.posts = acc.posts || [];
+                acc.qaBox = []; // 🌟 核心修改：清空所有没回答的历史遗留提问
+                acc.posts = acc.posts || [];
                 cms.forEach(q => {
                     if (q.answeredByPartner && q.answeredByPartner.trim() !== '') {
                         const likes = Math.floor(acc.followers * 0.05 + 10);
@@ -452,7 +453,7 @@ if (!window.bloggerActions) {
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                 const text = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 const cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
-                acc.inbox = acc.inbox || [];
+                acc.inbox = []; // 🌟 核心修改：全盘清空旧的私信列表
                 cms.forEach(c => {
                     const mappedMsgs = c.messages.map(m => ({ sender: m.sender==='博主' ? acc.name : m.sender, text: m.text, isMe: m.sender==='博主' }));
                     acc.inbox.push({ id: 'msg_' + Date.now() + Math.random(), author: c.author, messages: mappedMsgs });
