@@ -117,9 +117,9 @@ export function renderWorldbookApp(store) {
     return `
       ${globalStyles}
       <div class="w-full h-full bg-[#f3f3f3] flex flex-col relative animate-in slide-in-from-right-2 duration-200 z-50">
-        <div class="bg-white px-4 pt-12 pb-3 flex justify-between items-center shadow-sm relative z-20">
+        <div class="bg-white/80 backdrop-blur-md px-4 pt-8 pb-3 flex justify-between items-center shadow-sm relative z-20">
           <div class="flex items-center cursor-pointer active:opacity-50" onclick="window.wbActions.closeApp()"><i data-lucide="chevron-left" class="w-6 h-6"></i></div>
-          <span class="absolute left-1/2 -translate-x-1/2 font-bold text-gray-800 text-[20px]">世界书</span>
+          <span class="absolute left-1/2 -translate-x-1/2 font-black text-gray-800 text-[17px]">世界书</span>
           <div class="flex items-center space-x-4 text-gray-800">
              <i data-lucide="folder-cog" class="w-5 h-5 cursor-pointer active:scale-90" onclick="window.wbActions.openGroupModal()"></i>
              <i data-lucide="plus" class="w-6 h-6 cursor-pointer active:scale-90" onclick="window.wbActions.openEdit()"></i>

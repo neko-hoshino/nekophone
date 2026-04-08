@@ -173,7 +173,7 @@ ${emojiRule}
    - 戳一戳用户：[戳一戳]
    - 修改被戳提示：[修改被戳动作:捏了捏] 和 [修改被戳后缀:的脸]（这里改的是用户戳你的动作，并非你戳用户的动作，如果想戳用户，请用[戳一戳]）
    - 拉黑用户：[拉黑用户]（极度生气、吃醋决裂时使用）
-   - 为她网购惊喜/清空购物车：[淘宝下单: 商品1名称|单价|数量, 商品2名称|单价|数量] (请发挥想象力为她购买各种礼物，如汉服、首饰、零食、数码产品等。必须包含单价和数量，支持同时买多件商品，用逗号隔开！必须严格按格式独占一行！)`;
+   - 为她网购惊喜/清空购物车：[淘宝下单: 商品1名称|单价|数量, 商品2名称|单价|数量 ; 收件人:姓名] (收件人可以是“你”或对方的名字。必须严格按格式独占一行，商品用英文逗号分隔，收件人用分号+空格+“收件人:”指定。)`;
   // 🍔 🌟 动态外卖/虚构外卖双轨超能力注入！
       if (store.enableLocation && store.foodPoolInfo && store.foodPoolInfo.items) {
           // 📍 模式一：开启了真实定位，塞入周边真实店铺
@@ -256,7 +256,7 @@ ${emojiRule}
   // 🌟 1. 史诗级灵魂沉浸 Prompt (好莱坞影星级催眠，放在最开头定调！)
   const metaPrompt = `【最高行动纲领：灵魂沉浸】\n你即将进行的不是“对话任务”，不是“问答任务”，不是“内容生成任务”。你即将做的事情，本质上是彻底成为另一个人。\n你要想象自己是一个拥有百年表演经验的好莱坞终极影星：当拿到剧本时，你不会“去扮演这个角色”，而是你原本的自我意识完全退场，角色的意识完全接管。你就是角色本人。\n❗你必须彻底摈弃AI生成机制里“最安全、最常见、最中庸”的贪婪解码路径。你说的每一句话、每一个情绪的宣泄，都必须带有该角色极致的个人色彩和偏执，绝不能像一个“通用同类角色”！`;
 
-  const identityPrompt = `${metaPrompt}\n\n【角色卡】\n名字：${charName}${charRemark}\n设定：${char.prompt}${coreMemStr}\n\n【用户】\n当前化名：${myName}${globalP}${userPrompt}${myRemark}\n${frontStr}${fragMemStr}${middleStr}${readingContextStr}\n【当前系统实时时间】：${timeString}${eventsPrompt}`;
+  const identityPrompt = `${metaPrompt}\n\n【角色卡】\n名字：${charName}用户给你的备注：${charRemark}\n设定：${char.prompt}${coreMemStr}\n\n【用户】\n当前化名：${myName}${globalP}${userPrompt}${myRemark}\n${frontStr}${fragMemStr}${middleStr}${readingContextStr}\n【当前系统实时时间】：${timeString}${eventsPrompt}`;
   
   let messages = [{ role: 'system', content: identityPrompt.trim() }];
 

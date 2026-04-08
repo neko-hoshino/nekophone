@@ -2095,6 +2095,11 @@ ${relation}
   saveSettings: () => {
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     const targetObj = chat.isGroup ? chat : store.contacts.find(c => c.id === wxState.activeChatId);
+    const char = store.contacts.find(c => c.id === wxState.activeChatId);
+    
+    // 保存旧值用于比较
+    let oldCharRemark = chat.charRemark;
+    let oldCharName = char?.name;
 
     if (chat.isGroup) {
         chat.groupName = document.getElementById('set-group-name').value.trim() || '群聊';
@@ -2146,6 +2151,32 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
          if (lib) allowedNames.push(...lib.emojis.map(e => typeof e === 'object' ? e.name : '表情'));
       });
       if (allowedNames.length > 0) { targetObj.emojis = [...new Set(allowedNames)].join(', '); } else { targetObj.emojis = ""; }
+    }
+
+    // 🌟 备注修改后发送系统消息
+    if (!chat.isGroup) {
+        const newCharRemark = chat.charRemark;
+        
+        // 获取当前用户的身份化名（绑定的马甲名字）
+        const charObj = store.contacts.find(c => c.id === chat.charId);
+        const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
+        const myName = boundPersona.name;
+        
+        // 用户修改了对方的备注（显示用户化名）
+        if (oldCharRemark !== newCharRemark && newCharRemark) {
+            const newDisplay = newCharRemark;
+            chat.messages.push({
+                id: Date.now(),
+                sender: 'system',
+                text: `${myName} 已将${oldCharName}的备注修改为${newDisplay}`,
+                isMe: true,
+                source: 'wechat',
+                isOffline: false,
+                msgType: 'system',
+                time: getNowTime()
+            });
+        }
     }
     
     targetObj.customCSS = document.getElementById('set-custom-css').value;
@@ -3298,7 +3329,21 @@ export function renderWeChatApp(store) {
                 ${isManage ? `<div class="mr-3 mt-1 w-[22px] h-[22px] rounded-full border flex-shrink-0 ${wxState.selectedFavIds?.includes(f.id) ? 'bg-[#07c160] border-[#07c160]' : 'border-gray-300'} flex items-center justify-center transition-colors shadow-sm">${wxState.selectedFavIds?.includes(f.id) ? '<i data-lucide="check" class="text-white" style="width:14px; height:14px;"></i>' : ''}</div>` : ''}
                 <div class="flex-1 overflow-hidden">
                   <div class="flex items-center mb-2"><span class="text-[10px] text-gray-500 bg-gray-100 px-2 py-0.5 rounded mr-2 font-bold">${f.chatName}</span><span class="text-[10px] text-gray-400">${new Date(f.savedAt).toLocaleDateString()}</span></div>
-                  <div class="text-[14px] text-gray-800 leading-relaxed overflow-wrap break-words">${f.text.replace(/<[^>]*>?/gm, '')}</div>
+                  ${f.msgType === 'html_card' ? 
+    `<div class="mc-html-render-box w-full text-[14px] text-gray-800 leading-relaxed" style="white-space: normal !important; word-break: break-word !important;">
+        <style>
+            .mc-html-render-box button { background-color: #f3f4f6; color: #374151; padding: 6px 14px; border-radius: 8px; font-weight: bold; border: 1px solid #e5e7eb; cursor: pointer; transition: all 0.2s; }
+            .mc-html-render-box button:active { transform: scale(0.95); background-color: #e5e7eb; }
+            .mc-html-render-box input { border: 1px solid #d1d5db; border-radius: 8px; padding: 6px 10px; outline: none; width: 100%; }
+            .mc-html-render-box h1 { font-size: 1.4em; font-weight: 900; margin-bottom: 0.5em; }
+            .mc-html-render-box h2 { font-size: 1.2em; font-weight: 800; margin-bottom: 0.5em; }
+            .mc-html-render-box ul, .mc-html-render-box ol { padding-left: 1.5em; margin-bottom: 0.5em; }
+            .mc-html-render-box p { margin-bottom: 0.5em; }
+        </style>
+        ${f.text}
+    </div>` :
+    `<div class="text-[14px] text-gray-800 leading-relaxed overflow-wrap break-words">${f.text.replace(/<[^>]*>?/gm, '')}</div>`
+}
                 </div>
               </div>
             `).join('')}
@@ -5976,11 +6021,9 @@ window.syncCloudMailbox = async () => {
         if (!msg.charId) continue;
         let sysMsgOffset = 1; // 🌟 修复 1：引入局部计数器，确保同一毫秒内的指令 ID 绝对唯一且为纯整数！
         
-        // 🌟 提取云端的真实时间戳 (不再使用用户拉取时的时间！)
         // 🌟 史诗级修复：精准读取云端的 timestamp 并转换为人类时间！
 const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) : getNowTime();
         
-        // 🌟 史诗级修复：剥离 AUTO| 和 ALARM| 前缀，防止找不到聊天室导致消息被无情吞噬！
         // 🌟 史诗级修复：剥离所有前缀，支持 AUTO、MOMENT、ALARM 和 FORCE！
         let rawCharId = msg.charId;
         let isAutoTask = false;
@@ -6448,20 +6491,36 @@ if (cleanedBeforeText.trim()) {
         let content = (match[2] || match[3] || '').trim();
         
         if (type === '发起转账' || type === '转账') {
-            // 转账处理，同样需要 sender
-            let nextLines = remainingAfterMatch.split(/\r\n|\r|\n/);
-            const amount = (nextLines[0].match(/金额[:：]?\s*(\d+(\.\d+)?)/) || [])[1] || '520.00';
-            const note = (nextLines[0].match(/备注[:：]?\s*([^，,。\]\n]+)/) || [])[1] || '转账给你';
-            msgsToPush.push({ 
-                sender: currentSpeakerName,
-                msgType: 'transfer', 
-                text: `[收到转账]`, 
-                transferData: { amount, note }, 
-                transferState: 'pending' 
-            });
-            remainingText = nextLines.slice(1).join('\n').trim();
-        // 👇 🌟 新增的顺序指令拦截器
-        } else if (type === '表情包' || type === '表情') {
+    // 从 match[2] 或 match[3] 中获取转账详情
+    let contentDetail = (match[2] || match[3] || '').trim();
+    let amount = '520.00';
+    let note = '转账给你';
+
+    // 提取金额
+    const amountMatch = contentDetail.match(/金额\s*[:：]?\s*(\d+(?:\.\d+)?)/);
+    if (amountMatch) {
+        amount = amountMatch[1];
+    }
+
+    // 提取备注（匹配到换行或方括号为止）
+    const noteMatch = contentDetail.match(/备注\s*[:：]\s*([^\n\r[\]]+)/);
+    if (noteMatch) {
+        note = noteMatch[1].trim();
+    }
+
+    msgsToPush.push({ 
+        sender: currentSpeakerName,
+        msgType: 'transfer', 
+        text: `[收到转账]`, 
+        transferData: { amount, note }, 
+        transferState: 'pending' 
+    });
+
+    // 剩余未处理的文本（如换行后的普通消息）继续解析
+    remainingText = remainingAfterMatch;
+    matched = true;
+    continue;
+} else if (type === '表情包' || type === '表情') {
             let foundUrl = '';
             for (let libId of (char.mountedEmojis || [])) {
                 const lib = (store.emojiLibs || []).find(l => l.id === libId);
@@ -6563,57 +6622,76 @@ if (cleanedBeforeText.trim()) {
                 if (window.actions?.saveStore) window.actions.saveStore();
             }
           } else if (type === '淘宝下单') {
-            // 🌟 淘宝多件商品拆解引擎
-            let itemsRaw = content.split(/[,，]/); // 用逗号切分不同商品
-            let parsedItems = [];
-            let totalAmount = 0;
+    let itemsRaw = [];
+    let recipient = '';
+    
+    // 先尝试提取收件人（支持两种格式：; 收件人:xxx 或 收件人:xxx）
+    let recipientMatch = content.match(/[;；]\s*收件人[:：]\s*([^;；,，\n]+)/i);
+    if (!recipientMatch) {
+        recipientMatch = content.match(/收件人[:：]\s*([^;；,，\n]+)/i);
+    }
+    if (recipientMatch) {
+        recipient = recipientMatch[1].trim();
+        // 从 content 中移除收件人部分，剩下的作为商品列表
+        content = content.replace(recipientMatch[0], '');
+    }
+    
+    // 按逗号切分商品（兼容中英文逗号）
+    itemsRaw = content.split(/[,，]/);
+    let parsedItems = [];
+    let totalAmount = 0;
 
-            itemsRaw.forEach(itemStr => {
-                let parts = itemStr.split('|').map(p => p.trim());
-                if (parts.length >= 1 && parts[0]) {
-                    let name = parts[0] || '神秘礼物';
-                    let price = parseFloat(parts[1]) || (Math.floor(Math.random() * 200) + 50); // 兜底价格
-                    let qty = parseInt(parts[2]) || 1; // 兜底数量1
-                    totalAmount += (price * qty);
-                    parsedItems.push({ name, price: price.toFixed(2), qty });
-                }
-            });
+    itemsRaw.forEach(itemStr => {
+        let parts = itemStr.split('|').map(p => p.trim());
+        if (parts.length >= 1 && parts[0]) {
+            let name = parts[0] || '神秘礼物';
+            let price = parseFloat(parts[1]) || (Math.floor(Math.random() * 200) + 50);
+            let qty = parseInt(parts[2]) || 1;
+            totalAmount += (price * qty);
+            parsedItems.push({ name, price: price.toFixed(2), qty });
+        }
+    });
 
-            // 动态生成极其逼真的订单信息
-            const orderNum = 'TB' + Date.now().toString().slice(-8) + Math.floor(Math.random() * 10000);
-            
-            // 巧妙处理时间：下单时间是现在，预计送达是3天后
-            const nowTime = msg.timestamp ? new Date(msg.timestamp) : new Date();
-            const orderTimeStr = nowTime.toLocaleString('zh-CN', { hour12: false });
-            
-            const deliveryTime = new Date(nowTime.getTime() + 3 * 24 * 60 * 60 * 1000);
-            const deliveryDateStr = `${deliveryTime.getMonth() + 1}月${deliveryTime.getDate()}日`;
+    // 动态生成订单信息
+    const orderNum = 'TB' + Date.now().toString().slice(-8) + Math.floor(Math.random() * 10000);
+    const nowTime = msg.timestamp ? new Date(msg.timestamp) : new Date();
+    const orderTimeStr = nowTime.toLocaleString('zh-CN', { hour12: false });
+    const deliveryTime = new Date(nowTime.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const deliveryDateStr = `${deliveryTime.getMonth() + 1}月${deliveryTime.getDate()}日`;
 
-            msgsToPush.push({ 
-                sender: currentSpeakerName, 
-                msgType: 'taobao_card', 
-                text: `[淘宝订单]`, 
-                taobaoData: { 
-                    items: parsedItems,
-                    totalPrice: totalAmount.toFixed(2),
-                    orderNum: orderNum,
-                    orderTime: orderTimeStr,
-                    deliveryDateStr: deliveryDateStr
-                } 
-            });
-            // 🌟 将 TA 的淘宝单写入系统
-            if (typeof store !== 'undefined' && store.shoppingData) {
-                const deliveryMs = 2 * 24 * 60 * 60 * 1000; // 淘宝2天
-                store.shoppingData.orders.unshift({
-                    orderNum: orderNum,
-                    time: new Date().toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}),
-                    timestamp: Date.now(), deliveryTime: Date.now() + deliveryMs,
-                    type: 'shop', storeName: '淘宝精选', items: parsedItems, totalPrice: totalAmount.toFixed(2),
-                    status: '卖家已发货', recipient: (store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas.find(p => p.isCurrent) || store.personas[0])?.name || '你',
-                    targetCharId: char.id, buyFor: 'user_by_ta'
-                });
-                if (window.actions?.saveStore) window.actions.saveStore();
-            }
+    // 如果没有提供收件人，使用默认值（用户当前身份的名字）
+    if (!recipient) {
+        const defaultPersona = store.personas.find(p => p.id === (char?.boundPersonaId || store.personas[0].id)) || store.personas[0];
+        recipient = defaultPersona.name;
+    }
+
+    msgsToPush.push({ 
+        sender: currentSpeakerName, 
+        msgType: 'taobao_card', 
+        text: `[淘宝订单]`, 
+        taobaoData: { 
+            items: parsedItems,
+            totalPrice: totalAmount.toFixed(2),
+            orderNum: orderNum,
+            orderTime: orderTimeStr,
+            deliveryDateStr: deliveryDateStr,
+            recipient: recipient   // 新增收件人字段
+        } 
+    });
+    
+    // 同步到 shoppingData（如果需要）
+    if (typeof store !== 'undefined' && store.shoppingData) {
+        const deliveryMs = 2 * 24 * 60 * 60 * 1000;
+        store.shoppingData.orders.unshift({
+            orderNum: orderNum,
+            time: new Date().toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}),
+            timestamp: Date.now(), deliveryTime: Date.now() + deliveryMs,
+            type: 'shop', storeName: '淘宝精选', items: parsedItems, totalPrice: totalAmount.toFixed(2),
+            status: '卖家已发货', recipient: recipient,
+            targetCharId: char.id, buyFor: 'user_by_ta'
+        });
+        if (window.actions?.saveStore) window.actions.saveStore();
+    }
           } else if (type === '付款') {
             // 🌟 1. 找到该聊天室里最后一张等待代付的订单（兼容淘宝和外卖）
             const pendingOrderMsg = chat.messages.slice().reverse().find(m => 

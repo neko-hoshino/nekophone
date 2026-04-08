@@ -149,10 +149,10 @@ function createAppIcon(iconName, label, actionStr, mcClass, isDark) {
 
   return `
     <div class="flex flex-col items-center justify-center space-y-2 cursor-pointer group" onclick="${actionStr}">
-      <div class="${mcClass} w-[4.25rem] h-[4.25rem] flex items-center justify-center ${bgClass} rounded-[20px] group-active:scale-95 transition-transform duration-200 shadow-sm border">
-        <i data-lucide="${iconName}" class="${iconClass}" style="width: 32px; height: 32px;"></i>
+      <div class="${mcClass} w-[3.5rem] h-[3.5rem] flex items-center justify-center ${bgClass} rounded-[16px] group-active:scale-95 transition-transform duration-200 shadow-sm border">
+        <i data-lucide="${iconName}" class="${iconClass}" style="width: 26px; height: 26px;"></i>
       </div>
-      <span class="${textClass} text-[12px] font-bold tracking-wider">${label}</span>
+      <span class="${textClass} text-[10px] font-bold tracking-wider">${label}</span>
     </div>
   `;
 }
@@ -343,7 +343,7 @@ export function renderHomeApp(store) {
               <div class="w-full pt-2 shrink-0 ${txtMain}">
                  <div class="flex justify-between items-end mb-3 px-1">
                     <div class="flex items-baseline space-x-2">
-                        <span class="font-extrabold text-4xl tracking-wider opacity-90 uppercase">${currentMonthEng}</span>
+                        <span class="font-monospace text-4xl tracking-wider opacity-90 uppercase">${currentMonthEng}</span>
                         <span class="text-sm font-bold opacity-50 uppercase tracking-widest">${currentYear}</span>
                     </div>
                     <div class="flex space-x-3 mb-1">
@@ -365,7 +365,7 @@ export function renderHomeApp(store) {
                     </div>
                     
                     <div class="flex-1"></div> 
-                    <div class="grid grid-cols-2 gap-y-4 gap-x-4 pb-24 mt-2">
+                    <div class="grid grid-cols-2 gap-y-4 gap-x-2 pb-24 mt-2">
                        ${createAppIcon('message-circle', '微信', "window.actions.setCurrentApp('wechat')", 'mc-icon-wechat', isDark)}
                        ${createAppIcon('messages-square', '论坛', "window.actions.setCurrentApp('forum')", 'mc-icon-forum', isDark)}
                        ${createAppIcon('infinity', 'Sync', "window.actions.setCurrentApp('blogger')", 'mc-icon-sync', isDark)}
@@ -378,15 +378,15 @@ export function renderHomeApp(store) {
                        <div class="w-[4.5rem] h-[4.5rem] rounded-full overflow-hidden ${isDark?'bg-black/30 border-black/20':'bg-white/30 border-white/20'} mb-3 cursor-pointer active:scale-95 transition-transform shadow-sm border" onclick="document.getElementById('home-avatar-upload').click()">
                          ${avatarHtml}
                        </div>
-                       <input type="text" value="${my.name}" onchange="window.homeActions.updateName(this.value)" class="font-medium ${txtMain} text-2xl tracking-wide bg-transparent outline-none text-right w-full ${isDark?'placeholder-white/30':'placeholder-gray-800/40'}" placeholder="点击编辑" />
+                       <input type="text" value="${my.name}" onchange="window.homeActions.updateName(this.value)" class="font-bold ${txtMain} text-2xl tracking-wide bg-transparent outline-none text-right w-full ${isDark?'placeholder-white/30':'placeholder-gray-800/40'}" style="font-size: 18px !important" placeholder="点击编辑" />
                     </div>
                     <div class="flex flex-col items-end space-y-4 mt-2 w-full shrink-0">
-                       <input type="text" value="正在进入..." class="w-[70%] ${inputBg} backdrop-blur-md px-3 py-1 text-[11px] font-serif rounded-full outline-none text-right shadow-sm border" onclick="event.stopPropagation()" />
-                       <input type="text" value="梦之旅途" class="w-[80%] mr-[20%] ${inputBg} backdrop-blur-md px-3 py-1 text-[11px] font-serif rounded-full outline-none text-center shadow-sm border" onclick="event.stopPropagation()" />
+                       <input type="text" value="正在进入..." class="w-[70%] ${inputBg} backdrop-blur-md px-3 py-1 text-[11px] font-cursive rounded-full outline-none text-right shadow-sm border" style="font-size: 12px !important" onclick="event.stopPropagation()" />
+                       <input type="text" value="梦之旅途" class="w-[80%] mr-[20%] ${inputBg} backdrop-blur-md px-3 py-1 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm border" style="font-size: 12px !important" onclick="event.stopPropagation()" />
                     </div>
                     <div class="flex-1"></div> 
 
-                    <div class="flex justify-end space-x-4 pb-0 mt-4 animate-in fade-in duration-500">
+                    <div class="flex justify-end space-x-8 pb-0 pr-2 mt-4 animate-in fade-in duration-500">
                        ${createAppIcon('shopping-bag', '购物', "window.actions.setCurrentApp('shopping')", 'mc-icon-shop', isDark)}
                        ${createAppIcon('smartphone', '查手机', "window.actions.setCurrentApp('phone')", 'mc-icon-phone', isDark)}
                     </div>

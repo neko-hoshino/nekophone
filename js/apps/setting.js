@@ -342,10 +342,10 @@ export function renderSettingsApp(store) {
     <div class="w-full h-full bg-gray-50 flex flex-col relative animate-in slide-in-from-bottom-4 fade-in duration-300">
       
       <div class="bg-white/80 backdrop-blur-md pt-8 pb-3 px-4 flex items-center border-b border-gray-200 z-10 sticky top-0">
-        <div class="cursor-pointer text-blue-500" onclick="window.actions.setCurrentApp(null)">
+        <div class="cursor-pointer text-gray-800" onclick="window.actions.setCurrentApp(null)">
           <i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i>
         </div>
-        <span class="flex-1 text-center font-bold text-gray-800 mr-7">系统设置</span>
+        <span class="absolute left-1/2 -translate-x-1/2 font-black text-gray-800 text-[17px]">系统设置</span>
       </div>
 
       <div id="setting-scroll" class="flex-1 overflow-y-auto p-4 space-y-4 pb-20">
@@ -444,6 +444,27 @@ export function renderSettingsApp(store) {
           <span>保存并全局应用</span>
         </button>
 
+        <div class="bg-white p-4 rounded-[16px] shadow-sm border border-gray-100 mt-4">
+          <h3 class="font-bold text-gray-800 text-[15px] flex items-center mb-3">
+            <i data-lucide="cloud-lightning" class="w-4 h-4 mr-2 text-purple-500"></i>云端跨国通道
+          </h3>
+    
+          <div class="mb-4">
+            <input type="password" placeholder="请输入服务器访问密钥" 
+              value="${localStorage.getItem('neko_server_pwd') || ''}" 
+              onchange="localStorage.setItem('neko_server_pwd', this.value.trim()); window.actions.showToast('密钥已安全存入本地');"
+              class="w-full bg-gray-50 border border-gray-100 rounded-[12px] p-3 outline-none text-[13px] font-mono text-gray-800 focus:border-purple-300 transition-colors" />
+            <p class="text-[10px] text-gray-400 mt-1 pl-1">密钥仅保存在您的本地浏览器缓存中。</p>
+          </div>
+
+          <button onclick="window.settingsActions.connectPushServer()" class="w-full bg-purple-500 text-white font-bold py-3.5 rounded-[12px] active:scale-95 transition-transform text-[14px] mb-2 shadow-[0_4px_12px_rgba(168,85,247,0.2)] flex items-center justify-center">
+            1. 绑定当前设备接收推送
+          </button>
+          <button onclick="window.settingsActions.testPushServer()" class="w-full bg-gray-100 text-gray-800 font-bold py-3.5 rounded-[12px] active:bg-gray-200 transition-colors text-[14px] flex items-center justify-center">
+            2. 发射云端测试广播
+          </button>
+        </div>
+
         <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mt-4 space-y-3">
            <div class="flex justify-between items-center">
              <span class="font-bold text-gray-800 text-sm flex items-center"><i data-lucide="hard-drive" class="w-4 h-4 mr-1 text-blue-500"></i>系统存储探针</span>
@@ -471,27 +492,6 @@ export function renderSettingsApp(store) {
               <span class="text-[13px] font-bold text-gray-700">恢复本地数据</span>
               <i data-lucide="upload-cloud" class="w-4.5 h-4.5 text-gray-400"></i>
             </div>
-        </div>
-
-        <div class="bg-white p-4 rounded-[16px] shadow-sm border border-gray-100 mt-4">
-          <h3 class="font-bold text-gray-800 text-[15px] flex items-center mb-3">
-            <i data-lucide="cloud-lightning" class="w-4 h-4 mr-2 text-purple-500"></i>云端跨国通道
-          </h3>
-    
-          <div class="mb-4">
-            <input type="password" placeholder="请输入服务器访问密钥" 
-              value="${localStorage.getItem('neko_server_pwd') || ''}" 
-              onchange="localStorage.setItem('neko_server_pwd', this.value.trim()); window.actions.showToast('密钥已安全存入本地');"
-              class="w-full bg-gray-50 border border-gray-100 rounded-[12px] p-3 outline-none text-[13px] font-mono text-gray-800 focus:border-purple-300 transition-colors" />
-            <p class="text-[10px] text-gray-400 mt-1 pl-1">密钥仅保存在您的本地浏览器缓存中。</p>
-          </div>
-
-          <button onclick="window.settingsActions.connectPushServer()" class="w-full bg-purple-500 text-white font-bold py-3.5 rounded-[12px] active:scale-95 transition-transform text-[14px] mb-2 shadow-[0_4px_12px_rgba(168,85,247,0.2)] flex items-center justify-center">
-            1. 绑定当前设备接收推送
-          </button>
-          <button onclick="window.settingsActions.testPushServer()" class="w-full bg-gray-100 text-gray-800 font-bold py-3.5 rounded-[12px] active:bg-gray-200 transition-colors text-[14px] flex items-center justify-center">
-            2. 发射云端测试广播
-          </button>
         </div>
 
       </div>

@@ -837,6 +837,15 @@ export function renderPhoneApp(store) {
 
         const { history = '', task = '', recentText = '', scenario = 'phone' } = options;
 
+        // 🌟 注入当前时间，增强 AI 时间感知
+    const now = new Date();
+    const currentTimeStr = now.toLocaleString('zh-CN', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        weekday: 'long'
+    });
+    const timeContext = `\n\n【当前时间】\n${currentTimeStr}。请严格以此时间为基准判断事件的发生时间、状态（例如：只有时间早于或等于当前时间的行程才能标记为已完成）。\n`;
+
         const globalP = store.globalPrompt ? `\n【通用用户人设】\n${store.globalPrompt}` : '';
         const boundPrompt = boundP.prompt ? `\n【当前绑定身份】\n${boundP.prompt}` : '';
         const basePrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n\n【潜入用户】\n当前化名：${boundP.name}${globalP}${boundPrompt}`;
@@ -874,7 +883,7 @@ export function renderPhoneApp(store) {
         const backStr = backWb.length > 0 ? `\n\n[最高优先级指令]\n${backWb.join('\n')}` : '';
         const historyStr = history ? `\n\n【相关聊天记录】\n${history}` : '';
         
-        return `${basePrompt}${coreMemStr}${frontStr}\n${middleStr}${fragMemStr}${backStr}${historyStr}\n\n【系统任务】\n${task}`;
+        return `${basePrompt}${coreMemStr}${frontStr}\n${middleStr}${fragMemStr}${backStr}${historyStr}${timeContext}\n\n【系统任务】\n${task}`;
     };
 
     // ==========================================
@@ -890,13 +899,12 @@ export function renderPhoneApp(store) {
             const historyStr = (chat?.messages || []).slice(-15).map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`).join('\n');
 
             const task = `你现在正在被黑客协议抽取该角色的本地备忘录(Notes)。
-请基于角色的性格、核心记忆、不为人知的秘密，以及最近和用户的聊天记录，生成 6 条备忘录。
+请基于角色的性格、核心记忆，以及最近和用户的聊天记录，生成 6 条备忘录。
 要求：
 1. 包含 2 条日常或工作相关的记录（展现生活碎片）。
 2. 包含 3 条极度私密、情绪化，甚至带有病态/阴暗面，且与用户(${boundP.name})强相关的记录。
 3. 包含 1 条像是密码、暗号或谜语一样的备忘录。
-4. 当前时间参考：2026年4月。请生成符合情理的日期。
-5. 绝不要输出思考过程，严格输出 JSON 数组格式！
+4. 绝不要输出思考过程，严格输出 JSON 数组格式！
 
 格式要求：
 [
@@ -1014,7 +1022,7 @@ export function renderPhoneApp(store) {
             const task = `你现在正在被黑客协议抽取该角色的本地抖音数据。
 请生成三个列表：私信(messages)、作品(works)、喜欢(liked)。
 要求：
-1. 【私信】：生成4条。每条必须包含：name(对方名字), content(对方发来的话), reply(角色的回复/吐槽。❗直接输出回复，禁止使用（）进行动作描述或心理描写！), status(状态: "normal" 或 "blocked"表示已拉黑)。
+1. 【私信】：生成5条。每条必须包含：name(对方名字), content(对方发来的话), reply(角色的回复/吐槽。❗直接输出回复，禁止使用（）进行动作描述或心理描写！), status(状态: "normal" 或 "blocked"表示已拉黑)。
 2. 【作品】与【喜欢】：基于角色XP和秘密生成，每条包含desc描述。
 3. 必须包含与用户(${boundP.name})相关的私密私信或吐槽。
 4. 绝不输出思考过程，严格输出 JSON！
@@ -1294,7 +1302,7 @@ export function renderPhoneApp(store) {
 请基于角色的性格、隐藏的性偏好(XP/癖好)、以及最近和用户(${boundP.name})的关系，生成浏览数据。
 要求：
 1. 【keywords】: 生成3-5个搜索关键词。极大概率暴露出他内心深处的渴望、反差XP，或者是关于用户(${boundP.name})的代餐词汇。
-2. 【videos】: 生成3-4个视频记录。必须包含 title(视频的抓人眼球的标题), content(视频具体画面的露骨/刺激的文字描述，约100字), duration(时长), time(观看时间), review(角色看这个视频时的真实心理活动，比如代入用户、或者是自我吐槽)。
+2. 【videos】: 生成3-4个视频记录。必须包含 title(视频的抓人眼球的标题), content(视频具体画面的露骨的文字描述，剧情内容，谁操了谁、怎么操的，约200字), duration(时长), time(观看时间), review(最让自己湿/硬的片段、为什么兴奋、看的时候有没有摸自己、角色看这个视频时的真实心理活动（比如代入用户、或者是自我吐槽），不少于300字。)。
 3. 绝不输出思考过程，严格输出 JSON 格式！
 
 格式要求：

@@ -75,7 +75,7 @@ export function renderMemoryApp(store) {
     return `
       <div class="w-full h-full bg-[#f3f3f3] flex flex-col relative animate-in slide-in-from-right-2 duration-200 z-50">
         
-        <div class="bg-white px-4 pt-12 pb-3 flex justify-between items-center shadow-sm relative z-20">
+        <div class="bg-white/80 backdrop-blur-md px-4 pt-8 pb-3 flex justify-between items-center shadow-sm relative z-20">
           <div class="flex items-center cursor-pointer active:opacity-50" onclick="window.memActions.closeApp()">
              <i data-lucide="chevron-left" class="w-6 h-6 text-gray-800"></i>
           </div>
