@@ -138,8 +138,12 @@ if (!window.bloggerActions) {
             if (acc && acc.studioData && acc.studioData.commercial) {
                 acc.studioData.commercial.status = 'accepted';
                 acc.showcase = acc.showcase || [];
-                const price = Math.floor(Math.random() * 300 + 50); 
-                const commission = Math.floor(price * (Math.random() * 0.2 + 0.1)); 
+                // 🌟 使用 AI 判定的真实售价，兜底随机价格
+                const price = acc.studioData.commercial.price || Math.floor(Math.random() * 300 + 50); 
+                // 🌟 使用 AI 给出的合理佣金比例，兜底 5%~15%
+                const rate = acc.studioData.commercial.commissionRate || (Math.random() * 0.1 + 0.05); 
+                // 确保佣金至少有 1 块钱
+                const commission = Math.max(1, Math.floor(price * rate)); 
                 acc.showcase.unshift({
                     id: 'prod_' + Date.now(),
                     name: acc.studioData.commercial.product,
@@ -261,45 +265,63 @@ if (!window.bloggerActions) {
             const post = acc?.posts?.find(p => p.id === postId);
             state.isFetchingComments = true; window.render();
             try {
-                let context = "";
-                if (isLoadMore) context = "\n已有评论参考：\n" + post.comments.slice(-10).map(c => `[${c.author}]: ${c.content}`).join('\n');
-                // 🌟 如果这篇帖子是澄清贴，强行用它的判定结果扭转 AI 的评论倾向
-                if (post.prContext) {
-                    context += `\n【极其重要指令】：这是一篇公关澄清贴！处理结果是：${post.prContext.success ? '成功洗白，舆论反转' : '越抹越黑，严重翻车掉粉'}。具体情况：${post.prContext.feedback}。请严格按照这个结果生成网友评论（如果翻车，评论必须清一色嘲讽、脱粉、骂战；如果成功，必须清一色支持、心疼、吃瓜）！`;
-                }
-                const task = `请根据以下帖子生成评论。
-帖子标题: "${post.title}" | 正文: "${post.desc}"
-
-【要求】
-1. 生成 10 条多样化的野生网友评论，展现真实的互联网生态。
-2. 评论态度必须混合：嗑CP的狂欢、真诚的羡慕、酸言酸语(judge)、拉踩对比、无厘头玩梗或求同款等。
-3. 不要头像，严禁使用任何 Emoji！
-4. 严格输出 JSON 数组格式：
-[
-  { "author": "网名", "content": "评论内容" }
-]`;
                 const char = store.contacts.find(c => c.id === acc.charId);
+                let context = "";
+                if (isLoadMore) context += "\n已有评论参考：\n" + post.comments.slice(-10).map(c => `[${c.author}]: ${c.content}`).join('\n');
+                
+                if (post.prContext) {
+                    context += `\n【舆论风向控制】：这篇是澄清贴，判定结果为：${post.prContext.success ? '洗白成功' : '越抹越黑'}。请让粉丝评论严格对齐此风向。`;
+                }
+
+                // 🌟 1. 终极强控：改用 myReply，且加上“严禁HTML”的死命令防止网络报错
+                const task = `根据平台风格，模拟生成10条社交平台评论。
+1. 其中 7-8 条为普通粉丝/路人/黑粉的【首层评论】。
+2. 评论态度必须混合：嗑CP的狂欢、真诚的羡慕、酸言酸语(judge)、拉踩对比、无厘头玩梗或求同款等。
+【强制要求】你必须挑选其中 3 条，以博主（扮演【${char.name}】）的身份亲自回复（护妻/回怼/撒糖等）。
+严格输出JSON数组：
+[
+  {"author": "路人甲", "content": "好漂亮！", "myReply": ""},
+  {"author": "黑粉乙", "content": "太假了", "myReply": "有本事你拍一个"},
+  {"author": "粉丝丙", "content": "催更", "myReply": "安排上了"}
+]`;
+                
                 const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task: task + context });
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
+                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, 
+                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) 
                 });
+                
                 const data = await res.json();
                 let text = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 let cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
                 
                 const maxLikes = Math.max(10, Math.floor(post.stats.likes * 2));
-                const newCms = cms.map(c => ({ 
-                    id: 'cmt_'+Math.random().toString(36).substr(2,9), 
-                    author: c.author, 
-                    content: c.content, 
-                    likes: Math.floor(Math.random() * maxLikes),
-                    replies: [] 
-                })).sort((a,b) => b.likes - a.likes);
+                const newCms = cms.map(c => {
+                    const cmtId = 'cmt_'+Math.random().toString(36).substr(2,9);
+                    const replies = [];
+                    // 🌟 2. 捕捉 myReply，强制披上官方账号马甲，并剔除任何异常标签
+                    if (c.myReply && c.myReply.trim() !== "") {
+                        replies.push({ 
+                            author: acc.name, 
+                            content: c.myReply.replace(/<[^>]+>/g, ''), // 强行扒掉图片等代码
+                            isAuthor: true 
+                        });
+                    }
+                    
+                    return { 
+                        id: cmtId, 
+                        author: c.author, 
+                        content: c.content.replace(/<[^>]+>/g, ''), // 强行扒掉图片等代码
+                        likes: Math.floor(Math.random() * maxLikes),
+                        replies: replies 
+                    };
+                }).sort((a,b) => b.likes - a.likes);
 
                 post.comments = isLoadMore ? [...post.comments, ...newCms] : newCms;
                 post.hasFetchedComments = true;
                 post.stats.commentsCount = Math.max(post.stats.commentsCount, post.comments.length + Math.floor(Math.random()*20));
+                
                 if (window.actions.saveStore) window.actions.saveStore();
             } catch (e) { console.error(e); } finally { state.isFetchingComments = false; window.render(); }
         },
@@ -650,7 +672,7 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                     if (q.answeredByPartner && q.answeredByPartner.trim() !== '') {
                         const likes = Math.floor(acc.followers * 0.05 + 10);
                         acc.totalLikes += likes;
-                        acc.posts.unshift({ id: 'post_' + Date.now() + Math.random(), desc: `回答了匿名提问：${q.question}`, htmlContent: `<div class="bg-gray-100 p-3 rounded mb-2"><span class="font-bold text-gray-900">匿名提问: </span><span class="text-gray-700">${q.question}</span></div><div class="text-gray-800">${q.answeredByPartner}</div>`, mediaDesc: null, showcaseProduct: null, topics: [], stats: { likes, commentsCount: Math.floor(likes*0.1), saves: 0, shares: 0 }, comments: [], hasFetchedComments: false });
+                        acc.posts.unshift({ id: 'post_' + Math.random().toString(36).substr(2, 9), desc: `回答了匿名提问：${q.question}`, htmlContent: `<div class="bg-gray-100 p-3 rounded mb-2"><span class="font-bold text-gray-900">匿名提问: </span><span class="text-gray-700">${q.question}</span></div><div class="text-gray-800">${q.answeredByPartner}</div>`, mediaDesc: null, showcaseProduct: null, topics: [], stats: { likes, commentsCount: Math.floor(likes*0.1), saves: 0, shares: 0 }, comments: [], hasFetchedComments: false });
                     } else acc.qaBox.push({ id: 'qa_' + Date.now() + Math.random(), question: q.question });
                 });
                 if (window.actions.saveStore) window.actions.saveStore();
@@ -664,7 +686,7 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             const q = acc.qaBox.find(x => x.id === id);
             const likes = Math.floor(acc.followers * 0.08 + 10);
             acc.totalLikes += likes;
-            acc.posts.unshift({ id: 'post_' + Date.now(), desc: `回答了匿名提问：${q.question}`, htmlContent: `<div class="bg-gray-100 p-3 rounded mb-2"><span class="font-bold text-gray-900">匿名提问: </span><span class="text-gray-700">${q.question}</span></div><div class="text-gray-800">${ans.replace(/\n/g, '<br>')}</div>`, mediaDesc: null, showcaseProduct: null, topics: [], stats: { likes, commentsCount: Math.floor(likes*0.1), saves: 0, shares: 0 }, comments: [], hasFetchedComments: false });
+            acc.posts.unshift({ id: 'post_' + Math.random().toString(36).substr(2, 9), desc: `回答了匿名提问：${q.question}`, htmlContent: `<div class="bg-gray-100 p-3 rounded mb-2"><span class="font-bold text-gray-900">匿名提问: </span><span class="text-gray-700">${q.question}</span></div><div class="text-gray-800">${ans.replace(/\n/g, '<br>')}</div>`, mediaDesc: null, showcaseProduct: null, topics: [], stats: { likes, commentsCount: Math.floor(likes*0.1), saves: 0, shares: 0 }, comments: [], hasFetchedComments: false });
             acc.qaBox = acc.qaBox.filter(x => x.id !== id);
             if (window.actions.saveStore) window.actions.saveStore(); window.render(); window.actions?.showToast('✅ 回答已发布到主页');
         },
@@ -717,9 +739,9 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                 const task = `你是后台引擎。基于平台风格、账号等级[${lv.name} ${lv.rank}]、定位[${acc.positioning}]。
 生成：1. 平台活动 2. 商单邀约 3. 公关事件。
 【公关危机强烈要求】：必须非常抓马、搞笑、乌龙或离谱绯闻！
-重点：必须拆分为【表面黑料(desc)】和【乌龙真相(truth)】！并指定黑料的【攻击目标(target)】（必须严格输出 "user" 或 "character" 或 "both" 之一，代表黑料是针对用户、伴侣还是俩人）。
+重点：必须拆分为【表面黑料(desc)】和【乌龙真相(truth)】！并指定黑料的【攻击目标(target)】（严格输出 "user" 或 "character" 或 "both" 之一）。
 严禁Emoji。严格输出 JSON：
-{"activity": {"title": "标题", "desc": "描述", "topic": "话题词(不带#)"}, "commercial": {"title": "标题", "desc": "描述", "product": "商品名", "payout": 5000}, "pr": {"title": "标题(表面黑料)", "desc": "表面黑料具体描述", "truth": "不为人知的搞笑/乌龙真相", "target": "user/character/both", "stakeholder": "狗仔/黑粉网名"}}`;
+{"activity": {"title": "标题", "desc": "描述", "topic": "话题词(不带#)"}, "commercial": {"title": "标题", "desc": "描述", "product": "商品名", "price": 真实合理的商品售价(纯数字), "commissionRate": 行业合理的带货提成比例(例如0.05到0.15之间的数字), "payout": 坑位费(纯数字)}, "pr": {"title": "标题(表面黑料)", "desc": "表面黑料具体描述", "truth": "不为人知的搞笑/乌龙真相", "target": "user/character/both", "stakeholder": "狗仔/黑粉网名"}}`;
                 const char = store.contacts.find(c => c.id === acc.charId);
                 const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -825,7 +847,7 @@ export function renderBloggerApp(store) {
                                 const commentsHtml = isExpanded ? `<div class="w-full mt-2 mb-14 animate-in fade-in slide-in-from-top-4 duration-300"><div class="w-full bg-[#F9F7EF] p-5 shadow-sm"><div class="text-[12px] font-bold mb-4 tracking-widest border-b border-gray-300 pb-1.5 font-serif flex justify-between items-end"><span>精选高赞评论 (Top 10)</span><span class="text-[9px] text-gray-400 font-normal tracking-normal">总评: ${post.stats.commentsCount}</span></div><div class="space-y-4">${state.isFetchingComments && !post.hasFetchedComments ? `<div class="py-4 text-center text-gray-400 text-[10px]">加载中...</div>` : (post.comments||[]).map(cmt => `<div class="flex justify-between items-start mb-3 group"><div class="text-[11px] text-gray-800 leading-relaxed font-serif flex-1 pr-3"><span class="font-bold text-gray-900 cursor-pointer" onclick="event.stopPropagation(); window.bloggerActions.replyToComment('${post.id}', '${cmt.id}')">${cmt.author}: </span><span class="tracking-wide">${cmt.content}</span><span class="text-[9px] text-gray-400 ml-1 font-sans"><i data-lucide="heart" class="w-2.5 h-2.5 inline -mt-0.5"></i> ${cmt.likes || 0}</span>${(cmt.replies||[]).map(r => `<div class="mt-1.5 pl-3 border-l-[1.5px] border-gray-400 text-gray-600"><span class="font-bold text-gray-800">${r.author} ${r.isAuthor ? '<span class="bg-gray-200 text-gray-600 px-1 rounded-[2px] text-[8px] ml-1">作者</span>' : ''}: </span>${r.content}</div>`).join('')}${cmt.isWaitingReply ? `<div class="mt-1.5 pl-3 border-l-[1.5px] border-gray-300 text-gray-400 text-[10px] flex items-center font-serif"><i data-lucide="loader" class="w-3 h-3 mr-1 animate-spin"></i>对方正在输入...</div>` : ''}</div><i data-lucide="corner-down-left" class="w-3.5 h-3.5 text-gray-400 cursor-pointer mt-0.5 shrink-0" onclick="event.stopPropagation(); window.bloggerActions.replyToComment('${post.id}', '${cmt.id}')"></i></div>`).join('')}</div>${post.hasFetchedComments ? (state.isFetchingComments ? `<div class="mt-6 text-[10px] text-gray-400 flex items-center justify-center border-t border-gray-200 pt-3"><i data-lucide="loader" class="w-3 h-3 mr-1 animate-spin"></i>加载中...</div>` : `<div class="mt-6 text-[10px] text-gray-400 text-center border-t border-gray-200 pt-3 cursor-pointer" onclick="event.stopPropagation(); window.bloggerActions.fetchComments('${post.id}', true)">换一批评论 ﹀</div>`) : ''}</div></div>` : '<div class="mb-14"></div>';
 
                                 // 🌟 分别渲染：无图版、左图右文、右图左文
-                                const noImgHtml = `<div class="relative w-full px-6 pt-4 cursor-pointer" onclick="window.bloggerActions.togglePostDetail('${post.id}')"><div class="relative flex w-full">${isLeft ? '' : '<div class="absolute left-0 bottom-0 w-[6px] bg-[#1a1a1a] h-[66%] z-10"></div>'}<div class="flex-1 bg-[#F9F7EF] p-5 z-10 shadow-sm min-h-[100px] flex flex-col justify-center ${isLeft ? 'mr-4' : 'ml-4'}"><div class="text-[12px] text-gray-800 leading-loose mb-4 w-full break-words font-serif text-left">${post.htmlContent || post.desc}</div><div class="flex space-x-3 text-[9px] text-gray-400 font-serif tracking-widest ${isLeft ? 'justify-end' : 'justify-start'} shrink-0 pt-3 border-t border-gray-200 mt-auto items-center"><span class="flex items-center">赞 ${post.stats.likes}</span><span>评 ${post.stats.commentsCount}</span>${post.id.toString().startsWith('post_') ? `<span class="text-rose-400 font-bold ml-2 cursor-pointer" onclick="event.stopPropagation(); window.bloggerActions.deletePost('${post.id}')">删除</span>` : ''}</div></div>${isLeft ? '<div class="absolute right-0 bottom-0 w-[6px] bg-[#1a1a1a] h-[66%] z-10"></div>' : ''}</div>${commentsHtml}</div>`;
+                                const noImgHtml = `<div class="relative w-full px-6 pt-4 cursor-pointer" onclick="window.bloggerActions.togglePostDetail('${post.id}')"><div class="relative flex w-full">${isLeft ? '' : '<div class="absolute left-0 bottom-0 w-[6px] bg-[#1a1a1a] h-[66%] z-10"></div>'}<div class="flex-1 bg-[#F9F7EF] p-5 z-10 shadow-sm min-h-[145px] flex flex-col justify-center ${isLeft ? 'mr-4' : 'ml-4'}"><div class="text-[12px] text-gray-800 leading-loose mb-4 w-full break-words font-serif text-left">${post.htmlContent || post.desc}</div><div class="flex space-x-3 text-[9px] text-gray-400 font-serif tracking-widest ${isLeft ? 'justify-end' : 'justify-start'} shrink-0 pt-3 border-t border-gray-200 mt-auto items-center"><span class="flex items-center">赞 ${post.stats.likes}</span><span>评 ${post.stats.commentsCount}</span>${post.id.toString().startsWith('post_') ? `<span class="text-rose-400 font-bold ml-2 cursor-pointer" onclick="event.stopPropagation(); window.bloggerActions.deletePost('${post.id}')">删除</span>` : ''}</div></div>${isLeft ? '<div class="absolute right-0 bottom-0 w-[6px] bg-[#1a1a1a] h-[66%] z-10"></div>' : ''}</div>${commentsHtml}</div>`;
                                 const imgLeftHtml = `<div class="relative w-full pl-[56px] pr-6 pt-4 cursor-pointer" onclick="window.bloggerActions.togglePostDetail('${post.id}')"><div class="absolute left-4 top-0 w-[120px] h-[160px] bg-[#a8a8a8] -rotate-3 z-20 shadow-md p-4 overflow-hidden flex flex-col"><div class="rotate-3 h-full flex flex-col"><span class="text-[11px] font-bold text-gray-800 mb-2 tracking-widest font-serif">图片描述：</span><div class="text-[10px] text-gray-700 leading-relaxed overflow-y-auto hide-scrollbar flex-1">${post.mediaDesc || '...'}</div></div></div><div class="relative flex w-full"><div class="flex-1 bg-[#F9F7EF] p-5 pl-[85px] mr-4 z-10 shadow-sm min-h-[145px] flex flex-col justify-center"><div class="text-[12px] text-gray-800 leading-loose mb-4 w-full text-left break-words font-serif">${post.htmlContent || post.desc}</div><div class="flex space-x-3 text-[9px] text-gray-400 font-serif tracking-widest justify-end shrink-0 pt-3 border-t border-gray-200 mt-auto items-center"><span class="flex items-center">${post.showcaseProduct ? '<i data-lucide="shopping-bag" class="w-3 h-3 text-orange-500 mr-4"></i>' : ''}赞 ${post.stats.likes}</span><span>评 ${post.stats.commentsCount}</span>${post.id.toString().startsWith('post_') ? `<span class="text-rose-400 font-bold ml-2 cursor-pointer" onclick="event.stopPropagation(); window.bloggerActions.deletePost('${post.id}')">删除</span>` : ''}</div></div><div class="absolute right-0 bottom-0 w-[6px] bg-[#1a1a1a] h-[66%] z-10"></div></div>${commentsHtml}</div>`;
                                 const imgRightHtml = `<div class="relative w-full pr-[56px] pl-6 pt-4 cursor-pointer" onclick="window.bloggerActions.togglePostDetail('${post.id}')"><div class="relative flex w-full"><div class="absolute left-0 bottom-0 w-[6px] bg-[#1a1a1a] h-[66%] z-10"></div><div class="flex-1 bg-[#F9F7EF] p-5 pr-[85px] ml-4 z-10 shadow-sm min-h-[145px] flex flex-col justify-center"><div class="text-[12px] text-gray-800 leading-loose mb-4 w-full text-left break-words font-serif">${post.htmlContent || post.desc}</div><div class="flex space-x-3 text-[9px] text-gray-400 font-serif tracking-widest justify-start shrink-0 pt-3 border-t border-gray-200 mt-auto items-center"><span class="flex items-center">${post.showcaseProduct ? '<i data-lucide="shopping-bag" class="w-3 h-3 text-orange-500 mr-4"></i>' : ''}赞 ${post.stats.likes}</span><span>评 ${post.stats.commentsCount}</span>${post.id.toString().startsWith('post_') ? `<span class="text-rose-400 font-bold ml-2 cursor-pointer" onclick="event.stopPropagation(); window.bloggerActions.deletePost('${post.id}')">删除</span>` : ''}</div></div></div><div class="absolute right-4 top-0 w-[120px] h-[160px] bg-[#a8a8a8] rotate-3 z-20 shadow-md p-4 overflow-hidden flex flex-col"><div class="-rotate-3 h-full flex flex-col"><span class="text-[11px] font-bold text-gray-800 mb-2 tracking-widest font-serif">图片描述：</span><div class="text-[10px] text-gray-700 leading-relaxed overflow-y-auto hide-scrollbar flex-1">${post.mediaDesc || '...'}</div></div></div>${commentsHtml}</div>`;
                                 
