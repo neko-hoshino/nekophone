@@ -639,9 +639,17 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                 const text = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 const cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
-                acc.inbox = []; // 🌟 核心修改：全盘清空旧的私信列表
+                acc.inbox = []; 
                 cms.forEach(c => {
-                    const mappedMsgs = c.messages.map(m => ({ sender: m.sender==='博主' ? acc.name : m.sender, text: m.text, isMe: m.sender==='博主' }));
+                    const mappedMsgs = c.messages.map(m => {
+                        // 🌟 核心护盾：不管 AI 填的是"博主"、"Aric" 还是 "Eve"，统统识别为自己人！
+                        const isBlogger = m.sender === '博主' || m.sender === acc.name || m.sender === char.name || m.sender === store.personas[0].name;
+                        return { 
+                            sender: isBlogger ? acc.name : m.sender, // 强制披上官方账号的马甲
+                            text: m.text, 
+                            isMe: isBlogger // 强制把气泡拉回右边
+                        };
+                    });
                     acc.inbox.push({ id: 'msg_' + Date.now() + Math.random(), author: c.author, messages: mappedMsgs });
                 });
                 if (window.actions.saveStore) window.actions.saveStore();

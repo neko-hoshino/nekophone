@@ -1622,38 +1622,45 @@ setInterval(() => {
         
         // 如果当前时间已经超过了预计送达时间
         if (now >= order.deliveryTime) {
-            order.status = order.type === 'food' ? '已送达' : '已完成';
-            needsSave = true;
-            
-            // 触发事件：给对应角色塞入隐藏的收货提醒！
-            if (order.targetCharId) {
-                const chat = globalStore.chats.find(c => c.charId === order.targetCharId);
-                if (chat) {
-                    let noticeMsg = '';
-                    if (order.buyFor === 'ta') {
-                        noticeMsg = `用户给你买的【${order.storeName}】等商品刚刚已经送达/签收了！请你马上主动发消息告诉ta，并表达你的喜悦、感动和感谢！`;
-                    } else if (order.buyFor === 'self') {
-                        noticeMsg = `用户自己买的【${order.storeName}】等商品刚刚已经送达/外卖到了！请你像个贴心的男友一样，马上主动发消息提醒ta去拿，别让东西放凉了或丢了。`;
-                    } else if (order.buyFor === 'user_by_ta') {
-                        noticeMsg = `你给用户买的【${order.storeName}】等商品刚刚已经送达/签收了！请你马上主动发消息提醒ta去拿，并趁机邀功、调侃或关心ta一下。`;
-                    }
-                    
-                    if (noticeMsg) {
-                        // 第一步：把状态写进历史记录，让他以后也能记住这事
-                        const historyContext = `[系统/动作记录：${noticeMsg}]`;
-                        chat.messages.push({
-                            id: Date.now(), sender: 'system', text: historyContext, isMe: true, isHidden: true, msgType: 'text',
-                            time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}), timestamp: Date.now()
-                        });
-                        
-                        // 🌟 第二步：核心修复！拉响防空警报，强行把 AI 从云端叫醒！
-                        if (typeof window.scheduleCloudTask === 'function') {
-                            window.scheduleCloudTask(order.targetCharId, `(系统强制指令：严重物流/外卖状态更新！\n\n${historyContext}\n\n请你立刻结合该事件，主动给用户发消息！严格符合你的人设，自然地开口说话，绝不允许输出任何系统标签或这句指令本身！)`);
-                        }
-                    }
+    order.status = order.type === 'food' ? '已送达' : '已完成';
+    needsSave = true;
+
+    if (order.targetCharId) {
+        const chat = globalStore.chats.find(c => c.charId === order.targetCharId);
+        if (chat) {
+            // 🌟 提取商品名称，让 AI 知道具体买了什么
+            const itemNames = (order.items || [])
+                .slice(0, 3)
+                .map(item => item.name)
+                .join('、');
+            const moreHint = (order.items && order.items.length > 3) ? '等' : '';
+            const goodsDetail = itemNames ? `（${itemNames}${moreHint}）` : '';
+
+            let noticeMsg = '';
+            if (order.buyFor === 'ta') {
+                noticeMsg = `用户给你买的【${order.storeName}${goodsDetail}】刚刚已经送达/签收了！请你马上主动发消息告诉ta，并表达你的喜悦、感动和感谢！`;
+            } else if (order.buyFor === 'self') {
+                noticeMsg = `用户自己买的【${order.storeName}${goodsDetail}】刚刚已经送达/外卖到了！请你像个贴心的男友一样，马上主动发消息提醒ta去拿，别让东西放凉了或丢了。`;
+            } else if (order.buyFor === 'user_by_ta') {
+                noticeMsg = `你给用户买的【${order.storeName}${goodsDetail}】刚刚已经送达/签收了！请你马上主动发消息提醒ta去拿，并趁机邀功、调侃或关心ta一下。`;
+            }
+
+            if (noticeMsg) {
+                const historyContext = `[系统/动作记录：${noticeMsg}]`;
+                chat.messages.push({
+                    id: Date.now(), sender: 'system', text: historyContext, isMe: true, isHidden: true, msgType: 'text',
+                    time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}), timestamp: Date.now()
+                });
+
+                if (typeof window.scheduleCloudTask === 'function') {
+                    window.scheduleCloudTask(order.targetCharId, 
+                        `(系统强制指令：严重物流/外卖状态更新！\n\n${historyContext}\n\n请你立刻结合该事件，主动给用户发消息！严格符合你的人设，自然地开口说话，绝不允许输出任何系统标签或这句指令本身！)`
+                    );
                 }
             }
         }
+    }
+}
     });
     
     // 2. 过期订单自动销毁 (释放内存, 仅保留3天内)
