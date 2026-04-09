@@ -1039,15 +1039,15 @@ export function renderBloggerApp(store) {
 
         const displayPosts = acc.posts || [];
 
-        // 🌟 1. 直播间全屏覆盖层 (修复缩进Bug、弹幕卡顿Bug、长文截断Bug)
+        // 🌟 1. 直播间全屏覆盖层 (彻底抹除代码缩进带来的前置空格Bug)
         const liveOverlay = state.live?.isActive ? `
             <style>
-                /* 🌟 开启 3D 硬件加速，修复手机端弹幕卡住不动的问题 */
                 @keyframes fly-left { 
                     0% { transform: translate3d(100vw, 0, 0); } 
                     100% { transform: translate3d(-150vw, 0, 0); } 
                 }
                 .danmaku-item { white-space: nowrap; position: absolute; left: 0; will-change: transform; }
+                .live-scroll { -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
                 .live-scroll::-webkit-scrollbar { width: 4px; }
                 .live-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 4px; }
             </style>
@@ -1063,20 +1063,22 @@ export function renderBloggerApp(store) {
                             <button class="bg-rose-500 text-white text-[10px] px-3 py-1 rounded-full font-bold active:scale-95 shadow-lg" onclick="window.bloggerActions.endLive()">下播</button>
                         </div>
                     </div>
-                    
                     <div class="bg-white/10 backdrop-blur-xl border border-white/20 p-3 rounded-xl shadow-2xl relative overflow-hidden">
                         <div class="absolute top-0 right-0 w-16 h-16 bg-white/5 rounded-full blur-xl -mr-8 -mt-8 pointer-events-none"></div>
                         <div class="flex items-center justify-between relative z-10">
                             <span class="text-[10px] text-white/60 font-serif italic shrink-0">Mission:</span>
-                            <span class="text-[11px] text-white font-bold ml-2 text-right leading-tight">${state.live.task.title}</span>
+                            <span class="text-[11px] text-white font-bold ml-2 text-right leading-tight flex items-center">${state.live.isTaskLoading ? '<i data-lucide="loader" class="w-3 h-3 animate-spin mr-1.5"></i>' : ''}${state.live.task.title}</span>
                         </div>
                     </div>
                 </div>
 
                 <div class="absolute top-[120px] left-0 w-full h-[200px] pointer-events-none z-[60] overflow-hidden">
-                    ${(state.live.messages || []).filter(m => m.type === 'fan').slice(-10).map((m, i) => `
-                        <div class="danmaku-item text-white/95 font-bold text-[14px] drop-shadow-[0_1.5px_2px_rgba(0,0,0,0.9)] tracking-wide" style="top: ${(i % 5) * 32}px; animation: fly-left ${10 + (i % 5) * 1.5}s linear forwards;">${m.content}</div>
-                    `).join('')}
+                    ${(state.live.messages || []).filter(m => m.type === 'fan').slice(-25).map((m) => {
+                        const seed = (m.content.length * 47) + (m.content.charCodeAt(0) || 0) + (m.author.length * 13);
+                        const randomTop = seed % 170;
+                        const randomSpeed = 9 + (seed % 7);
+                        return `<div class="danmaku-item text-white/95 font-bold text-[14px] drop-shadow-[0_1.5px_2px_rgba(0,0,0,0.9)] tracking-wide" style="top: ${randomTop}px; animation: fly-left ${randomSpeed}s linear forwards;">${m.content}</div>`;
+                    }).join('')}
                 </div>
 
                 <div class="absolute top-[160px] bottom-[280px] w-full flex flex-col items-center justify-end pointer-events-none z-30 px-5 space-y-3 pb-2">
@@ -1098,7 +1100,7 @@ export function renderBloggerApp(store) {
                                 ${(state.live.messages || []).filter(m => ['user', 'partner', 'vote', 'error_retry'].includes(m.type)).slice(-2).map((m, i, arr) => `
                                     <div class="bg-black/60 backdrop-blur-md px-3 py-3 rounded-2xl rounded-bl-sm border ${m.type === 'error_retry' ? 'border-red-500/50' : 'border-blue-500/30'} shadow-2xl w-full flex flex-col pointer-events-auto shrink-0 ${i === arr.length - 1 ? 'animate-in slide-in-from-left duration-300' : 'opacity-70 scale-95 origin-bottom-left'}">
                                         <div class="text-[9px] font-black tracking-widest uppercase mb-1 ${m.type === 'partner' ? 'text-rose-400' : m.type === 'error_retry' ? 'text-red-400' : 'text-blue-300'} drop-shadow-sm text-left line-clamp-1 shrink-0">${m.type === 'partner' ? '👑 ' : m.type === 'error_retry' ? '⚠️ ' : ''}${m.author}</div>
-                                        <div class="text-[11px] font-bold text-white/90 leading-relaxed drop-shadow-md whitespace-pre-wrap text-left max-h-[120px] overflow-y-auto live-scroll pr-1 flex flex-col items-start">${m.type === 'error_retry' ? `<span>${m.content}</span><button class="mt-2 bg-red-500/80 text-white px-2 py-1 rounded-[4px] text-[9px] active:scale-95 flex items-center" onclick="window.bloggerActions.sendLiveAction(decodeURIComponent('${encodeURIComponent(m.retryVal)}'), true)"><i data-lucide="refresh-cw" class="w-2.5 h-2.5 mr-1"></i>重roll</button>` : m.content}</div>
+                                        <div class="text-[11px] font-bold text-white/90 leading-relaxed drop-shadow-md whitespace-pre-wrap text-left max-h-[120px] overflow-y-auto live-scroll pr-1 block">${m.type === 'error_retry' ? `<div>${m.content}</div><button class="mt-2 bg-red-500/80 text-white px-2 py-1 rounded-[4px] text-[9px] active:scale-95 inline-flex items-center" onclick="window.bloggerActions.sendLiveAction(decodeURIComponent('${encodeURIComponent(m.retryVal)}'), true)"><i data-lucide="refresh-cw" class="w-2.5 h-2.5 mr-1"></i>重roll</button>` : m.content}</div>
                                     </div>
                                 `).join('')}
                             </div>
@@ -1106,7 +1108,7 @@ export function renderBloggerApp(store) {
                                 ${(state.live.messages || []).filter(m => m.type === 'opponent').slice(-2).map((m, i, arr) => `
                                     <div class="bg-black/60 backdrop-blur-md px-3 py-3 rounded-2xl rounded-br-sm border border-rose-500/30 shadow-2xl w-full flex flex-col pointer-events-auto shrink-0 ${i === arr.length - 1 ? 'animate-in slide-in-from-right duration-300' : 'opacity-70 scale-95 origin-bottom-right'}">
                                         <div class="text-[9px] font-black tracking-widest uppercase mb-1 text-rose-300 drop-shadow-sm text-right line-clamp-1 shrink-0">😈 ${m.author}</div>
-                                        <div class="text-[11px] font-bold text-white/90 leading-relaxed drop-shadow-md whitespace-pre-wrap text-left max-h-[120px] overflow-y-auto live-scroll pr-1">${m.content}</div>
+                                        <div class="text-[11px] font-bold text-white/90 leading-relaxed drop-shadow-md whitespace-pre-wrap text-left max-h-[120px] overflow-y-auto live-scroll pr-1 block">${m.content}</div>
                                     </div>
                                 `).join('')}
                             </div>
@@ -1114,7 +1116,7 @@ export function renderBloggerApp(store) {
                             ${(state.live.messages || []).filter(m => ['user', 'partner', 'vote', 'error_retry'].includes(m.type)).slice(-2).map((m, i, arr) => `
                                 <div class="bg-black/60 backdrop-blur-md px-5 py-3.5 rounded-3xl border ${m.type === 'error_retry' ? 'border-red-500/50' : 'border-white/10'} shadow-2xl w-full flex flex-col pointer-events-auto shrink-0 ${i === arr.length - 1 ? 'animate-in zoom-in slide-in-from-bottom-4 duration-300' : 'opacity-60 scale-95'}">
                                     <div class="text-[10px] font-black tracking-widest uppercase mb-1.5 ${m.type === 'partner' ? 'text-rose-400' : m.type === 'vote' ? 'text-blue-300' : m.type === 'error_retry' ? 'text-red-400' : 'text-orange-300'} drop-shadow-sm text-center shrink-0">${m.type === 'partner' ? '👑 ' : m.type === 'vote' ? '📊 ' : m.type === 'error_retry' ? '⚠️ ' : ''}${m.author}</div>
-                                    <div class="text-[13px] font-bold text-white/90 leading-relaxed drop-shadow-md whitespace-pre-wrap text-left max-h-[140px] overflow-y-auto live-scroll pr-1 ${m.type === 'error_retry' ? 'flex justify-between items-center' : ''}">${m.type === 'error_retry' ? `<span>${m.content}</span><button class="ml-3 bg-red-500/80 hover:bg-red-500 text-white px-2.5 py-1.5 rounded-md shadow-md active:scale-95 flex items-center shrink-0 transition-transform" onclick="window.bloggerActions.sendLiveAction(decodeURIComponent('${encodeURIComponent(m.retryVal)}'), true)"><i data-lucide="refresh-cw" class="w-3 h-3 mr-1"></i>重roll</button>` : m.content}</div>
+                                    <div class="text-[13px] font-bold text-white/90 leading-relaxed drop-shadow-md whitespace-pre-wrap text-left max-h-[140px] overflow-y-auto live-scroll pr-1 block">${m.type === 'error_retry' ? `<div>${m.content}</div><button class="mt-3 bg-red-500/80 hover:bg-red-500 text-white px-2.5 py-1.5 rounded-md shadow-md active:scale-95 inline-flex items-center transition-transform" onclick="window.bloggerActions.sendLiveAction(decodeURIComponent('${encodeURIComponent(m.retryVal)}'), true)"><i data-lucide="refresh-cw" class="w-3 h-3 mr-1"></i>重roll</button>` : m.content}</div>
                                 </div>
                             `).join('')}
                         `}
