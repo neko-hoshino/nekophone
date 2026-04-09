@@ -577,7 +577,7 @@ if (!window.bloggerActions) {
                 }
                 
                 // 🌟 核心补丁：强行规定 4 个选项框死他，发律师函只能算前摇演绎！
-                const hiddenPrompt = `[系统隐藏提示] 我们的共同账号遇到了公关危机！网上的传闻是：“${pr.desc}”。\n${truthContext}\n【机制强制要求】：在与用户商议对策时，你必须引导或催促用户从账号后台支持的 4 个功能中选择一个来推进：[1.冷处理]、[2.发文澄清]、[3.私下交涉]、[4.开播回应]。即使你的人设极其强势（例如想发律师函、报警或封杀对方），这些也只能作为口头上的狠话或附加背景演绎，你的最终落脚点和建议必须回归到这 4 个功能之一，否则系统机制无法推进！`;
+                const hiddenPrompt = `[系统隐藏提示] 我们的情侣账号遇到了公关危机！网上的传闻是：“${pr.desc}”。\n${truthContext}\n【机制强制要求】：在与用户商议对策时，你必须引导用户从账号后台支持的 4 个功能中选择一个来推进：[1.冷处理]、[2.发文澄清]、[3.私下交涉]、[4.开播回应]。即使你的人设极其强势（例如想发律师函、报警或封杀对方），这些也只能作为口头上的狠话或附加背景演绎，你的最终落脚点和建议必须回归到这 4 个功能之一，否则系统机制无法推进！请全面慎重考虑每个选项的后续发展和可能的结果，做出合理的最优的选择。如果处理不当会使谣言发酵，导致掉粉、账号封禁等严重后果。`;
                 
                 chat.messages.push({ id: Date.now() + 1, sender: 'System', isMe: false, msgType: 'system', isHidden: true, text: hiddenPrompt, timestamp: Date.now(), time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}) });
 
@@ -585,19 +585,55 @@ if (!window.bloggerActions) {
                 window.actions.showToast('✅ 危机已发至微信，快去聊天界面质问或商量吧！');
             }
         },
-        handlePR: (type) => {
+        handlePR: async (type) => { // 🌟 注意这里变成了 async 函数
             const state = window.bloggerState;
             const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
             const pr = acc.studioData?.pr;
             if(!pr) return;
 
             if (type === 'ignore') {
-                const success = Math.random() > 0.5;
-                pr.status = 'resolved';
-                pr.result = success ? '你们选择了冷处理，网友逐渐淡忘了此事，有惊无险。' : '冷处理失败！舆论发酵，掉粉1000，口碑受损。';
-                if(!success) acc.followers = Math.max(0, acc.followers - 1000);
-                window.actions?.showToast(success ? '风波平息' : '冷处理失败，掉粉！');
+                window.actions?.showToast('正在观望舆论走向...'); // 🌟 加个等待提示
+                if (store.apiConfig?.apiKey) {
+                    try {
+                        const char = store.contacts.find(c => c.id === acc.charId);
+                        const chat = store.chats.find(c => c.charId === acc.charId);
+                        const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+                        const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+
+                        const prevConsequence = pr.lastFailure ? `\n【上一次失败后果】：${pr.lastFailure}` : '';
+                        
+                        // 🌟 核心判断逻辑：让 AI 评估这种事能不能装死
+                        const task = `公关危机传闻：${pr.desc}${prevConsequence}\n实际真相：${pr.truth}\n处理方式：博主选择了【冷处理/装死不回应】。\n请结合娱乐圈舆论规律严厉评估：这种程度的危机“装死”能混过去吗？（提示：太扯的绯闻装死就过去了，但有实锤或事态严重时装死会被骂心虚，甚至激怒狗仔放新料）。\n严格输出JSON：{"success": boolean, "feedback": "详细反馈(平息或翻车的过程)", "isEscalated": boolean, "escalationDetail": "若升级，描述具体后果(如：狗仔见不回应，放出了更锤的第二弹录音)"}`;
+
+                        const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
+                        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                        const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
+
+                        if (parsed.success) {
+                            pr.status = 'resolved';
+                            pr.result = parsed.feedback;
+                            window.bloggerActions.notifyPartnerOfPR('冷处理', parsed.feedback);
+                            setTimeout(() => window.actions?.showToast(`💨 危机太无聊，风波自然平息了。`), 1000);
+                        } else {
+                            pr.lastFailure = parsed.escalationDetail || parsed.feedback;
+                            if (parsed.isEscalated) {
+                                pr.desc += `\n【装死导致升级】：${parsed.escalationDetail}`;
+                                acc.followers = Math.max(0, acc.followers - 8000);
+                                window.bloggerActions.notifyPartnerOfPR('冷处理（失败升级）', parsed.escalationDetail);
+                                setTimeout(() => window.actions?.showToast(`🚨 装死失败！舆论彻底炸锅了！`), 1000);
+                            } else {
+                                pr.status = 'resolved';
+                                pr.result = parsed.feedback;
+                                acc.followers = Math.max(0, acc.followers - 3000);
+                                window.bloggerActions.notifyPartnerOfPR('冷处理（勉强平息）', parsed.feedback);
+                                setTimeout(() => window.actions?.showToast(`⚠️ 勉强熬过去了，但被骂心虚，掉粉严重。`), 1000);
+                            }
+                        }
+                    } catch(e) { console.error(e); window.actions?.showToast('网络波动，请重试'); }
+                }
+                if (window.actions.saveStore) window.actions.saveStore();
                 window.render();
+                
             } else if (type === 'post') {
                 window.bloggerActions.openCreatePost();
                 state.postData.content = '【关于近期传闻的说明】\n';
