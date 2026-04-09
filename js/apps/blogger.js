@@ -201,18 +201,32 @@ if (!window.bloggerActions) {
                 const currentDraft = state.postData.content.replace(/<[^>]+>/g, '').trim();
                 const draftMedia = state.postData.mediaDesc.trim();
                 
-                // 🌟 核心：如果有危机，把真相强行塞给代写的角色！
+                // 🌟 1. 获取最近 10 条动态，防止 AI 变复读机
+                const recent = (acc.posts || []).slice(0, 10).map(p => p.desc).join('；');
+                
+                // 🌟 2. 提取当前挂载的话题和橱窗商品
+                const topicsStr = state.postData.topics.length > 0 ? state.postData.topics.join('、') : '';
+                const showcaseName = state.postData.showcaseProduct ? state.postData.showcaseProduct.name : '';
+
+                // 🌟 3. 动态组装各种场景 Buff
                 let prAddon = '';
                 if (acc.studioData?.pr?.status === 'active') {
-                    prAddon = `\n【紧急危机处理】：当前处于公关危机，网上传闻是“${acc.studioData.pr.desc}”，但实际真相是“${acc.studioData.pr.truth}”！请务必在正文中，以你极其符合人设的口吻，直接或委婉地把“真相”解释清楚，狠狠辟谣！`;
+                    prAddon = `\n【紧急危机处理】：当前处于公关危机，网上传闻是“${acc.studioData.pr.desc}”，实际真相是“${acc.studioData.pr.truth}”！请务必在正文中直接或委婉地把“真相”解释清楚，狠狠辟谣！`;
                 }
 
+                let topicAddon = topicsStr ? `\n【指定话题】：当前动态挂载了话题 #${topicsStr}。请围绕这些话题展开构思。` : '';
+                
+                let showcaseAddon = showcaseName ? `\n【软广植入】：当前挂载了商品“${showcaseName}”。绝对不要写成生硬的带货广告！请结合你们的人设，编造一个跟该商品相关的自然生活场景或搞笑/浪漫小剧情，让商品极其自然地出镜，随口夸两句好用即可。` : '';
+
+                // 🌟 4. 终极任务组装
                 const task = `请协助完成一篇社交图文的创作。
+【近期已发动态（请勿重复内容）】：${recent || '暂无'}
 【草稿状态】
 画面: ${draftMedia || '(空，请构思符合角色设定的画面描述)'}
-正文: ${currentDraft || '(空，请基于近期经历与回忆，以角色口吻进行创作)'}${prAddon}
+正文: ${currentDraft || '(空，请基于近期经历与回忆，以角色口吻进行创作)'}${topicAddon}${showcaseAddon}${prAddon}
+
 【要求】
-1. 内容需贴合当前平台定位。
+1. 内容必须贴合当前平台定位与你的人设。
 2. 正文必须控制在 80 字以内，精简、克制、有留白感！绝不要长篇大论！
 3. 严格输出 JSON 格式：{"mediaDesc": "画面描述", "content_addon": "补充的正文内容"}`;
                 
