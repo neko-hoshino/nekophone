@@ -81,7 +81,7 @@ async function buildBloggerPrompt(acc, char, chat, boundP, options = {}) {
     const activeWbs = (store.worldbooks || []).filter(wb => wb.enabled && (wb.type === 'global' || (wb.type === 'local' && acc.mountedWbs?.some(x => String(x) === String(wb.id)))));
     if (activeWbs.length > 0) wbStr = `\n\n【世界观设定】\n` + activeWbs.map(wb => `[${wb.title}]: ${wb.content}`).join('\n');
     const styleRule = `\n【核心铁律】：行文风格需契合角色人设和性格。严禁使用任何 Emoji ！`;
-    return `${basePrompt}${coreMemStr}${wbStr}${fragMemStr}${historyStr}\n\n【时间】：${timeString}\n【平台风控】：${platformStyle}\n【账号定位】：${positioning}${styleRule}\n\n【系统任务】\n${task}`;
+    return `${basePrompt}${coreMemStr}${wbStr}${fragMemStr}${historyStr}\n\n【时间】：${timeString}\n【平台风格】：${platformStyle}\n【账号定位】：${positioning}${styleRule}\n\n【系统任务】\n${task}`;
 }
 
 if (!window.bloggerActions) {
@@ -200,14 +200,22 @@ if (!window.bloggerActions) {
             try {
                 const currentDraft = state.postData.content.replace(/<[^>]+>/g, '').trim();
                 const draftMedia = state.postData.mediaDesc.trim();
+                
+                // 🌟 核心：如果有危机，把真相强行塞给代写的角色！
+                let prAddon = '';
+                if (acc.studioData?.pr?.status === 'active') {
+                    prAddon = `\n【紧急危机处理】：当前处于公关危机，网上传闻是“${acc.studioData.pr.desc}”，但实际真相是“${acc.studioData.pr.truth}”！请务必在正文中，以你极其符合人设的口吻，直接或委婉地把“真相”解释清楚，狠狠辟谣！`;
+                }
+
                 const task = `请协助完成一篇社交图文的创作。
 【草稿状态】
 画面: ${draftMedia || '(空，请构思符合角色设定的画面描述)'}
-正文: ${currentDraft || '(空，请基于近期经历与回忆，以角色口吻进行创作)'}
+正文: ${currentDraft || '(空，请基于近期经历与回忆，以角色口吻进行创作)'}${prAddon}
 【要求】
 1. 内容需贴合当前平台定位。
 2. 正文必须控制在 80 字以内，精简、克制、有留白感！绝不要长篇大论！
 3. 严格输出 JSON 格式：{"mediaDesc": "画面描述", "content_addon": "补充的正文内容"}`;
+                
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { recentText: currentDraft, task: task });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
@@ -407,8 +415,9 @@ if (!window.bloggerActions) {
             if (store.apiConfig?.apiKey) {
                 try {
                     const char = store.contacts.find(c => c.id === acc.charId);
-                    const promptStr = `【系统指令】：现在发生公关危机，网上传闻是：${acc.studioData?.pr?.desc}。实际背后的真相是：${acc.studioData?.pr?.truth}。
-请模拟博主的伴侣【${char.name}】与黑粉/狗仔[${chat.author}]进行一次【两回合】的激烈交锋。伴侣必须在交涉中甩出真相疯狂打脸对方！
+                    // 🌟 核心：使用任务模式，让 buildBloggerPrompt 包装人设和记忆
+                    const task = `现在发生公关危机，网上传闻是：${acc.studioData?.pr?.desc}。实际背后的真相是：${acc.studioData?.pr?.truth}。
+请你以【${char.name}】的身份，与黑粉/狗仔[${chat.author}]进行一次【两回合】的激烈交锋。你必须严格符合自己的人设性格（参考记忆），并在交涉中甩出真相疯狂打脸对方！
 严格输出JSON格式：
 {
   "transcript": [
@@ -416,8 +425,9 @@ if (!window.bloggerActions) {
     {"sender": "${chat.author}", "text": "...", "isMe": false}
   ],
   "resolved": true,
-  "resultText": "交涉结果(如：对方认怂达成和解 / 谈判彻底破裂)"
+  "resultText": "交涉结果(如：对方被真相打脸认怂 / 彻底破裂)"
 }`;
+                    const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
                     const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                     const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                     
@@ -454,12 +464,14 @@ if (!window.bloggerActions) {
                 try {
                     let promptStr = "";
                     if(chat.isPR) {
-                        // 🌟 用户自决：AI 充当判官评估是否解决危机
-                        promptStr = `【系统指令】：你扮演狗仔/黑粉 [${chat.author}]，因公关危机正与博主[${acc.name}]私聊。
-网上的传闻是：${acc.studioData?.pr?.desc}。而实际的真相是：${acc.studioData?.pr?.truth}。
+                        const char = store.contacts.find(c => c.id === acc.charId);
+                        const task = `你扮演狗仔/黑粉 [${chat.author}]，因公关危机正与博主[${acc.name}]私聊。
+网上传闻：${acc.studioData?.pr?.desc}。实际真相：${acc.studioData?.pr?.truth}。
 聊天记录：${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
 判断博主的最新回复是否把“实际真相”解释清楚了、说服了你？还是没说到点子上让你更火大？
 严格输出JSON：{"reply": "你的回怼/服软", "isResolved": boolean, "isEscalated": boolean, "resultText": "对方反应的系统描述(如：爆料人被真相打脸同意撤稿 / 彻底激怒对方曝光聊天记录)"}`;
+                        
+                        const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
                         const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                         const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                         
@@ -506,10 +518,13 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                 if (acc.studioData?.pr?.status === 'active') {
                     if (state.postData.topics.includes('澄清') || pure.includes('澄清')) {
                         try {
-                            const promptStr = `公关危机：${acc.studioData.pr.desc}。实际真相是：${acc.studioData.pr.truth}。
+                            const char = store.contacts.find(c => c.id === acc.charId);
+                            const task = `公关危机：${acc.studioData.pr.desc}。实际真相是：${acc.studioData.pr.truth}。
 博主发了澄清文：${pure}。
-请严厉评估这篇公关文是否把“实际真相”解释清楚了？如果偏离了真相或者胡言乱语，就是越抹越黑！
+请严厉评估这篇公关文是否把“实际真相”解释清楚了并且符合你们的人设定位？如果偏离了真相、态度不对或者胡言乱语，就是越抹越黑！
 严格输出JSON：{"success": boolean, "feedback": "舆论反转 或 越抹越黑 的说明"}`;
+                            
+                            const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
                             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                             const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                             
@@ -643,7 +658,7 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             state.isGeneratingStudio = true; window.render();
             try {
                 // 🌟 引入剧本杀级别的公关设定：隐藏真相 + 指定攻击对象
-                const task = `你是后台引擎。基于账号等级[${lv.name} ${lv.rank}]，定位[${acc.positioning}]。
+                const task = `你是后台引擎。基于平台风格、账号等级[${lv.name} ${lv.rank}]、定位[${acc.positioning}]。
 生成：1. 平台活动 2. 商单邀约 3. 公关事件。
 【公关危机强烈要求】：必须非常抓马、搞笑、乌龙或离谱绯闻！
 重点：必须拆分为【表面黑料(desc)】和【乌龙真相(truth)】！并指定黑料的【攻击目标(target)】（必须严格输出 "user" 或 "character" 或 "both" 之一，代表黑料是针对用户、伴侣还是俩人）。
