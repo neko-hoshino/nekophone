@@ -138,11 +138,8 @@ if (!window.bloggerActions) {
             if (acc && acc.studioData && acc.studioData.commercial) {
                 acc.studioData.commercial.status = 'accepted';
                 acc.showcase = acc.showcase || [];
-                // 🌟 使用 AI 判定的真实售价，兜底随机价格
                 const price = acc.studioData.commercial.price || Math.floor(Math.random() * 300 + 50); 
-                // 🌟 使用 AI 给出的合理佣金比例，兜底 5%~15%
                 const rate = acc.studioData.commercial.commissionRate || (Math.random() * 0.1 + 0.05); 
-                // 确保佣金至少有 1 块钱
                 const commission = Math.max(1, Math.floor(price * rate)); 
                 acc.showcase.unshift({
                     id: 'prod_' + Date.now(),
@@ -199,36 +196,29 @@ if (!window.bloggerActions) {
             const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
             const char = store.contacts.find(c => c.id === acc.charId);
             const chat = store.chats.find(c => c.charId === acc.charId);
-            const boundP = store.personas.find(p => p.id === (chat?.isGroup ? chat.boundPersonaId : char?.boundPersonaId)) || store.personas[0];
+            const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+            const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+            
             state.isGeneratingPost = true; window.render();
             try {
                 const currentDraft = state.postData.content.replace(/<[^>]+>/g, '').trim();
                 const draftMedia = state.postData.mediaDesc.trim();
-                
-                // 🌟 1. 获取最近 10 条动态，防止 AI 变复读机
                 const recent = (acc.posts || []).slice(0, 10).map(p => p.desc).join('；');
-                
-                // 🌟 2. 提取当前挂载的话题和橱窗商品
                 const topicsStr = state.postData.topics.length > 0 ? state.postData.topics.join('、') : '';
                 const showcaseName = state.postData.showcaseProduct ? state.postData.showcaseProduct.name : '';
 
-                // 🌟 3. 动态组装各种场景 Buff
                 let prAddon = '';
                 if (acc.studioData?.pr?.status === 'active') {
                     prAddon = `\n【紧急危机处理】：当前处于公关危机，网上传闻是“${acc.studioData.pr.desc}”，实际真相是“${acc.studioData.pr.truth}”！请务必在正文中直接或委婉地把“真相”解释清楚，狠狠辟谣！`;
                 }
-
                 let topicAddon = topicsStr ? `\n【指定话题】：当前动态挂载了话题 #${topicsStr}。请围绕这些话题展开构思。` : '';
-                
                 let showcaseAddon = showcaseName ? `\n【软广植入】：当前挂载了商品“${showcaseName}”。绝对不要写成生硬的带货广告！请结合你们的人设，编造一个跟该商品相关的自然生活场景或搞笑/浪漫小剧情，让商品极其自然地出镜，随口夸两句好用即可。` : '';
 
-                // 🌟 4. 终极任务组装
                 const task = `请协助完成一篇社交图文的创作。
-【近期已发动态（请勿重复相似主题！）】：${recent || '暂无'}
+【近期已发动态（请勿重复内容）】：${recent || '暂无'}
 【草稿状态】
 画面: ${draftMedia || '(空，请构思符合角色设定的画面描述)'}
 正文: ${currentDraft || '(空，请基于近期经历与回忆，以角色口吻进行创作)'}${topicAddon}${showcaseAddon}${prAddon}
-
 【要求】
 1. 内容必须贴合当前平台定位与你的人设。
 2. 正文必须控制在 80 字以内，精简、克制、有留白感！绝不要长篇大论！
@@ -247,358 +237,45 @@ if (!window.bloggerActions) {
             } catch (e) { console.error(e); window.actions.showToast('生成失败'); } finally { state.isGeneratingPost = false; window.render(); }
         },
 
-        togglePostDetail: (postId) => {
-            const state = window.bloggerState;
-            state.expandedPosts[postId] = !state.expandedPosts[postId];
-            if (state.expandedPosts[postId]) {
-                const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
-                const post = acc?.posts?.find(p => p.id === postId);
-                if (post && !post.hasFetchedComments) window.bloggerActions.fetchComments(postId, false);
-            }
-            window.render();
-        },
-
-        fetchComments: async (postId, isLoadMore = false) => {
-            const state = window.bloggerState;
-            if (state.isFetchingComments || !store.apiConfig?.apiKey) return;
-            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
-            const post = acc?.posts?.find(p => p.id === postId);
-            state.isFetchingComments = true; window.render();
-            try {
-                const char = store.contacts.find(c => c.id === acc.charId);
-                let context = "";
-                if (isLoadMore) context += "\n已有评论参考：\n" + post.comments.slice(-10).map(c => `[${c.author}]: ${c.content}`).join('\n');
-                
-                if (post.prContext) {
-                    context += `\n【舆论风向控制】：这篇是澄清贴，判定结果为：${post.prContext.success ? '洗白成功' : '越抹越黑'}。请让粉丝评论严格对齐此风向。`;
-                }
-
-                // 🌟 1. 终极强控：改用 myReply，且加上“严禁HTML”的死命令防止网络报错
-                const task = `根据平台风格，模拟生成10条社交平台评论。
-1. 其中 7-8 条为普通粉丝/路人/黑粉的【首层评论】。
-2. 评论态度必须混合：嗑CP的狂欢、真诚的羡慕、酸言酸语(judge)、拉踩对比、无厘头玩梗或求同款等。
-【强制要求】你必须挑选其中 3 条，以博主（扮演【${char.name}】）的身份亲自回复（护妻/回怼/撒糖等）。
-严格输出JSON数组：
-[
-  {"author": "路人甲", "content": "好漂亮！", "myReply": ""},
-  {"author": "黑粉乙", "content": "太假了", "myReply": "有本事你拍一个"},
-  {"author": "粉丝丙", "content": "催更", "myReply": "安排上了"}
-]`;
-                
-                const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task: task + context });
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { 
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, 
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) 
-                });
-                
-                const data = await res.json();
-                let text = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
-                let cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
-                
-                const maxLikes = Math.max(10, Math.floor(post.stats.likes * 2));
-                const newCms = cms.map(c => {
-                    const cmtId = 'cmt_'+Math.random().toString(36).substr(2,9);
-                    const replies = [];
-                    // 🌟 2. 捕捉 myReply，强制披上官方账号马甲，并剔除任何异常标签
-                    if (c.myReply && c.myReply.trim() !== "") {
-                        replies.push({ 
-                            author: acc.name, 
-                            content: c.myReply.replace(/<[^>]+>/g, ''), // 强行扒掉图片等代码
-                            isAuthor: true 
-                        });
-                    }
-                    
-                    return { 
-                        id: cmtId, 
-                        author: c.author, 
-                        content: c.content.replace(/<[^>]+>/g, ''), // 强行扒掉图片等代码
-                        likes: Math.floor(Math.random() * maxLikes),
-                        replies: replies 
-                    };
-                }).sort((a,b) => b.likes - a.likes);
-
-                post.comments = isLoadMore ? [...post.comments, ...newCms] : newCms;
-                post.hasFetchedComments = true;
-                post.stats.commentsCount = Math.max(post.stats.commentsCount, post.comments.length + Math.floor(Math.random()*20));
-                
-                if (window.actions.saveStore) window.actions.saveStore();
-            } catch (e) { console.error(e); } finally { state.isFetchingComments = false; window.render(); }
-        },
-
-        replyToComment: async (postId, commentId) => {
-            const text = prompt("回复该网友：");
-            if (!text) return;
-            const acc = store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId);
-            const post = acc?.posts?.find(p => p.id === postId);
-            const comment = post?.comments?.find(c => c.id === commentId);
-            if (comment) {
-                const char = store.contacts.find(c => c.id === acc.charId);
-                const chat = store.chats.find(c => c.id === acc.charId);
-                const boundP = store.personas.find(p => p.id === (chat?.isGroup ? chat.boundPersonaId : char?.boundPersonaId)) || store.personas[0];
-                
-                comment.replies.push({ author: acc.name, content: text, isAuthor: true });
-                comment.isWaitingReply = true;
-                
-                post.stats.commentsCount += 1;
-                const boostLikes = Math.floor(Math.random() * 5) + 1;
-                post.stats.likes += boostLikes;
-                acc.totalLikes += boostLikes;
-                acc.followers += 2;
-                if(post.showcaseProduct) {
-                    const prod = acc.showcase?.find(p => p.id === post.showcaseProduct.id);
-                    if(prod) prod.sales += 1;
-                }
-                window.render();
-
-                if (store.apiConfig?.apiKey) {
-                    try {
-                        const task = `你是网友 [${comment.author}]。你之前的评论是：“${comment.content}”。
-博主（网名：${acc.name}）刚刚亲自回复了你：“${text}”。
-请基于你的网民性格，写一条简短的追评（惊叹被翻牌了/继续争论/开心互动等）。严禁Emoji。直接输出文字，不要前缀。`;
-                        const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
-                        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                            body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
-                        });
-                        const data = await res.json();
-                        const reaction = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
-                        if (reaction) comment.replies.push({ author: comment.author, content: reaction });
-                    } catch(e) { console.error(e); }
-                }
-                
-                comment.isWaitingReply = false;
-                if (window.actions.saveStore) window.actions.saveStore();
-                window.render();
-            }
-        },
-
-        deletePost: (postId) => {
-            if (confirm("删除记忆？")) {
-                const acc = store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId);
-                acc.posts = acc.posts.filter(p => p.id !== postId);
-                if (window.actions.saveStore) window.actions.saveStore(); window.render();
-            }
-        },
-        // --- 🌟 公关危机四件套 ---
-        forwardPR: () => {
-            const acc = store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId);
-            const chat = store.chats.find(c => c.charId === acc.charId);
-            if(chat && acc.studioData?.pr) {
-                const pr = acc.studioData.pr;
-                // 1. 发送给用户的 UI 可见转发卡片
-                chat.messages.push({ id: Date.now(), sender: store.personas[0].name, isMe: true, msgType: 'pr_forward_card', text: `[公关危机预警]\n标题：${pr.title}`, timestamp: Date.now(), time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}) });
-                
-                // 2. 🌟 根据 target 决定伴侣是否知道真相，并注入隐藏系统提示
-                let truthContext = "";
-                if (pr.target === 'character' || pr.target === 'both') {
-                    truthContext = `【重要设定】：你（角色）是知道真相的，其实事实真相是——${pr.truth}！请在接下来的对话中，拼命向用户解释清楚这个乌龙。`;
-                } else {
-                    truthContext = `【重要设定】：因为传闻是关于用户的，所以你（角色）目前**不知道**真相！实际的真相其实是：${pr.truth}（但你不能直接说出来）。请在接下来的对话中表现出震惊、吃醋或疑惑，去质问/询问用户到底是怎么回事。`;
-                }
-                const hiddenPrompt = `[系统隐藏提示] 我们的共同账号遇到了公关危机！网上的传闻是：“${pr.desc}”。\n${truthContext}`;
-                
-                // 推送一条 isHidden 的系统消息，不再强制角色立刻回复
-                chat.messages.push({ id: Date.now() + 1, sender: 'System', isMe: false, msgType: 'system', isHidden: true, text: hiddenPrompt, timestamp: Date.now(), time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}) });
-
-                if (window.actions.saveStore) window.actions.saveStore();
-                window.actions.showToast('✅ 危机已发至微信，快去聊天界面质问或商量吧！');
-            }
-        },
-        // 🌟 核心：通知伴侣危机处理结果（Hidden 消息，同步认知）
-        notifyPartnerOfPR: (method, result) => {
-            const acc = store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId);
-            const chat = store.chats.find(c => c.charId === acc.charId);
-            if(chat && acc.studioData?.pr) {
-                const pr = acc.studioData.pr;
-                const hiddenText = `[系统通知：危机处理反馈]\n事件：${pr.title}\n真相：${pr.truth}\n处理方式：${method}\n当前结果：${result}\n\n【重要】：请记住此结果，在接下来的对话中表现出对应的态度（如：夸赞用户的聪明、由于危机平息而松了一口气、或者针对新的升级事态感到焦灼）。`;
-                chat.messages.push({ 
-                    id: Date.now() + 500, 
-                    sender: 'System', 
-                    isMe: false, 
-                    msgType: 'system', 
-                    isHidden: true, 
-                    text: hiddenText, 
-                    timestamp: Date.now() 
-                });
-                if (window.actions.saveStore) window.actions.saveStore();
-            }
-        },
-        handlePR: (type) => {
-            const state = window.bloggerState;
-            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
-            const pr = acc.studioData?.pr;
-            if(!pr) return;
-
-            if (type === 'ignore') {
-                const success = Math.random() > 0.5;
-                pr.status = 'resolved';
-                pr.result = success ? '你们选择了冷处理，网友逐渐淡忘了此事，有惊无险。' : '冷处理失败！舆论发酵，掉粉1000，口碑受损。';
-                if(!success) acc.followers = Math.max(0, acc.followers - 1000);
-                window.actions?.showToast(success ? '风波平息' : '冷处理失败，掉粉！');
-                window.render();
-            } else if (type === 'post') {
-                window.bloggerActions.openCreatePost();
-                state.postData.content = '【关于近期传闻的说明】\n';
-                state.postData.topics.push('澄清');
-                window.render();
-                // 🌟 自动呼叫伴侣代写公关稿
-                setTimeout(() => { window.bloggerActions.generatePostContent(); window.actions?.showToast('正在让伴侣撰写公关回应稿...'); }, 500);
-            } else if (type === 'message') {
-                acc.inbox = acc.inbox || [];
-                const newChatId = 'msg_pr_' + Date.now();
-                acc.inbox.unshift({
-                    id: newChatId, author: pr.stakeholder || '神秘爆料人',
-                    messages: [{sender: pr.stakeholder || '神秘爆料人', text: `关于网上的事，给个痛快话，不然我马上放出更多猛料。`, isMe: false}],
-                    isPR: true 
-                });
-                window.bloggerActions.openInboxChat(newChatId);
-                window.bloggerState.showInboxModal = true;
-                window.render();
-            } else if (type === 'live') {
-                window.actions?.showToast('准备开启直播间与粉丝对线（功能实装中）...');
-            }
-            if (window.actions.saveStore) window.actions.saveStore();
-        },
-        letPartnerHandleMsg: async (chatId) => {
-            const state = window.bloggerState;
-            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
-            const chat = acc.inbox.find(x => x.id === chatId);
-            if(chat.negotiationResult) return;
-            chat.isPartnerTyping = true; // 🌟 伴侣打字状态
-            window.render();
-            if (store.apiConfig?.apiKey) {
-                try {
-                    const char = store.contacts.find(c => c.id === acc.charId);
-                    // 🌟 核心：使用任务模式，让 buildBloggerPrompt 包装人设和记忆
-                    const task = `现在发生公关危机，网上传闻是：${acc.studioData?.pr?.desc}。实际背后的真相是：${acc.studioData?.pr?.truth}。
-请你以【${char.name}】的身份，与黑粉/狗仔[${chat.author}]进行一次【两回合】的激烈交锋。你必须严格符合自己的人设性格（参考记忆），并在交涉中甩出真相疯狂打脸对方！
-严格输出JSON格式：
-{
-  "transcript": [
-    {"sender": "${char.name}", "text": "...", "isMe": true},
-    {"sender": "${chat.author}", "text": "...", "isMe": false}
-  ],
-  "resolved": true,
-  "resultText": "交涉结果(如：对方被真相打脸认怂 / 彻底破裂)"
-}`;
-                    const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
-                    const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
-                    const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
-                    
-                    chat.messages.push(...parsed.transcript);
-                    chat.negotiationResult = parsed.resultText;
-
-                    if(chat.isPR && acc.studioData.pr) {
-                        if(parsed.resolved) {
-                            acc.studioData.pr.status = 'resolved';
-                            acc.studioData.pr.result = parsed.resultText;
-                            window.bloggerActions.notifyPartnerOfPR('伴侣亲自谈判成功', parsed.resultText); // 🌟 同步
-                            setTimeout(() => window.actions?.showToast(`🤝 伴侣交涉完毕，达成和解！`), 1000);
-                        } else {
-                            acc.studioData.pr.lastFailure = parsed.resultText;
-                            acc.studioData.pr.desc += `\n【谈判破裂】：${parsed.resultText}`;
-                            acc.followers = Math.max(0, acc.followers - 5000);
-                            window.bloggerActions.notifyPartnerOfPR('伴侣谈判失败', parsed.resultText); // 🌟 同步
-                            setTimeout(() => window.actions?.showToast(`⚠️ 谈判破裂，事件升级！`), 1000);
-                        }
-                    }
-                } catch(e) { console.error(e); }
-            }
-            chat.isPartnerTyping = false;
-            if (window.actions.saveStore) window.actions.saveStore(); 
-            window.render();
-        },
-        sendInboxMsg: async (id, text) => {
-            if (!text || !text.trim()) return;
-            const state = window.bloggerState;
-            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
-            const chat = acc.inbox.find(x => x.id === id);
-            if(chat.negotiationResult) return window.actions?.showToast('⚠️ 交涉已结束，无法继续发送');
-            chat.messages.push({ sender: acc.name, text: text, isMe: true });
-            chat.isWaitingReply = true;
-            window.render();
-            
-            if (store.apiConfig?.apiKey) {
-                try {
-                    let promptStr = "";
-                    if(chat.isPR) {
-                        const char = store.contacts.find(c => c.id === acc.charId);
-                        const prevConsequence = acc.studioData.pr.lastFailure ? `\n【之前尝试失败的后果】：${acc.studioData.pr.lastFailure}` : '';
-                        const task = `你扮演狗仔/黑粉 [${chat.author}]。网上传闻：${acc.studioData.pr.desc}${prevConsequence}。实际真相：${acc.studioData.pr.truth}。\n对话记录：${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}\n博主的回复是否解决了危机？\n严格输出JSON：{"reply": "回怼/服软", "isResolved": boolean, "isEscalated": boolean, "escalationDetail": "若升级的具体表现", "resultText": "系统结果描述"}`;
-                        
-                        const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
-                        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
-                        const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
-                        
-                        if (parsed.reply) chat.messages.push({ sender: chat.author, text: parsed.reply, isMe: false });
-                        
-                        if (parsed.isResolved) {
-                            chat.negotiationResult = parsed.resultText;
-                            acc.studioData.pr.status = 'resolved';
-                            acc.studioData.pr.result = parsed.resultText;
-                            window.bloggerActions.notifyPartnerOfPR('私下和解', parsed.resultText); // 🌟 同步
-                            window.actions?.showToast(`🤝 沟通有效，危机彻底解除！`);
-                        } else if (parsed.isEscalated) {
-                            acc.studioData.pr.lastFailure = parsed.escalationDetail;
-                            acc.studioData.pr.desc += `\n【新猛料/升级】：${parsed.escalationDetail}`;
-                            acc.followers = Math.max(0, acc.followers - 8000);
-                            window.bloggerActions.notifyPartnerOfPR('私聊破裂（事态恶化）', parsed.escalationDetail); // 🌟 同步
-                            window.actions?.showToast(`🚨 交涉崩盘！事态进一步升级！`);
-                        }
-                    } else {
-                        // 🌟 普通私信正常聊天
-                        promptStr = `【系统指令】：你现在扮演网友 [${chat.author}]。
-以下是你和博主 [${acc.name}] 的私聊记录：
-${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
-请回复博主。严禁Emoji，直接输出纯文本。`;
-                        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
-                        const reply = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
-                        if (reply) chat.messages.push({ sender: chat.author, text: reply, isMe: false });
-                    }
-                } catch(e) { console.error(e); }
-            }
-            chat.isWaitingReply = false;
-            if (window.actions.saveStore) window.actions.saveStore(); 
-            window.render();
-        },
         publishPost: async () => {
             const state = window.bloggerState;
             const pure = state.postData.content.replace(/<[^>]+>/g, '').trim();
             if (!state.postData.mediaDesc || !pure) return window.actions.showToast('请填写完整');
             const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
             if (acc) {
-                state.isPublishing = true; window.render(); // 🌟 锁定发帖按钮
+                state.isPublishing = true; window.render(); 
                 let virality = Math.random() * 0.5 + 0.8;
-                let prContext = null; // 🌟 新增：用来记录这篇帖子的公关审判结果
+                let prContext = null; 
                 
-                // 🌟 危机 DeBuff 与 澄清小作文 AI 研判
                 if (acc.studioData?.pr?.status === 'active') {
                     if (state.postData.topics.includes('澄清') || pure.includes('澄清')) {
                         try {
                             const char = store.contacts.find(c => c.id === acc.charId);
-                            // 🌟 注入历史后果，让 AI 综合判断
+                            const chat = store.chats.find(c => c.charId === acc.charId);
+                            const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+                            const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+
                             const prevConsequence = acc.studioData.pr.lastFailure ? `\n【上一次失败后果】：${acc.studioData.pr.lastFailure}` : '';
                             const task = `公关危机：${acc.studioData.pr.desc}${prevConsequence}\n实际真相：${acc.studioData.pr.truth}\n博主发了澄清文：${pure}。\n请评估是否越抹越黑？严格输出JSON：{"success": boolean, "feedback": "详细反馈", "isEscalated": boolean, "escalationDetail": "若升级，描述具体后果(如：被指责撒谎、引发更多爆料)"}`;
                             
-                            const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
+                            const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
                             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                             const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                             
                             if (parsed.success) {
-                                // ✅ 成功解决
                                 acc.studioData.pr.status = 'resolved';
                                 acc.studioData.pr.result = parsed.feedback;
+                                prContext = { success: parsed.success, feedback: parsed.feedback };
                                 virality *= 3;
-                                window.bloggerActions.notifyPartnerOfPR('发文澄清', parsed.feedback); // 🌟 通知伴侣
-                                setTimeout(() => window.actions?.showToast(`🎉 澄清贴发布！公关危机彻底解除！`), 1000);
+                                window.bloggerActions.notifyPartnerOfPR('发文澄清', parsed.feedback); 
+                                setTimeout(() => window.actions?.showToast(`澄清贴发布！公关危机彻底解除！`), 1000);
                             } else {
-                                // ❌ 失败并可能升级
                                 acc.studioData.pr.lastFailure = parsed.escalationDetail || parsed.feedback;
+                                prContext = { success: parsed.success, feedback: parsed.escalationDetail || parsed.feedback };
                                 if (parsed.isEscalated) {
-                                    acc.studioData.pr.desc += `\n【事态升级】：${parsed.escalationDetail}`; // 🌟 描述叠加
+                                    acc.studioData.pr.desc += `\n【事态升级】：${parsed.escalationDetail}`; 
                                     acc.followers = Math.max(0, acc.followers - 8000);
-                                    window.bloggerActions.notifyPartnerOfPR('发文澄清（失败升级）', parsed.escalationDetail); // 🌟 通知伴侣
+                                    window.bloggerActions.notifyPartnerOfPR('发文澄清（失败升级）', parsed.escalationDetail); 
                                     setTimeout(() => window.actions?.showToast(`🚨 澄清翻车！舆论不仅没平息反而升级了！`), 1000);
                                 } else {
                                     acc.studioData.pr.status = 'resolved';
@@ -611,20 +288,20 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                             }
                         } catch(e) { console.error(e); }
                     } else {
-                        virality *= 0.5; // 无视危机正常发帖，流量受限
+                        virality *= 0.5;
                         setTimeout(() => window.actions?.showToast(`⚠️ 风波未平息，日常动态流量严重受限！`), 1000);
                     }
                 }
 
                 if (acc.studioData?.activity?.topic && state.postData.topics.includes(acc.studioData.activity.topic)) {
                     virality *= 1.5; acc.studioData.activity.status = 'completed';
-                    setTimeout(() => window.actions?.showToast(`参与活动成功，流量加成！`), 500);
+                    setTimeout(() => window.actions?.showToast(`🎉 参与活动成功，流量加成！`), 500);
                 }
 
                 if (acc.studioData?.commercial?.status === 'accepted' && state.postData.showcaseProduct && state.postData.showcaseProduct.name === acc.studioData.commercial.product) {
                     acc.extraIncome = (acc.extraIncome || 0) + (acc.studioData.commercial.payout || 0);
                     acc.studioData.commercial.status = 'completed';
-                    setTimeout(() => window.actions?.showToast(`商单完成！酬金已入账！`), 1500);
+                    setTimeout(() => window.actions?.showToast(`💰 商单完成！酬金已入账！`), 1500);
                 }
 
                 if (state.postData.showcaseProduct) {
@@ -649,7 +326,144 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                 if (window.actions.saveStore) window.actions.saveStore(); window.render();
             }
         },
-        // --- 🌟 提问箱逻辑 ---
+
+        togglePostDetail: (postId) => {
+            const state = window.bloggerState;
+            state.expandedPosts[postId] = !state.expandedPosts[postId];
+            if (state.expandedPosts[postId]) {
+                const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
+                const post = acc?.posts?.find(p => p.id === postId);
+                if (post && !post.hasFetchedComments) window.bloggerActions.fetchComments(postId, false);
+            }
+            window.render();
+        },
+
+        fetchComments: async (postId, isLoadMore = false) => {
+            const state = window.bloggerState;
+            if (state.isFetchingComments || !store.apiConfig?.apiKey) return;
+            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
+            const post = acc?.posts?.find(p => p.id === postId);
+            state.isFetchingComments = true; window.render();
+            try {
+                const char = store.contacts.find(c => c.id === acc.charId);
+                const chat = store.chats.find(c => c.charId === acc.charId);
+                const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+                const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+
+                let context = "";
+                if (isLoadMore) context += "\n已有评论参考：\n" + post.comments.slice(-10).map(c => `[${c.author}]: ${c.content}`).join('\n');
+                
+                if (post.prContext) {
+                    context += `\n【舆论风向控制】：这篇是澄清贴，判定结果为：${post.prContext.success ? '洗白成功' : '越抹越黑'}。请让粉丝评论严格对齐此风向。`;
+                }
+
+                const task = `根据平台风格，模拟生成10条社交平台评论。
+1. 其中 7-8 条为普通粉丝/路人/黑粉的【首层评论】。
+2. 评论态度必须混合：嗑CP的狂欢、真诚的羡慕、酸言酸语(judge)、拉踩对比、无厘头玩梗或求同款等。
+【强制要求】你必须挑选其中 3 条，以博主（扮演【${char.name}】）的身份亲自回复（护妻/回怼/撒糖等）。
+严格输出JSON数组：
+[
+  {"author": "路人甲", "content": "好漂亮！", "myReply": ""},
+  {"author": "黑粉乙", "content": "太假了", "myReply": "有本事你拍一个"},
+  {"author": "粉丝丙", "content": "催更", "myReply": "安排上了"}
+]`;
+                
+                const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task: task + context });
+                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, 
+                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) 
+                });
+                
+                const data = await res.json();
+                let text = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
+                let cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
+                
+                const maxLikes = Math.max(10, Math.floor(post.stats.likes * 2));
+                const newCms = cms.map(c => {
+                    const cmtId = 'cmt_'+Math.random().toString(36).substr(2,9);
+                    const replies = [];
+                    if (c.myReply && c.myReply.trim() !== "") {
+                        replies.push({ 
+                            author: acc.name, 
+                            content: c.myReply.replace(/<[^>]+>/g, ''), 
+                            isAuthor: true 
+                        });
+                    }
+                    
+                    return { 
+                        id: cmtId, 
+                        author: c.author, 
+                        content: c.content.replace(/<[^>]+>/g, ''), 
+                        likes: Math.floor(Math.random() * maxLikes),
+                        replies: replies 
+                    };
+                }).sort((a,b) => b.likes - a.likes);
+
+                post.comments = isLoadMore ? [...post.comments, ...newCms] : newCms;
+                post.hasFetchedComments = true;
+                post.stats.commentsCount = Math.max(post.stats.commentsCount, post.comments.length + Math.floor(Math.random()*20));
+                
+                if (window.actions.saveStore) window.actions.saveStore();
+            } catch (e) { console.error(e); } finally { state.isFetchingComments = false; window.render(); }
+        },
+
+        replyToComment: async (postId, commentId) => {
+            const text = prompt("回复该网友：");
+            if (!text) return;
+            const acc = store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId);
+            const post = acc?.posts?.find(p => p.id === postId);
+            const comment = post?.comments?.find(c => c.id === commentId);
+            if (comment) {
+                const char = store.contacts.find(c => c.id === acc.charId);
+                const chat = store.chats.find(c => c.id === acc.charId);
+                const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+                const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+                
+                comment.replies.push({ author: acc.name, content: text, isAuthor: true });
+                comment.isWaitingReply = true;
+                
+                post.stats.commentsCount += 1;
+                const boostLikes = Math.floor(Math.random() * 5) + 1;
+                post.stats.likes += boostLikes;
+                acc.totalLikes += boostLikes;
+                acc.followers += 2;
+                if(post.showcaseProduct) {
+                    const prod = acc.showcase?.find(p => p.id === post.showcaseProduct.id);
+                    if(prod) prod.sales += 1;
+                }
+                window.render();
+
+                if (store.apiConfig?.apiKey) {
+                    try {
+                        const task = `你是网友 [${comment.author}]。你之前的评论是：“${comment.content}”。
+博主（网名：${acc.name}）刚刚亲自回复了你：“${text}”。
+请基于你的网民性格，写一条简短的追评（惊叹被翻牌了/继续争论/开心互动等）。严禁Emoji。直接输出文字，不要前缀。`;
+                        const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
+                        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+                            body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
+                        });
+                        const data = await res.json();
+                        const reaction = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+                        if (reaction) comment.replies.push({ author: comment.author, content: reaction });
+                    } catch(e) { console.error(e); }
+                }
+                
+                comment.isWaitingReply = false;
+                if (window.actions.saveStore) window.actions.saveStore();
+                window.render();
+            }
+        },
+
+        deletePost: (postId) => {
+            if (confirm("删除记忆？")) {
+                const acc = store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId);
+                acc.posts = acc.posts.filter(p => p.id !== postId);
+                if (window.actions.saveStore) window.actions.saveStore(); window.render();
+            }
+        },
+
         openQA: () => { window.bloggerState.showQAModal = true; window.bloggerState.qaDrafts = {}; window.render(); if (!(store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId)?.qaBox?.length > 0)) window.bloggerActions.fetchQA(); },
         closeQA: () => { window.bloggerState.showQAModal = false; window.render(); },
         updateQADraft: (id, val) => { window.bloggerState.qaDrafts[id] = val; },
@@ -660,14 +474,17 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             state.isFetchingQA = true; window.render();
             try {
                 const char = store.contacts.find(c => c.id === acc.charId);
+                const chat = store.chats.find(c => c.charId === acc.charId);
+                const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+                const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+
                 const recent = (acc.posts||[]).slice(0,10).map(p => p.desc).join('；');
                 const task = `结合近期动态[${recent}]，生成5条符合平台风格的匿名提问。2条由【${char.name}】亲自回答，3条留空等待用户回答。严禁Emoji。输出JSON数组：[{"question":"问题","answeredByPartner":"回答内容(若无请留空)"}]`;
-                const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
+                const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                 const text = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 const cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
-                acc.qaBox = []; // 🌟 核心修改：清空所有没回答的历史遗留提问
-                acc.posts = acc.posts || [];
+                acc.qaBox = []; acc.posts = acc.posts || [];
                 cms.forEach(q => {
                     if (q.answeredByPartner && q.answeredByPartner.trim() !== '') {
                         const likes = Math.floor(acc.followers * 0.05 + 10);
@@ -691,7 +508,6 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             if (window.actions.saveStore) window.actions.saveStore(); window.render(); window.actions?.showToast('✅ 回答已发布到主页');
         },
         
-        // --- 🌟 私信逻辑 ---
         openInbox: () => { window.bloggerState.showInboxModal = true; window.render(); if (!(store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId)?.inbox?.length > 0)) window.bloggerActions.fetchInbox(); },
         closeInbox: () => { window.bloggerState.showInboxModal = false; window.bloggerState.inboxChatId = null; window.render(); },
         openInboxChat: (id) => { window.bloggerState.inboxChatId = id; window.render(); },
@@ -703,27 +519,212 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             state.isFetchingInbox = true; window.render();
             try {
                 const char = store.contacts.find(c => c.id === acc.charId);
+                const chat = store.chats.find(c => c.charId === acc.charId);
+                const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+                const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+
                 const recent = (acc.posts||[]).slice(0,10).map(p => p.desc).join('；');
                 const task = `结合平台风格和近期动态[${recent}]，生成5条私信会话（粉丝/路人/其他博主）。其中2条【${char.name}】已回复，3条未读。严禁Emoji。JSON格式：[{"author": "网名", "messages": [{"sender": "网名", "text": "内容"}, {"sender": "博主", "text": "回复(未回复则删掉此对象)"}]}]`;
-                const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
+                const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                 const text = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 const cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
                 acc.inbox = []; 
                 cms.forEach(c => {
                     const mappedMsgs = c.messages.map(m => {
-                        // 🌟 核心护盾：不管 AI 填的是"博主"、"Aric" 还是 "Eve"，统统识别为自己人！
-                        const isBlogger = m.sender === '博主' || m.sender === acc.name || m.sender === char.name || m.sender === store.personas[0].name;
+                        const isBlogger = m.sender === '博主' || m.sender === acc.name || m.sender === char.name || m.sender === boundP.name;
                         return { 
-                            sender: isBlogger ? acc.name : m.sender, // 强制披上官方账号的马甲
+                            sender: isBlogger ? acc.name : m.sender,
                             text: m.text, 
-                            isMe: isBlogger // 强制把气泡拉回右边
+                            isMe: isBlogger 
                         };
                     });
                     acc.inbox.push({ id: 'msg_' + Date.now() + Math.random(), author: c.author, messages: mappedMsgs });
                 });
                 if (window.actions.saveStore) window.actions.saveStore();
             } catch(e) {} finally { state.isFetchingInbox = false; window.render(); }
+        },
+        
+        notifyPartnerOfPR: (method, result) => {
+            const acc = store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId);
+            const chat = store.chats.find(c => c.charId === acc.charId);
+            if(chat && acc.studioData?.pr) {
+                const pr = acc.studioData.pr;
+                const hiddenText = `[系统通知：危机处理反馈]\n事件：${pr.title}\n真相：${pr.truth}\n处理方式：${method}\n当前结果：${result}\n\n【重要】：请记住此结果，在接下来的对话中表现出对应的态度（如：夸赞用户的聪明、由于危机平息而松了一口气、或者针对新的升级事态感到焦灼）。`;
+                chat.messages.push({ 
+                    id: Date.now() + 500, sender: 'System', isMe: false, msgType: 'system', isHidden: true, text: hiddenText, timestamp: Date.now() 
+                });
+                if (window.actions.saveStore) window.actions.saveStore();
+            }
+        },
+
+        forwardPR: () => {
+            const acc = store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId);
+            const char = store.contacts.find(c => c.id === acc.charId);
+            const chat = store.chats.find(c => c.charId === acc.charId);
+            const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+            const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+
+            if(chat && acc.studioData?.pr) {
+                const pr = acc.studioData.pr;
+                chat.messages.push({ id: Date.now(), sender: boundP.name, isMe: true, msgType: 'pr_forward_card', text: `[公关危机预警]\n标题：${pr.title}`, timestamp: Date.now(), time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}) });
+                
+                let truthContext = "";
+                if (pr.target === 'character' || pr.target === 'both') {
+                    truthContext = `【重要设定】：你（角色）是知道真相的，其实事实真相是——${pr.truth}！请在接下来的对话中，拼命向用户解释清楚这个乌龙。`;
+                } else {
+                    truthContext = `【重要设定】：因为传闻是关于用户的，所以你（角色）目前**不知道**真相！实际的真相其实是：${pr.truth}（但你不能直接说出来）。请在接下来的对话中表现出震惊、吃醋或疑惑，去质问/询问用户到底是怎么回事。`;
+                }
+                const hiddenPrompt = `[系统隐藏提示] 我们的共同账号遇到了公关危机！网上的传闻是：“${pr.desc}”。\n${truthContext}，请和用户商讨如何解决这个公关危机吧！你们可以选择冷处理、发帖澄清、私信对峙或直播说明等方式来应对这场危机。`;
+                
+                chat.messages.push({ id: Date.now() + 1, sender: 'System', isMe: false, msgType: 'system', isHidden: true, text: hiddenPrompt, timestamp: Date.now(), time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}) });
+
+                if (window.actions.saveStore) window.actions.saveStore();
+                window.actions.showToast('✅ 危机已发至微信，快去聊天界面质问或商量吧！');
+            }
+        },
+        handlePR: (type) => {
+            const state = window.bloggerState;
+            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
+            const pr = acc.studioData?.pr;
+            if(!pr) return;
+
+            if (type === 'ignore') {
+                const success = Math.random() > 0.5;
+                pr.status = 'resolved';
+                pr.result = success ? '你们选择了冷处理，网友逐渐淡忘了此事，有惊无险。' : '冷处理失败！舆论发酵，掉粉1000，口碑受损。';
+                if(!success) acc.followers = Math.max(0, acc.followers - 1000);
+                window.actions?.showToast(success ? '风波平息' : '冷处理失败，掉粉！');
+                window.render();
+            } else if (type === 'post') {
+                window.bloggerActions.openCreatePost();
+                state.postData.content = '【关于近期传闻的说明】\n';
+                state.postData.topics.push('澄清');
+                window.render();
+                setTimeout(() => { window.bloggerActions.generatePostContent(); window.actions?.showToast('正在让伴侣撰写公关回应稿...'); }, 500);
+            } else if (type === 'message') {
+                acc.inbox = acc.inbox || [];
+                const newChatId = 'msg_pr_' + Date.now();
+                acc.inbox.unshift({
+                    id: newChatId, author: pr.stakeholder || '神秘爆料人',
+                    messages: [{sender: pr.stakeholder || '神秘爆料人', text: `关于网上的事，给个痛快话，不然我马上放出更多猛料。`, isMe: false}],
+                    isPR: true 
+                });
+                window.bloggerActions.openInboxChat(newChatId);
+                window.bloggerState.showInboxModal = true;
+                window.render();
+            } else if (type === 'live') {
+                window.actions?.showToast('准备开启直播间与粉丝对线（功能实装中）...');
+            }
+            if (window.actions.saveStore) window.actions.saveStore();
+        },
+        letPartnerHandleMsg: async (chatId) => {
+            const state = window.bloggerState;
+            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
+            const chatObj = acc.inbox.find(x => x.id === chatId);
+            if(chatObj.negotiationResult) return;
+            chatObj.isPartnerTyping = true; 
+            window.render();
+            if (store.apiConfig?.apiKey) {
+                try {
+                    const char = store.contacts.find(c => c.id === acc.charId);
+                    const chat = store.chats.find(c => c.charId === acc.charId);
+                    const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+                    const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+
+                    const task = `现在发生公关危机，网上传闻是：${acc.studioData?.pr?.desc}。实际背后的真相是：${acc.studioData?.pr?.truth}。
+请你以【${char.name}】的身份，与黑粉/狗仔[${chatObj.author}]进行一次【两回合】的激烈交锋。你必须严格符合自己的人设性格（参考记忆），并在交涉中甩出真相疯狂打脸对方！
+严格输出JSON格式：
+{
+  "transcript": [
+    {"sender": "${char.name}", "text": "...", "isMe": true},
+    {"sender": "${chatObj.author}", "text": "...", "isMe": false}
+  ],
+  "resolved": true,
+  "resultText": "交涉结果(如：对方被真相打脸认怂 / 彻底破裂)"
+}`;
+                    const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
+                    const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                    const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
+                    
+                    chatObj.messages.push(...parsed.transcript);
+                    chatObj.negotiationResult = parsed.resultText;
+
+                    if(chatObj.isPR && acc.studioData.pr) {
+                        if(parsed.resolved) {
+                            acc.studioData.pr.status = 'resolved';
+                            acc.studioData.pr.result = parsed.resultText;
+                            window.bloggerActions.notifyPartnerOfPR('伴侣亲自谈判成功', parsed.resultText);
+                            setTimeout(() => window.actions?.showToast(`🤝 伴侣交涉完毕，达成和解！`), 1000);
+                        } else {
+                            acc.studioData.pr.lastFailure = parsed.resultText;
+                            acc.studioData.pr.desc += `\n【谈判破裂】：${parsed.resultText}`;
+                            acc.followers = Math.max(0, acc.followers - 5000);
+                            window.bloggerActions.notifyPartnerOfPR('伴侣谈判失败', parsed.resultText);
+                            setTimeout(() => window.actions?.showToast(`⚠️ 谈判破裂，事件升级！`), 1000);
+                        }
+                    }
+                } catch(e) { console.error(e); }
+            }
+            chatObj.isPartnerTyping = false;
+            if (window.actions.saveStore) window.actions.saveStore(); 
+            window.render();
+        },
+        sendInboxMsg: async (id, text) => {
+            if (!text || !text.trim()) return;
+            const state = window.bloggerState;
+            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
+            const chatObj = acc.inbox.find(x => x.id === id);
+            if(chatObj.negotiationResult) return window.actions?.showToast('⚠️ 交涉已结束，无法继续发送');
+            chatObj.messages.push({ sender: acc.name, text: text, isMe: true });
+            chatObj.isWaitingReply = true;
+            window.render();
+            
+            if (store.apiConfig?.apiKey) {
+                try {
+                    const char = store.contacts.find(c => c.id === acc.charId);
+                    const chat = store.chats.find(c => c.charId === acc.charId);
+                    const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+                    const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+                    let promptStr = "";
+                    if(chatObj.isPR) {
+                        const prevConsequence = acc.studioData.pr.lastFailure ? `\n【之前尝试失败的后果】：${acc.studioData.pr.lastFailure}` : '';
+                        const task = `你扮演狗仔/黑粉 [${chatObj.author}]。网上传闻：${acc.studioData.pr.desc}${prevConsequence}。实际真相：${acc.studioData.pr.truth}。\n对话记录：${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}\n博主的回复是否解决了危机？\n严格输出JSON：{"reply": "回怼/服软", "isResolved": boolean, "isEscalated": boolean, "escalationDetail": "若升级的具体表现", "resultText": "系统结果描述"}`;
+                        
+                        promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
+                        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                        const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
+                        
+                        if (parsed.reply) chatObj.messages.push({ sender: chatObj.author, text: parsed.reply, isMe: false });
+                        
+                        if (parsed.isResolved) {
+                            chatObj.negotiationResult = parsed.resultText;
+                            acc.studioData.pr.status = 'resolved';
+                            acc.studioData.pr.result = parsed.resultText;
+                            window.bloggerActions.notifyPartnerOfPR('私下和解', parsed.resultText); 
+                            window.actions?.showToast(`🤝 沟通有效，危机彻底解除！`);
+                        } else if (parsed.isEscalated) {
+                            acc.studioData.pr.lastFailure = parsed.escalationDetail;
+                            acc.studioData.pr.desc += `\n【新猛料/升级】：${parsed.escalationDetail}`;
+                            acc.followers = Math.max(0, acc.followers - 8000);
+                            window.bloggerActions.notifyPartnerOfPR('私聊破裂（事态恶化）', parsed.escalationDetail); 
+                            window.actions?.showToast(`🚨 交涉崩盘！事态进一步升级！`);
+                        }
+                    } else {
+                        const task = `你现在扮演网友 [${chatObj.author}]。
+以下是你和博主 [${acc.name}] 的私聊记录：
+${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
+请回复博主。严禁Emoji，直接输出纯文本。`;
+                        promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
+                        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                        const reply = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+                        if (reply) chatObj.messages.push({ sender: chatObj.author, text: reply, isMe: false });
+                    }
+                } catch(e) { console.error(e); }
+            }
+            chatObj.isWaitingReply = false;
+            if (window.actions.saveStore) window.actions.saveStore(); 
+            window.render();
         },
 
         refreshStudio: async () => {
@@ -735,15 +736,18 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             const lv = bloggerUtils.calcLevel(acc.followers);
             state.isGeneratingStudio = true; window.render();
             try {
-                // 🌟 引入剧本杀级别的公关设定：隐藏真相 + 指定攻击对象
+                const char = store.contacts.find(c => c.id === acc.charId);
+                const chat = store.chats.find(c => c.charId === acc.charId);
+                const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+                const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+
                 const task = `你是后台引擎。基于平台风格、账号等级[${lv.name} ${lv.rank}]、定位[${acc.positioning}]。
 生成：1. 平台活动 2. 商单邀约 3. 公关事件。
 【公关危机强烈要求】：必须非常抓马、搞笑、乌龙或离谱绯闻！
 重点：必须拆分为【表面黑料(desc)】和【乌龙真相(truth)】！并指定黑料的【攻击目标(target)】（严格输出 "user" 或 "character" 或 "both" 之一）。
 严禁Emoji。严格输出 JSON：
 {"activity": {"title": "标题", "desc": "描述", "topic": "话题词(不带#)"}, "commercial": {"title": "标题", "desc": "描述", "product": "商品名", "price": 真实合理的商品售价(纯数字), "commissionRate": 行业合理的带货提成比例(例如0.05到0.15之间的数字), "payout": 坑位费(纯数字)}, "pr": {"title": "标题(表面黑料)", "desc": "表面黑料具体描述", "truth": "不为人知的搞笑/乌龙真相", "target": "user/character/both", "stakeholder": "狗仔/黑粉网名"}}`;
-                const char = store.contacts.find(c => c.id === acc.charId);
-                const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
+                const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                     body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
