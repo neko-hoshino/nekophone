@@ -220,7 +220,7 @@ if (!window.bloggerActions) {
 
                 // 🌟 4. 终极任务组装
                 const task = `请协助完成一篇社交图文的创作。
-【近期已发动态（请勿重复内容）】：${recent || '暂无'}
+【近期已发动态（请勿重复相似主题！）】：${recent || '暂无'}
 【草稿状态】
 画面: ${draftMedia || '(空，请构思符合角色设定的画面描述)'}
 正文: ${currentDraft || '(空，请基于近期经历与回忆，以角色口吻进行创作)'}${topicAddon}${showcaseAddon}${prAddon}
@@ -383,6 +383,25 @@ if (!window.bloggerActions) {
                 window.actions.showToast('✅ 危机已发至微信，快去聊天界面质问或商量吧！');
             }
         },
+        // 🌟 核心：通知伴侣危机处理结果（Hidden 消息，同步认知）
+        notifyPartnerOfPR: (method, result) => {
+            const acc = store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId);
+            const chat = store.chats.find(c => c.charId === acc.charId);
+            if(chat && acc.studioData?.pr) {
+                const pr = acc.studioData.pr;
+                const hiddenText = `[系统通知：危机处理反馈]\n事件：${pr.title}\n真相：${pr.truth}\n处理方式：${method}\n当前结果：${result}\n\n【重要】：请记住此结果，在接下来的对话中表现出对应的态度（如：夸赞用户的聪明、由于危机平息而松了一口气、或者针对新的升级事态感到焦灼）。`;
+                chat.messages.push({ 
+                    id: Date.now() + 500, 
+                    sender: 'System', 
+                    isMe: false, 
+                    msgType: 'system', 
+                    isHidden: true, 
+                    text: hiddenText, 
+                    timestamp: Date.now() 
+                });
+                if (window.actions.saveStore) window.actions.saveStore();
+            }
+        },
         handlePR: (type) => {
             const state = window.bloggerState;
             const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
@@ -449,13 +468,17 @@ if (!window.bloggerActions) {
                     chat.negotiationResult = parsed.resultText;
 
                     if(chat.isPR && acc.studioData.pr) {
-                        acc.studioData.pr.status = 'resolved';
-                        acc.studioData.pr.result = parsed.resultText;
                         if(parsed.resolved) {
+                            acc.studioData.pr.status = 'resolved';
+                            acc.studioData.pr.result = parsed.resultText;
+                            window.bloggerActions.notifyPartnerOfPR('伴侣亲自谈判成功', parsed.resultText); // 🌟 同步
                             setTimeout(() => window.actions?.showToast(`🤝 伴侣交涉完毕，达成和解！`), 1000);
                         } else {
+                            acc.studioData.pr.lastFailure = parsed.resultText;
+                            acc.studioData.pr.desc += `\n【谈判破裂】：${parsed.resultText}`;
                             acc.followers = Math.max(0, acc.followers - 5000);
-                            setTimeout(() => window.actions?.showToast(`⚠️ 谈判破裂，事件升级掉粉！`), 1000);
+                            window.bloggerActions.notifyPartnerOfPR('伴侣谈判失败', parsed.resultText); // 🌟 同步
+                            setTimeout(() => window.actions?.showToast(`⚠️ 谈判破裂，事件升级！`), 1000);
                         }
                     }
                 } catch(e) { console.error(e); }
@@ -479,11 +502,8 @@ if (!window.bloggerActions) {
                     let promptStr = "";
                     if(chat.isPR) {
                         const char = store.contacts.find(c => c.id === acc.charId);
-                        const task = `你扮演狗仔/黑粉 [${chat.author}]，因公关危机正与博主[${acc.name}]私聊。
-网上传闻：${acc.studioData?.pr?.desc}。实际真相：${acc.studioData?.pr?.truth}。
-聊天记录：${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
-判断博主的最新回复是否把“实际真相”解释清楚了、说服了你？还是没说到点子上让你更火大？
-严格输出JSON：{"reply": "你的回怼/服软", "isResolved": boolean, "isEscalated": boolean, "resultText": "对方反应的系统描述(如：爆料人被真相打脸同意撤稿 / 彻底激怒对方曝光聊天记录)"}`;
+                        const prevConsequence = acc.studioData.pr.lastFailure ? `\n【之前尝试失败的后果】：${acc.studioData.pr.lastFailure}` : '';
+                        const task = `你扮演狗仔/黑粉 [${chat.author}]。网上传闻：${acc.studioData.pr.desc}${prevConsequence}。实际真相：${acc.studioData.pr.truth}。\n对话记录：${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}\n博主的回复是否解决了危机？\n严格输出JSON：{"reply": "回怼/服软", "isResolved": boolean, "isEscalated": boolean, "escalationDetail": "若升级的具体表现", "resultText": "系统结果描述"}`;
                         
                         const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
                         const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
@@ -491,16 +511,18 @@ if (!window.bloggerActions) {
                         
                         if (parsed.reply) chat.messages.push({ sender: chat.author, text: parsed.reply, isMe: false });
                         
-                        if(parsed.isResolved || parsed.isEscalated) {
-                             chat.negotiationResult = parsed.resultText;
-                             acc.studioData.pr.status = 'resolved';
-                             acc.studioData.pr.result = parsed.resultText;
-                             if(parsed.isEscalated) {
-                                 acc.followers = Math.max(0, acc.followers - 8000);
-                                 window.actions?.showToast(`🚨 交涉崩盘！聊天记录被曝光，严重掉粉！`);
-                             } else {
-                                 window.actions?.showToast(`🤝 沟通有效，危机彻底解除！`);
-                             }
+                        if (parsed.isResolved) {
+                            chat.negotiationResult = parsed.resultText;
+                            acc.studioData.pr.status = 'resolved';
+                            acc.studioData.pr.result = parsed.resultText;
+                            window.bloggerActions.notifyPartnerOfPR('私下和解', parsed.resultText); // 🌟 同步
+                            window.actions?.showToast(`🤝 沟通有效，危机彻底解除！`);
+                        } else if (parsed.isEscalated) {
+                            acc.studioData.pr.lastFailure = parsed.escalationDetail;
+                            acc.studioData.pr.desc += `\n【新猛料/升级】：${parsed.escalationDetail}`;
+                            acc.followers = Math.max(0, acc.followers - 8000);
+                            window.bloggerActions.notifyPartnerOfPR('私聊破裂（事态恶化）', parsed.escalationDetail); // 🌟 同步
+                            window.actions?.showToast(`🚨 交涉崩盘！事态进一步升级！`);
                         }
                     } else {
                         // 🌟 普通私信正常聊天
@@ -533,25 +555,37 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                     if (state.postData.topics.includes('澄清') || pure.includes('澄清')) {
                         try {
                             const char = store.contacts.find(c => c.id === acc.charId);
-                            const task = `公关危机：${acc.studioData.pr.desc}。实际真相是：${acc.studioData.pr.truth}。
-博主发了澄清文：${pure}。
-请严厉评估这篇公关文是否把“实际真相”解释清楚了并且符合你们的人设定位？如果偏离了真相、态度不对或者胡言乱语，就是越抹越黑！
-严格输出JSON：{"success": boolean, "feedback": "舆论反转 或 越抹越黑 的说明"}`;
+                            // 🌟 注入历史后果，让 AI 综合判断
+                            const prevConsequence = acc.studioData.pr.lastFailure ? `\n【上一次失败后果】：${acc.studioData.pr.lastFailure}` : '';
+                            const task = `公关危机：${acc.studioData.pr.desc}${prevConsequence}\n实际真相：${acc.studioData.pr.truth}\n博主发了澄清文：${pure}。\n请评估是否越抹越黑？严格输出JSON：{"success": boolean, "feedback": "详细反馈", "isEscalated": boolean, "escalationDetail": "若升级，描述具体后果(如：被指责撒谎、引发更多爆料)"}`;
                             
                             const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
                             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                             const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                             
-                            acc.studioData.pr.status = 'resolved';
-                            acc.studioData.pr.result = parsed.feedback;
-                            prContext = { success: parsed.success, feedback: parsed.feedback }; // 🌟 记录下来供评论区使用
-                            if(parsed.success) {
-                                virality *= 3; // 反转大爆
-                                setTimeout(() => window.actions?.showToast(`澄清文极具说服力！舆论反转！`), 1000);
+                            if (parsed.success) {
+                                // ✅ 成功解决
+                                acc.studioData.pr.status = 'resolved';
+                                acc.studioData.pr.result = parsed.feedback;
+                                virality *= 3;
+                                window.bloggerActions.notifyPartnerOfPR('发文澄清', parsed.feedback); // 🌟 通知伴侣
+                                setTimeout(() => window.actions?.showToast(`🎉 澄清贴发布！公关危机彻底解除！`), 1000);
                             } else {
-                                virality *= 0.2; // 欲盖弥彰
-                                acc.followers = Math.max(0, acc.followers - 8000);
-                                setTimeout(() => window.actions?.showToast(`⚠️ 澄清文引发次生灾害，越抹越黑，严重掉粉！`), 1000);
+                                // ❌ 失败并可能升级
+                                acc.studioData.pr.lastFailure = parsed.escalationDetail || parsed.feedback;
+                                if (parsed.isEscalated) {
+                                    acc.studioData.pr.desc += `\n【事态升级】：${parsed.escalationDetail}`; // 🌟 描述叠加
+                                    acc.followers = Math.max(0, acc.followers - 8000);
+                                    window.bloggerActions.notifyPartnerOfPR('发文澄清（失败升级）', parsed.escalationDetail); // 🌟 通知伴侣
+                                    setTimeout(() => window.actions?.showToast(`🚨 澄清翻车！舆论不仅没平息反而升级了！`), 1000);
+                                } else {
+                                    acc.studioData.pr.status = 'resolved';
+                                    acc.studioData.pr.result = parsed.feedback;
+                                    acc.followers = Math.max(0, acc.followers - 3000);
+                                    window.bloggerActions.notifyPartnerOfPR('发文澄清（勉强平息）', parsed.feedback);
+                                    setTimeout(() => window.actions?.showToast(`⚠️ 澄清效果不佳，虽已平息但损失惨重。`), 1000);
+                                }
+                                virality *= 0.2;
                             }
                         } catch(e) { console.error(e); }
                     } else {
@@ -605,7 +639,7 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             try {
                 const char = store.contacts.find(c => c.id === acc.charId);
                 const recent = (acc.posts||[]).slice(0,10).map(p => p.desc).join('；');
-                const task = `结合近期动态[${recent}]，生成5条匿名提问。2条由【${char.name}】亲自回答，3条留空等待用户回答。严禁Emoji。输出JSON数组：[{"question":"问题","answeredByPartner":"回答内容(若无请留空)"}]`;
+                const task = `结合近期动态[${recent}]，生成5条符合平台风格的匿名提问。2条由【${char.name}】亲自回答，3条留空等待用户回答。严禁Emoji。输出JSON数组：[{"question":"问题","answeredByPartner":"回答内容(若无请留空)"}]`;
                 const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                 const text = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
@@ -648,7 +682,7 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             try {
                 const char = store.contacts.find(c => c.id === acc.charId);
                 const recent = (acc.posts||[]).slice(0,10).map(p => p.desc).join('；');
-                const task = `结合近期动态[${recent}]，生成5条私信会话（粉丝/路人/其他博主）。其中2条【${char.name}】已回复，3条未读。严禁Emoji。JSON格式：[{"author": "网名", "messages": [{"sender": "网名", "text": "内容"}, {"sender": "博主", "text": "回复(未回复则删掉此对象)"}]}]`;
+                const task = `结合平台风格和近期动态[${recent}]，生成5条私信会话（粉丝/路人/其他博主）。其中2条【${char.name}】已回复，3条未读。严禁Emoji。JSON格式：[{"author": "网名", "messages": [{"sender": "网名", "text": "内容"}, {"sender": "博主", "text": "回复(未回复则删掉此对象)"}]}]`;
                 const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                 const text = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
