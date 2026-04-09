@@ -575,7 +575,9 @@ if (!window.bloggerActions) {
                 } else {
                     truthContext = `【重要设定】：因为传闻是关于用户的，所以你（角色）目前**不知道**真相！实际的真相其实是：${pr.truth}（但你不能直接说出来）。请在接下来的对话中表现出震惊、吃醋或疑惑，去质问/询问用户到底是怎么回事。`;
                 }
-                const hiddenPrompt = `[系统隐藏提示] 我们的共同账号遇到了公关危机！网上的传闻是：“${pr.desc}”。\n${truthContext}，请和用户商讨如何解决这个公关危机吧！你们可以选择冷处理、发帖澄清、私信对峙或直播说明等方式来应对这场危机。`;
+                
+                // 🌟 核心补丁：强行规定 4 个选项框死他，发律师函只能算前摇演绎！
+                const hiddenPrompt = `[系统隐藏提示] 我们的共同账号遇到了公关危机！网上的传闻是：“${pr.desc}”。\n${truthContext}\n【机制强制要求】：在与用户商议对策时，你必须引导或催促用户从账号后台支持的 4 个功能中选择一个来推进：[1.冷处理]、[2.发文澄清]、[3.私下交涉]、[4.开播回应]。即使你的人设极其强势（例如想发律师函、报警或封杀对方），这些也只能作为口头上的狠话或附加背景演绎，你的最终落脚点和建议必须回归到这 4 个功能之一，否则系统机制无法推进！`;
                 
                 chat.messages.push({ id: Date.now() + 1, sender: 'System', isMe: false, msgType: 'system', isHidden: true, text: hiddenPrompt, timestamp: Date.now(), time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}) });
 
