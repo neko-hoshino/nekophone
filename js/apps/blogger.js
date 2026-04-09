@@ -24,7 +24,8 @@ if (!window.bloggerState) {
         showQAModal: false,
         isFetchingInbox: false,
         isFetchingQA: false,
-        qaDrafts: {} 
+        qaDrafts: {},
+        isPublishing: false // 🌟 用于发帖时的 AI 研判转圈保护
     };
 }
 
@@ -220,68 +221,6 @@ if (!window.bloggerActions) {
             } catch (e) { console.error(e); window.actions.showToast('生成失败'); } finally { state.isGeneratingPost = false; window.render(); }
         },
 
-        publishPost: () => {
-            const state = window.bloggerState;
-            const pure = state.postData.content.replace(/<[^>]+>/g, '').trim();
-            if (!state.postData.mediaDesc || !pure) return window.actions.showToast('请填写完整');
-            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
-            if (acc) {
-                let virality = Math.random() * 0.5 + 0.8;
-                
-                if (acc.studioData?.activity?.topic && state.postData.topics.includes(acc.studioData.activity.topic)) {
-                    virality *= 1.5;
-                    acc.studioData.activity.status = 'completed'; // 🌟 标记完成
-                    setTimeout(() => window.actions?.showToast(`成功带话题参与活动，流量加成 1.5 倍！`), 500);
-                }
-
-                if (acc.studioData?.commercial?.status === 'accepted' && state.postData.showcaseProduct && state.postData.showcaseProduct.name === acc.studioData.commercial.product) {
-                    acc.extraIncome = (acc.extraIncome || 0) + (acc.studioData.commercial.payout || 0);
-                    acc.studioData.commercial.status = 'completed';
-                    setTimeout(() => window.actions?.showToast(`商单完成！基础酬金 ￥${acc.studioData.commercial.payout} 已入账！`), 1500);
-                }
-
-                if (state.postData.showcaseProduct) {
-                    const prod = acc.showcase.find(p => p.id === state.postData.showcaseProduct.id);
-                    if (prod) {
-                        const newSales = Math.floor(acc.followers * 0.005 * virality) + Math.floor(Math.random() * 10);
-                        prod.sales = (prod.sales || 0) + newSales;
-                    }
-                }
-
-                const likes = Math.floor(acc.followers * 0.1 * virality + 10);
-                const commentsCount = Math.floor(likes * (Math.random() * 0.15 + 0.05));
-                
-                acc.followers += Math.floor(likes * 0.15);
-                acc.totalLikes = (acc.totalLikes || 0) + likes;
-                acc.posts = acc.posts || [];
-                
-                const newPost = { 
-                    id: 'post_' + Date.now(), 
-                    desc: pure, 
-                    htmlContent: state.postData.content, 
-                    mediaDesc: state.postData.mediaDesc, 
-                    showcaseProduct: state.postData.showcaseProduct, 
-                    topics: state.postData.topics || [],
-                    stats: { likes, commentsCount, saves: Math.floor(likes/4), shares: Math.floor(likes/10) }, 
-                    comments: [], 
-                    hasFetchedComments: false 
-                };
-                acc.posts.unshift(newPost);
-
-                if (acc.posts.length > 1) {
-                    const prevPost = acc.posts[1];
-                    const boostLikes = Math.floor(likes * 0.05) + 1;
-                    const boostComments = Math.floor(commentsCount * 0.05) + 1;
-                    prevPost.stats.likes += boostLikes;
-                    prevPost.stats.commentsCount += boostComments;
-                    acc.totalLikes += boostLikes;
-                }
-
-                if (window.actions.saveStore) window.actions.saveStore();
-            }
-            state.showCreatePostModal = false; window.render();
-        },
-
         togglePostDetail: (postId) => {
             const state = window.bloggerState;
             state.expandedPosts[postId] = !state.expandedPosts[postId];
@@ -302,6 +241,10 @@ if (!window.bloggerActions) {
             try {
                 let context = "";
                 if (isLoadMore) context = "\n已有评论参考：\n" + post.comments.slice(-10).map(c => `[${c.author}]: ${c.content}`).join('\n');
+                // 🌟 如果这篇帖子是澄清贴，强行用它的判定结果扭转 AI 的评论倾向
+                if (post.prContext) {
+                    context += `\n【极其重要指令】：这是一篇公关澄清贴！处理结果是：${post.prContext.success ? '成功洗白，舆论反转' : '越抹越黑，严重翻车掉粉'}。具体情况：${post.prContext.feedback}。请严格按照这个结果生成网友评论（如果翻车，评论必须清一色嘲讽、脱粉、骂战；如果成功，必须清一色支持、心疼、吃瓜）！`;
+                }
                 const task = `请根据以下帖子生成评论。
 帖子标题: "${post.title}" | 正文: "${post.desc}"
 
@@ -393,6 +336,234 @@ if (!window.bloggerActions) {
                 if (window.actions.saveStore) window.actions.saveStore(); window.render();
             }
         },
+        // --- 🌟 公关危机四件套 ---
+        forwardPR: () => {
+            const acc = store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId);
+            const chat = store.chats.find(c => c.charId === acc.charId);
+            if(chat && acc.studioData?.pr) {
+                const pr = acc.studioData.pr;
+                // 1. 发送给用户的 UI 可见转发卡片
+                chat.messages.push({ id: Date.now(), sender: store.personas[0].name, isMe: true, msgType: 'pr_forward_card', text: `[公关危机预警]\n标题：${pr.title}`, timestamp: Date.now(), time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}) });
+                
+                // 2. 🌟 根据 target 决定伴侣是否知道真相，并注入隐藏系统提示
+                let truthContext = "";
+                if (pr.target === 'character' || pr.target === 'both') {
+                    truthContext = `【重要设定】：你（角色）是知道真相的，其实事实真相是——${pr.truth}！请在接下来的对话中，拼命向用户解释清楚这个乌龙。`;
+                } else {
+                    truthContext = `【重要设定】：因为传闻是关于用户的，所以你（角色）目前**不知道**真相！实际的真相其实是：${pr.truth}（但你不能直接说出来）。请在接下来的对话中表现出震惊、吃醋或疑惑，去质问/询问用户到底是怎么回事。`;
+                }
+                const hiddenPrompt = `[系统隐藏提示] 我们的共同账号遇到了公关危机！网上的传闻是：“${pr.desc}”。\n${truthContext}`;
+                
+                // 推送一条 isHidden 的系统消息，不再强制角色立刻回复
+                chat.messages.push({ id: Date.now() + 1, sender: 'System', isMe: false, msgType: 'system', isHidden: true, text: hiddenPrompt, timestamp: Date.now(), time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}) });
+
+                if (window.actions.saveStore) window.actions.saveStore();
+                window.actions.showToast('✅ 危机已发至微信，快去聊天界面质问或商量吧！');
+            }
+        },
+        handlePR: (type) => {
+            const state = window.bloggerState;
+            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
+            const pr = acc.studioData?.pr;
+            if(!pr) return;
+
+            if (type === 'ignore') {
+                const success = Math.random() > 0.5;
+                pr.status = 'resolved';
+                pr.result = success ? '你们选择了冷处理，网友逐渐淡忘了此事，有惊无险。' : '冷处理失败！舆论发酵，掉粉1000，口碑受损。';
+                if(!success) acc.followers = Math.max(0, acc.followers - 1000);
+                window.actions?.showToast(success ? '风波平息' : '冷处理失败，掉粉！');
+                window.render();
+            } else if (type === 'post') {
+                window.bloggerActions.openCreatePost();
+                state.postData.content = '【关于近期传闻的说明】\n';
+                state.postData.topics.push('澄清');
+                window.render();
+                // 🌟 自动呼叫伴侣代写公关稿
+                setTimeout(() => { window.bloggerActions.generatePostContent(); window.actions?.showToast('正在让伴侣撰写公关回应稿...'); }, 500);
+            } else if (type === 'message') {
+                acc.inbox = acc.inbox || [];
+                const newChatId = 'msg_pr_' + Date.now();
+                acc.inbox.unshift({
+                    id: newChatId, author: pr.stakeholder || '神秘爆料人',
+                    messages: [{sender: pr.stakeholder || '神秘爆料人', text: `关于网上的事，给个痛快话，不然我马上放出更多猛料。`, isMe: false}],
+                    isPR: true 
+                });
+                window.bloggerActions.openInboxChat(newChatId);
+                window.bloggerState.showInboxModal = true;
+                window.render();
+            } else if (type === 'live') {
+                window.actions?.showToast('准备开启直播间与粉丝对线（功能实装中）...');
+            }
+            if (window.actions.saveStore) window.actions.saveStore();
+        },
+        letPartnerHandleMsg: async (chatId) => {
+            const state = window.bloggerState;
+            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
+            const chat = acc.inbox.find(x => x.id === chatId);
+            if(chat.negotiationResult) return;
+            chat.isPartnerTyping = true; // 🌟 伴侣打字状态
+            window.render();
+            if (store.apiConfig?.apiKey) {
+                try {
+                    const char = store.contacts.find(c => c.id === acc.charId);
+                    const promptStr = `【系统指令】：现在发生公关危机，网上传闻是：${acc.studioData?.pr?.desc}。实际背后的真相是：${acc.studioData?.pr?.truth}。
+请模拟博主的伴侣【${char.name}】与黑粉/狗仔[${chat.author}]进行一次【两回合】的激烈交锋。伴侣必须在交涉中甩出真相疯狂打脸对方！
+严格输出JSON格式：
+{
+  "transcript": [
+    {"sender": "${char.name}", "text": "...", "isMe": true},
+    {"sender": "${chat.author}", "text": "...", "isMe": false}
+  ],
+  "resolved": true,
+  "resultText": "交涉结果(如：对方认怂达成和解 / 谈判彻底破裂)"
+}`;
+                    const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                    const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
+                    
+                    chat.messages.push(...parsed.transcript);
+                    chat.negotiationResult = parsed.resultText;
+
+                    if(chat.isPR && acc.studioData.pr) {
+                        acc.studioData.pr.status = 'resolved';
+                        acc.studioData.pr.result = parsed.resultText;
+                        if(parsed.resolved) {
+                            setTimeout(() => window.actions?.showToast(`🤝 伴侣交涉完毕，达成和解！`), 1000);
+                        } else {
+                            acc.followers = Math.max(0, acc.followers - 5000);
+                            setTimeout(() => window.actions?.showToast(`⚠️ 谈判破裂，事件升级掉粉！`), 1000);
+                        }
+                    }
+                } catch(e) { console.error(e); }
+            }
+            chat.isPartnerTyping = false;
+            if (window.actions.saveStore) window.actions.saveStore(); 
+            window.render();
+        },
+        sendInboxMsg: async (id, text) => {
+            if (!text || !text.trim()) return;
+            const state = window.bloggerState;
+            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
+            const chat = acc.inbox.find(x => x.id === id);
+            if(chat.negotiationResult) return window.actions?.showToast('⚠️ 交涉已结束，无法继续发送');
+            chat.messages.push({ sender: acc.name, text: text, isMe: true });
+            chat.isWaitingReply = true;
+            window.render();
+            
+            if (store.apiConfig?.apiKey) {
+                try {
+                    let promptStr = "";
+                    if(chat.isPR) {
+                        // 🌟 用户自决：AI 充当判官评估是否解决危机
+                        promptStr = `【系统指令】：你扮演狗仔/黑粉 [${chat.author}]，因公关危机正与博主[${acc.name}]私聊。
+网上的传闻是：${acc.studioData?.pr?.desc}。而实际的真相是：${acc.studioData?.pr?.truth}。
+聊天记录：${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
+判断博主的最新回复是否把“实际真相”解释清楚了、说服了你？还是没说到点子上让你更火大？
+严格输出JSON：{"reply": "你的回怼/服软", "isResolved": boolean, "isEscalated": boolean, "resultText": "对方反应的系统描述(如：爆料人被真相打脸同意撤稿 / 彻底激怒对方曝光聊天记录)"}`;
+                        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                        const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
+                        
+                        if (parsed.reply) chat.messages.push({ sender: chat.author, text: parsed.reply, isMe: false });
+                        
+                        if(parsed.isResolved || parsed.isEscalated) {
+                             chat.negotiationResult = parsed.resultText;
+                             acc.studioData.pr.status = 'resolved';
+                             acc.studioData.pr.result = parsed.resultText;
+                             if(parsed.isEscalated) {
+                                 acc.followers = Math.max(0, acc.followers - 8000);
+                                 window.actions?.showToast(`🚨 交涉崩盘！聊天记录被曝光，严重掉粉！`);
+                             } else {
+                                 window.actions?.showToast(`🤝 沟通有效，危机彻底解除！`);
+                             }
+                        }
+                    } else {
+                        // 🌟 普通私信正常聊天
+                        promptStr = `【系统指令】：你现在扮演网友 [${chat.author}]。
+以下是你和博主 [${acc.name}] 的私聊记录：
+${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
+请回复博主。严禁Emoji，直接输出纯文本。`;
+                        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                        const reply = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+                        if (reply) chat.messages.push({ sender: chat.author, text: reply, isMe: false });
+                    }
+                } catch(e) { console.error(e); }
+            }
+            chat.isWaitingReply = false;
+            if (window.actions.saveStore) window.actions.saveStore(); 
+            window.render();
+        },
+        publishPost: async () => {
+            const state = window.bloggerState;
+            const pure = state.postData.content.replace(/<[^>]+>/g, '').trim();
+            if (!state.postData.mediaDesc || !pure) return window.actions.showToast('请填写完整');
+            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
+            if (acc) {
+                state.isPublishing = true; window.render(); // 🌟 锁定发帖按钮
+                let virality = Math.random() * 0.5 + 0.8;
+                let prContext = null; // 🌟 新增：用来记录这篇帖子的公关审判结果
+                
+                // 🌟 危机 DeBuff 与 澄清小作文 AI 研判
+                if (acc.studioData?.pr?.status === 'active') {
+                    if (state.postData.topics.includes('澄清') || pure.includes('澄清')) {
+                        try {
+                            const promptStr = `公关危机：${acc.studioData.pr.desc}。实际真相是：${acc.studioData.pr.truth}。
+博主发了澄清文：${pure}。
+请严厉评估这篇公关文是否把“实际真相”解释清楚了？如果偏离了真相或者胡言乱语，就是越抹越黑！
+严格输出JSON：{"success": boolean, "feedback": "舆论反转 或 越抹越黑 的说明"}`;
+                            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                            const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
+                            
+                            acc.studioData.pr.status = 'resolved';
+                            acc.studioData.pr.result = parsed.feedback;
+                            prContext = { success: parsed.success, feedback: parsed.feedback }; // 🌟 记录下来供评论区使用
+                            if(parsed.success) {
+                                virality *= 3; // 反转大爆
+                                setTimeout(() => window.actions?.showToast(`澄清文极具说服力！舆论反转！`), 1000);
+                            } else {
+                                virality *= 0.2; // 欲盖弥彰
+                                acc.followers = Math.max(0, acc.followers - 8000);
+                                setTimeout(() => window.actions?.showToast(`⚠️ 澄清文引发次生灾害，越抹越黑，严重掉粉！`), 1000);
+                            }
+                        } catch(e) { console.error(e); }
+                    } else {
+                        virality *= 0.5; // 无视危机正常发帖，流量受限
+                        setTimeout(() => window.actions?.showToast(`⚠️ 风波未平息，日常动态流量严重受限！`), 1000);
+                    }
+                }
+
+                if (acc.studioData?.activity?.topic && state.postData.topics.includes(acc.studioData.activity.topic)) {
+                    virality *= 1.5; acc.studioData.activity.status = 'completed';
+                    setTimeout(() => window.actions?.showToast(`参与活动成功，流量加成！`), 500);
+                }
+
+                if (acc.studioData?.commercial?.status === 'accepted' && state.postData.showcaseProduct && state.postData.showcaseProduct.name === acc.studioData.commercial.product) {
+                    acc.extraIncome = (acc.extraIncome || 0) + (acc.studioData.commercial.payout || 0);
+                    acc.studioData.commercial.status = 'completed';
+                    setTimeout(() => window.actions?.showToast(`商单完成！酬金已入账！`), 1500);
+                }
+
+                if (state.postData.showcaseProduct) {
+                    const prod = acc.showcase.find(p => p.id === state.postData.showcaseProduct.id);
+                    if (prod) { prod.sales = (prod.sales || 0) + Math.floor(acc.followers * 0.005 * virality) + Math.floor(Math.random() * 10); }
+                }
+
+                const likes = Math.floor(acc.followers * 0.1 * virality + 10);
+                const commentsCount = Math.floor(likes * (Math.random() * 0.15 + 0.05));
+                acc.followers += Math.floor(likes * 0.15); acc.totalLikes = (acc.totalLikes || 0) + likes;
+                acc.posts = acc.posts || [];
+                
+                acc.posts.unshift({ id: 'post_' + Date.now(), desc: pure, htmlContent: state.postData.content, mediaDesc: state.postData.mediaDesc, showcaseProduct: state.postData.showcaseProduct, topics: state.postData.topics || [], prContext: prContext, stats: { likes, commentsCount, saves: Math.floor(likes/4), shares: Math.floor(likes/10) }, comments: [], hasFetchedComments: false });
+
+                if (acc.posts.length > 1) {
+                    const prevPost = acc.posts[1];
+                    const boostLikes = Math.floor(likes * 0.05) + 1; const boostComments = Math.floor(commentsCount * 0.05) + 1;
+                    prevPost.stats.likes += boostLikes; prevPost.stats.commentsCount += boostComments; acc.totalLikes += boostLikes;
+                }
+
+                state.isPublishing = false; state.showCreatePostModal = false; 
+                if (window.actions.saveStore) window.actions.saveStore(); window.render();
+            }
+        },
         // --- 🌟 提问箱逻辑 ---
         openQA: () => { window.bloggerState.showQAModal = true; window.bloggerState.qaDrafts = {}; window.render(); if (!(store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId)?.qaBox?.length > 0)) window.bloggerActions.fetchQA(); },
         closeQA: () => { window.bloggerState.showQAModal = false; window.render(); },
@@ -461,35 +632,6 @@ if (!window.bloggerActions) {
                 if (window.actions.saveStore) window.actions.saveStore();
             } catch(e) {} finally { state.isFetchingInbox = false; window.render(); }
         },
-        sendInboxMsg: async (id, text) => {
-            if (!text || !text.trim()) return;
-            const state = window.bloggerState;
-            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
-            const chat = acc.inbox.find(x => x.id === id);
-            chat.messages.push({ sender: acc.name, text: text, isMe: true });
-            chat.isWaitingReply = true; // 🌟 开启输入中状态
-            window.render();
-            
-            if (store.apiConfig?.apiKey) {
-                try {
-                    const promptStr = `【系统指令】：你现在扮演社交平台上的网友 [${chat.author}]。
-以下是你和博主 [${acc.name}] 的私信聊天记录：
-${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
-博主刚刚回复了你。请你站在网友 [${chat.author}] 的立场和性格，继续回复博主一句。严禁Emoji。直接输出回复的纯文本内容，不要输出你的名字前缀。`;
-                    
-                    const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { 
-                        method: 'POST', 
-                        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, 
-                        body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) 
-                    });
-                    const reply = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
-                    if (reply) chat.messages.push({ sender: chat.author, text: reply, isMe: false });
-                } catch(e) { console.error("私信回复失败", e); }
-            }
-            chat.isWaitingReply = false; // 🌟 关闭输入中状态
-            if (window.actions.saveStore) window.actions.saveStore(); 
-            window.render();
-        },
 
         refreshStudio: async () => {
             const state = window.bloggerState;
@@ -500,13 +642,13 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             const lv = bloggerUtils.calcLevel(acc.followers);
             state.isGeneratingStudio = true; window.render();
             try {
-                const task = `你是社交平台后台引擎。基于当前账号：等级[${lv.name} ${lv.rank}]，定位[${acc.positioning}]。
-生成以下内容：
-1. 平台活动：符合平台风格、适合当前等级的任务，包含具体的【参与话题词(topic)】。
-2. 商单邀约：符合定位的品牌推广，包含具体的【商品名】和【酬金(纯数字)】。
-3. 公关事件：戏剧性突发事件。
-严禁Emoji。必须严格输出以下 JSON 格式：
-{"activity": {"title": "活动标题", "desc": "描述", "topic": "话题词(不要带#)"}, "commercial": {"title": "商单标题", "desc": "描述", "product": "商品名称", "payout": 5000}, "pr": {"title": "事件标题", "desc": "描述"}}`;
+                // 🌟 引入剧本杀级别的公关设定：隐藏真相 + 指定攻击对象
+                const task = `你是后台引擎。基于账号等级[${lv.name} ${lv.rank}]，定位[${acc.positioning}]。
+生成：1. 平台活动 2. 商单邀约 3. 公关事件。
+【公关危机强烈要求】：必须非常抓马、搞笑、乌龙或离谱绯闻！
+重点：必须拆分为【表面黑料(desc)】和【乌龙真相(truth)】！并指定黑料的【攻击目标(target)】（必须严格输出 "user" 或 "character" 或 "both" 之一，代表黑料是针对用户、伴侣还是俩人）。
+严禁Emoji。严格输出 JSON：
+{"activity": {"title": "标题", "desc": "描述", "topic": "话题词(不带#)"}, "commercial": {"title": "标题", "desc": "描述", "product": "商品名", "payout": 5000}, "pr": {"title": "标题(表面黑料)", "desc": "表面黑料具体描述", "truth": "不为人知的搞笑/乌龙真相", "target": "user/character/both", "stakeholder": "狗仔/黑粉网名"}}`;
                 const char = store.contacts.find(c => c.id === acc.charId);
                 const promptStr = await buildBloggerPrompt(acc, char, null, store.personas[0], { task });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
@@ -517,6 +659,7 @@ ${chat.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                 let text = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 let parsed = JSON.parse(text.match(/\{[\s\S]*\}/)[0]);
                 parsed.commercial.status = 'pending';
+                if(parsed.pr) parsed.pr.status = 'active'; 
                 acc.studioData = parsed;
                 if (window.actions.saveStore) window.actions.saveStore();
             } catch (e) { console.error(e); window.actions.showToast('网络波动，获取失败'); } finally { state.isGeneratingStudio = false; window.render(); }
@@ -528,7 +671,7 @@ export function renderBloggerApp(store) {
     const state = window.bloggerState;
     store.syncAccounts = store.syncAccounts || [];
     const accounts = store.syncAccounts;
-    const my = (store.personas && store.personas.length > 0) ? store.personas[0] : { name: '我', avatar: '' };
+    // 🌟 删除了原本写死 my 变量的代码
 
     if (state.view === 'dashboard') {
         const acc = accounts.find(a => a.id === state.currentAccountId);
@@ -543,6 +686,13 @@ export function renderBloggerApp(store) {
         
         const targetChar = store.contacts.find(c => c.id === acc.charId);
         const partnerAvatar = targetChar ? targetChar.avatar : acc.avatar;
+        
+        // 🌟 核心修复：顺藤摸瓜，精确找到当前聊天绑定的身份和自定义头像！
+        const chat = store.chats?.find(c => c.charId === acc.charId);
+        const boundPId = chat?.isGroup ? chat.boundPersonaId : (targetChar?.boundPersonaId || store.personas?.[0]?.id);
+        const boundPersona = store.personas?.find(p => p.id === boundPId) || store.personas?.[0] || { name: '我', avatar: '' };
+        const myAvatar = chat?.myAvatar || boundPersona.avatar;
+
         const lv = bloggerUtils.calcLevel(acc.followers);
         const inc = bloggerUtils.calcIncome(acc);
 
@@ -567,7 +717,7 @@ export function renderBloggerApp(store) {
                             <div class="flex-1 bg-[#1a1a1a] text-white pt-2 pb-3 pl-6 pr-4 flex flex-col justify-between min-h-[110px] shadow-lg rounded-r-[4px]">
                                 <div class="flex justify-between items-start">
                                     <div class="flex -space-x-4 relative -mt-8">
-                                        <img src="${my.avatar}" class="w-16 h-16 rounded-full border-[3px] border-[#1a1a1a] object-cover filter grayscale-[10%] shadow-md" />
+                                        <img src="${myAvatar}" class="w-16 h-16 rounded-full border-[3px] border-[#1a1a1a] object-cover filter grayscale-[10%] shadow-md" />
                                         <img src="${partnerAvatar}" class="w-16 h-16 rounded-full border-[3px] border-[#1a1a1a] object-cover filter grayscale-[10%] shadow-md" />
                                     </div>
                                     <div class="flex space-x-4 text-right pt-2">
@@ -695,9 +845,30 @@ export function renderBloggerApp(store) {
                                             </div>
                                         </div>
 
-                                        <div class="bg-[#F9F7EF] p-5 shadow-sm border border-gray-100 flex flex-col">
-                                            <div class="flex items-center mb-3 border-b border-gray-200 pb-2"><i data-lucide="zap" class="w-4 h-4 mr-2 text-gray-800"></i><span class="text-[14px] font-black uppercase tracking-widest font-serif text-gray-900">${acc.studioData?.pr?.title || 'PR Drama'}</span></div>
-                                            <p class="text-[11px] text-gray-700 leading-relaxed font-serif mt-auto">${acc.studioData?.pr?.desc || '暂无描述'}</p>
+                                        <div class="bg-[#F9F7EF] p-5 shadow-sm border border-gray-100 flex flex-col relative">
+                                            <div class="flex items-center justify-between mb-1 pb-1 border-b border-gray-200">
+                                                <div class="flex items-center"><i data-lucide="zap" class="w-4 h-4 mr-2 ${acc.studioData?.pr?.status === 'active' ? 'text-rose-500 animate-pulse' : 'text-gray-800'}"></i><span class="text-[14px] font-black uppercase tracking-widest font-serif text-gray-900">${acc.studioData?.pr?.title || 'PR Drama'}</span></div>
+                                                <div class="flex items-center">
+                                                    ${acc.studioData?.pr?.status === 'active' ? `<i data-lucide="share" class="w-4 h-4 text-blue-500 cursor-pointer active:scale-90 mr-1 hover:opacity-80" onclick="window.bloggerActions.forwardPR()"></i>` : `<span class="text-[10px] font-bold text-gray-400 font-serif uppercase tracking-widest">Resolved</span>`}
+                                                </div>
+                                            </div>
+                                            ${acc.studioData?.pr?.status === 'active' ? `<div class="mb-3 mt-2"><span class="text-[9px] font-bold bg-rose-50 text-rose-500 px-1.5 py-0.5 rounded-sm font-serif uppercase tracking-widest animate-pulse border border-rose-100">Debuff Active</span></div>` : ''}
+                                            
+                                            <p class="text-[11px] text-gray-700 leading-relaxed font-serif ${acc.studioData?.pr?.status === 'active' ? 'mb-4' : 'mt-auto'}">${acc.studioData?.pr?.desc || '暂无描述'}</p>
+                                            
+                                            ${acc.studioData?.pr?.status === 'active' ? `
+                                                <div class="flex flex-col space-y-2 mt-auto border-t border-gray-200 pt-3">
+                                                    <span class="text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-1">Select Response:</span>
+                                                    <div class="grid grid-cols-2 gap-2">
+                                                        <button class="bg-white border border-gray-200 text-gray-700 text-[10px] py-1.5 font-bold uppercase tracking-wider hover:bg-gray-50 active:scale-95 transition-all rounded-sm shadow-sm" onclick="window.bloggerActions.handlePR('ignore')">冷处理</button>
+                                                        <button class="bg-[#1a1a1a] text-white text-[10px] py-1.5 font-bold uppercase tracking-wider active:scale-95 transition-all rounded-sm shadow-md" onclick="window.bloggerActions.handlePR('post')">发文澄清</button>
+                                                        <button class="bg-blue-50 text-blue-600 text-[10px] py-1.5 font-bold uppercase tracking-wider active:scale-95 transition-all border border-blue-200 rounded-sm" onclick="window.bloggerActions.handlePR('message')">私下交涉</button>
+                                                        <button class="bg-rose-50 text-rose-600 text-[10px] py-1.5 font-bold uppercase tracking-wider active:scale-95 transition-all border border-rose-200 rounded-sm" onclick="window.bloggerActions.handlePR('live')">开播回应</button>
+                                                    </div>
+                                                </div>
+                                            ` : acc.studioData?.pr?.result ? `
+                                                <div class="mt-3 p-2 bg-white/60 border-l-[3px] border-gray-400 text-[10px] text-gray-600 font-serif leading-relaxed">${acc.studioData.pr.result}</div>
+                                            ` : ''}
                                         </div>
                                     </div>
                                 `}
@@ -805,7 +976,9 @@ export function renderBloggerApp(store) {
                         <div class="pt-8 pb-3 px-5 flex items-center justify-between border-b border-gray-200 shrink-0 bg-white">
                             <div class="w-10 flex items-center cursor-pointer active:opacity-50 text-gray-900" onclick="window.bloggerActions.closeInboxChat()"><i data-lucide="chevron-left" class="w-6 h-6 -ml-2"></i></div>
                             <div class="font-black text-gray-900 text-[16px] font-serif">${(acc.inbox||[]).find(x=>x.id===state.inboxChatId)?.author}</div>
-                            <div class="w-10"></div>
+                            <div class="w-12 flex justify-end">
+                                ${(acc.inbox||[]).find(x=>x.id===state.inboxChatId)?.isPR ? `<span class="text-[10px] font-bold text-rose-500 cursor-pointer border border-rose-500 px-1.5 py-0.5 rounded-sm active:bg-rose-50" onclick="window.bloggerActions.letPartnerHandleMsg('${state.inboxChatId}')">让他来</span>` : ''}
+                            </div>
                         </div>
                         <div class="flex-1 overflow-y-auto p-5 space-y-4">
                             ${(acc.inbox||[]).find(x=>x.id===state.inboxChatId)?.messages.map(m => `
@@ -817,8 +990,17 @@ export function renderBloggerApp(store) {
                             ${(acc.inbox||[]).find(x=>x.id===state.inboxChatId)?.isWaitingReply ? `
                                 <div class="flex flex-col items-start w-full animate-in fade-in duration-200">
                                     <span class="text-[9px] text-gray-400 mb-1 font-serif">${(acc.inbox||[]).find(x=>x.id===state.inboxChatId)?.author}</span>
-                                    <div class="bg-white border border-gray-200 text-gray-400 p-3 max-w-[80%] shadow-sm text-[12px] flex items-center font-serif"><i data-lucide="loader" class="w-3 h-3 mr-1.5 animate-spin"></i>正在输入...</div>
+                                    <div class="bg-white border border-gray-200 text-gray-400 p-3 max-w-[80%] shadow-sm text-[12px] flex items-center font-serif"><i data-lucide="loader" class="w-3 h-3 mr-1.5 animate-spin"></i>对方正在输入...</div>
                                 </div>
+                            ` : ''}
+                            ${(acc.inbox||[]).find(x=>x.id===state.inboxChatId)?.isPartnerTyping ? `
+                                <div class="flex flex-col items-end w-full animate-in fade-in duration-200">
+                                    <span class="text-[9px] text-gray-400 mb-1 font-serif">伴侣代打中</span>
+                                    <div class="bg-[#1a1a1a] text-white p-3 max-w-[80%] shadow-sm text-[12px] flex items-center font-serif"><i data-lucide="loader" class="w-3 h-3 mr-1.5 animate-spin text-white"></i>正在激烈交涉...</div>
+                                </div>
+                            ` : ''}
+                            ${(acc.inbox||[]).find(x=>x.id===state.inboxChatId)?.negotiationResult ? `
+                                <div class="mt-6 p-3 bg-gray-100 border border-gray-200 text-[11px] text-center text-gray-600 font-bold font-serif rounded-sm shadow-inner">${(acc.inbox||[]).find(x=>x.id===state.inboxChatId).negotiationResult}</div>
                             ` : ''}
                         </div>
                         <div class="p-3 bg-white border-t border-gray-200 flex items-center shrink-0">
@@ -876,7 +1058,7 @@ export function renderBloggerApp(store) {
                                 </div>
                             `).join('')}
                         </div>
-                        <div class="flex justify-between items-center border-t border-gray-100 pt-4 pb-safe mt-auto"><div class="flex space-x-6"><div class="flex items-center text-[13px] font-bold text-gray-600 cursor-pointer active:scale-95" onclick="window.bloggerActions.addTopic()"><i data-lucide="hash" class="w-4 h-4 mr-1"></i>话题</div><div class="flex items-center text-[13px] font-bold ${state.postData.showcaseProduct ? 'text-orange-500' : 'text-gray-600'} cursor-pointer active:scale-95" onclick="window.bloggerActions.openProductSelector()"><i data-lucide="shopping-bag" class="w-4 h-4 mr-1 ${state.postData.showcaseProduct ? 'fill-current' : ''}"></i>${state.postData.showcaseProduct ? '已挂载' : '橱窗'}</div></div><button class="bg-[#1a1a1a] text-white px-6 py-2.5 rounded-full text-[13px] font-bold tracking-widest active:scale-95 font-serif shadow-md flex items-center" onclick="window.bloggerActions.publishPost()">发布 <i data-lucide="send" class="w-3.5 h-3.5 ml-1.5"></i></button></div></div>
+                        <div class="flex justify-between items-center border-t border-gray-100 pt-4 pb-safe mt-auto"><div class="flex space-x-6"><div class="flex items-center text-[13px] font-bold text-gray-600 cursor-pointer active:scale-95" onclick="window.bloggerActions.addTopic()"><i data-lucide="hash" class="w-4 h-4 mr-1"></i>话题</div><div class="flex items-center text-[13px] font-bold ${state.postData.showcaseProduct ? 'text-orange-500' : 'text-gray-600'} cursor-pointer active:scale-95" onclick="window.bloggerActions.openProductSelector()"><i data-lucide="shopping-bag" class="w-4 h-4 mr-1 ${state.postData.showcaseProduct ? 'fill-current' : ''}"></i>${state.postData.showcaseProduct ? '已挂载' : '橱窗'}</div></div><button class="bg-[#1a1a1a] text-white px-6 py-2.5 rounded-full text-[13px] font-bold tracking-widest active:scale-95 font-serif shadow-md flex items-center" onclick="window.bloggerActions.publishPost()">${state.isPublishing ? '<i data-lucide="loader" class="w-4 h-4 animate-spin"></i>' : '发布 <i data-lucide="send" class="w-3.5 h-3.5 ml-1.5"></i>'}</button></div></div>
                     </div>
                 ` : ''}
             </div>

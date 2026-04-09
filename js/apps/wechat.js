@@ -4379,6 +4379,25 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
                 </div>
             </div>
             `;
+      // 👇 🌟 新增：公关危机转发预警卡片
+        } else if (msg.msgType === 'pr_forward_card') {
+            maxWidthClass = 'max-w-[260px]';
+            bubbleClass = 'bg-transparent shadow-none p-0 m-0 border-0'; 
+            bubbleStyle = ''; 
+            const titleMatch = msg.text.match(/标题：(.*)/);
+            const title = titleMatch ? titleMatch[1] : '突发危机事件';
+            contentHtml = `
+            <div class="w-[240px] bg-[#fcfcfc] rounded-[12px] border border-rose-200 p-6 shadow-sm select-none flex flex-col items-center justify-center relative overflow-hidden">
+                <div class="absolute top-0 left-0 w-full h-[3px] bg-rose-500"></div>
+                <i data-lucide="alert-triangle" class="w-7 h-7 text-rose-500 mb-3 opacity-90 animate-pulse"></i>
+                <span class="text-[16px] font-black tracking-[0.2em] leading-snug text-center font-serif text-gray-900 mb-1 uppercase">PR Alert</span>
+                <span class="text-[9px] text-rose-400 tracking-[0.2em] uppercase mb-5">Crisis Management</span>
+                <div class="text-[12px] font-bold text-gray-600 text-center leading-relaxed font-serif w-full">
+                    <span class="text-rose-600 border-b border-rose-200 pb-0.5 px-1 block truncate">${title}</span>
+                    <span class="text-[11px] opacity-80 mt-3 block font-sans tracking-wide text-gray-500">⚠️ 请尽快商议公关对策</span>
+                </div>
+            </div>
+            `;
       } else if (msg.msgType === 'invite_card') {
             // 🌟 完美融入架构：利用底层气泡包装器，只需指定宽度和透明底色！头像和时间会自动对齐！
             maxWidthClass = 'max-w-[240px]';
