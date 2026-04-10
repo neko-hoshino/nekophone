@@ -5,26 +5,42 @@ import { store } from '../store.js';
 if (!window.homeState) window.homeState = { 
     showAddAudioModal: false, showPlaylistModal: false, showTodoModal: false, showPeriodModal: false, 
     showCompanionModal: false, tempLyrics: null, isGeneratingReaction: false, isGeneratingFortune: false,
-    lastScrollLeft: 0 // 🌟 新增：用来记住你滑到了第几页！
+    lastScrollLeft: 0, 
+    isRestoringScroll: false // 🌟 新增：结界锁，防止手机端恶意抢占滑动位置
 };
 
-// 全局滚动歌词引擎 (防错版)
+// 🌟 升级版全局滚动歌词引擎 (兼容 LRC 精准时间轴 与 TXT 黑魔法等比估算)
 if (!window.lyricTimerInt) {
     window.lyricTimerInt = setInterval(() => {
         const el = document.getElementById('music-lyric-line');
         if(el && window.audioState?.isPlaying && window.audioPlayer?.audio) {
             const ct = window.audioPlayer.audio.currentTime;
+            const duration = window.audioPlayer.audio.duration || 1;
             const track = window.audioPlaylist?.[window.audioState.currentIndex];
+            
             if(track && track.lyrics && Array.isArray(track.lyrics) && track.lyrics.length > 0) {
                 let active = '🎵';
-                for(let i=0; i<track.lyrics.length; i++) {
-                    if(ct >= track.lyrics[i].time) active = track.lyrics[i].text;
-                    else break;
+                
+                // 判断是精装 LRC 还是纯文本 TXT
+                if (typeof track.lyrics[0] === 'object') {
+                    // LRC 精准模式
+                    for(let i=0; i<track.lyrics.length; i++) {
+                        if(ct >= track.lyrics[i].time) active = track.lyrics[i].text;
+                        else break;
+                    }
+                } else {
+                    // TXT 黑魔法等比模式 (按歌曲进度百分比算行数)
+                    const progress = ct / duration;
+                    const idx = Math.min(Math.floor(progress * track.lyrics.length), track.lyrics.length - 1);
+                    active = track.lyrics[idx];
                 }
+
                 if(el.innerText !== active && active) {
                     el.style.opacity = '0';
                     setTimeout(() => { el.innerText = active; el.style.opacity = '1'; }, 150);
                 }
+            } else {
+                if(el.innerText !== '🎵') el.innerText = '🎵';
             }
         }
     }, 200);
@@ -32,15 +48,11 @@ if (!window.lyricTimerInt) {
 
 if (!window.homeActions) {
   window.homeActions = {
-    // 🌟 核心：无感刷新引擎，彻底治好切页多动症！
+    // 无感刷新引擎
     doRender: () => {
         const el = document.getElementById('home-swiper-scroll');
-        if (el) window.homeState.lastScrollLeft = el.scrollLeft;
+        if (el && !window.homeState.isRestoringScroll) window.homeState.lastScrollLeft = el.scrollLeft;
         window.render();
-        setTimeout(() => {
-            const newEl = document.getElementById('home-swiper-scroll');
-            if (newEl) newEl.scrollLeft = window.homeState.lastScrollLeft || 0;
-        }, 10);
     },
 
     updateAvatar: (e) => {
@@ -109,7 +121,7 @@ if (!window.homeActions) {
     openPlaylist: () => { window.homeState.showPlaylistModal = true; window.homeActions.doRender(); },
     closePlaylist: () => { window.homeState.showPlaylistModal = false; window.homeActions.doRender(); },
 
-    // 🌟 修复版歌词解析：完美兼容 txt 纯文本！
+    // 🌟 全能歌词解析器：没有时间轴就强行转成纯文本数组
     uploadLyricFile: (e) => {
         const file = e.target.files[0]; if(!file) return;
         const reader = new FileReader();
@@ -131,7 +143,9 @@ if (!window.homeActions) {
             if (hasTimestamp) {
                 window.homeState.tempLyrics = result;
             } else {
-                window.homeState.tempLyrics = rawText.trim(); // 纯文本直接塞进去给 AI 看
+                // 如果找不到时间轴，判定为 TXT，去掉空行后保存为数组
+                const pureTextLines = lines.map(l => l.trim()).filter(l => l !== '');
+                window.homeState.tempLyrics = pureTextLines.length > 0 ? pureTextLines : null;
             }
             window.actions?.showToast(window.homeState.tempLyrics ? '歌词解析成功！' : '解析为空');
             window.homeActions.doRender();
@@ -150,7 +164,7 @@ if (!window.homeActions) {
 
         store.customAudio = store.customAudio || []; 
         store.customAudio.push({ name: name, artist: artist, src: url, lyrics: window.homeState.tempLyrics });
-        if (window.actions.saveStore) window.actions.saveStore(); // 🌟 强制存档
+        if (window.actions.saveStore) window.actions.saveStore(); // 强制存档
         
         window.actions.showToast('网络音频添加成功！');
         if (window.updateAudioPlaylist) window.updateAudioPlaylist();
@@ -171,7 +185,7 @@ if (!window.homeActions) {
             if (!resultStr) return window.actions.showToast('读取失败');
             store.customAudio = store.customAudio || [];
             store.customAudio.push({ name: file.name.replace(/\.[^/.]+$/, ""), artist: '本地导入', src: resultStr, lyrics: window.homeState.tempLyrics });
-            if (window.actions.saveStore) window.actions.saveStore(); // 🌟 强制存档
+            if (window.actions.saveStore) window.actions.saveStore(); // 强制存档
             
             window.actions.showToast('本地音乐导入成功！');
             if (window.updateAudioPlaylist) window.updateAudioPlaylist(); 
@@ -193,7 +207,7 @@ if (!window.homeActions) {
         e.stopPropagation();
         if (!confirm('确定删除这首音乐吗？')) return;
         store.customAudio.splice(idx, 1);
-        if (window.actions.saveStore) window.actions.saveStore(); // 🌟 强制存档
+        if (window.actions.saveStore) window.actions.saveStore(); // 强制存档
         if (window.updateAudioPlaylist) window.updateAudioPlaylist();
         
         if (window.audioPlaylist.length === 0) { window.audioState.isPlaying = false; window.audioPlayer.loadAndPlay(); } 
@@ -211,14 +225,14 @@ if (!window.homeActions) {
         window.homeActions.doRender();
     },
     
-    // 🌟 究极神级 Prompt 听歌感想引擎
+    // 🌟 神级听歌感想 Prompt (人设 + 记忆 + 世界观 + 歌词 全方位轰炸)
     generateMusicReaction: async () => {
         if (!store.apiConfig?.apiKey || !store.musicCompanionId || !window.audioPlaylist || window.audioPlaylist.length === 0) return;
         const track = window.audioPlaylist[window.audioState.currentIndex];
         const char = store.contacts.find(c => c.id === store.musicCompanionId);
         if (!char) return;
 
-        // 精准组装你们的羁绊记忆和人设
+        // 提取羁绊人设
         const chat = store.chats?.find(ch => ch.charId === char.id);
         const boundPId = chat?.boundPersonaId || char?.boundPersonaId || store.personas[0].id;
         const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
@@ -230,14 +244,12 @@ if (!window.homeActions) {
         const coreMem = (store.memories || []).filter(m => m.charId === char.id && m.type === 'core').map(m=>m.content).join('；');
         const coreMemStr = coreMem ? `\n\n【我们之间的核心记忆】\n${coreMem}` : '';
         
-        // 智能组装歌词
+        // 智能挂载歌词
         let lyricsStr = '';
-        if (track.lyrics) {
-            if (Array.isArray(track.lyrics)) {
-                lyricsStr = `\n\n【当前播放的歌词】\n` + track.lyrics.slice(0, 15).map(l => l.text).join('\n') + `...`;
-            } else if (typeof track.lyrics === 'string') {
-                lyricsStr = `\n\n【当前播放的歌词】\n` + track.lyrics.substring(0, 600) + `...`;
-            }
+        if (track.lyrics && Array.isArray(track.lyrics)) {
+            // LRC 或 TXT 数组
+            const rawLines = track.lyrics.map(l => typeof l === 'object' ? l.text : l).slice(0, 20); // 取前20句防超长
+            lyricsStr = `\n\n【当前播放的歌词】\n` + rawLines.join('\n') + `...`;
         }
         
         window.homeState.isGeneratingReaction = true; window.homeActions.doRender();
@@ -373,12 +385,15 @@ export function renderHomeApp(store) {
       }
   }, 1500);
 
+  // 初始化小圆点状态（防止刷新时小点闪烁）
+  const initPageIdx = window.homeState?.lastScrollLeft > 50 ? 1 : 0;
+
   return `
     <div class="w-full h-full relative flex flex-col overflow-hidden animate-in fade-in duration-300" style="${bgStyle}">
       <input type="file" id="home-avatar-upload" accept="image/*" class="hidden" onchange="window.homeActions.updateAvatar(event)" />
       <input type="file" id="home-polaroid-upload" accept="image/*" class="hidden" onchange="window.homeActions.uploadPolaroid(event)" />
 
-      <div id="home-swiper-scroll" class="flex-1 w-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar" onscroll="window.homeActions.updateDots(event)">
+      <div id="home-swiper-scroll" class="flex-1 w-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar" onscroll="if(!window.homeState.isRestoringScroll) window.homeActions.updateDots(event)">
         
         <div class="w-full h-full flex-shrink-0 snap-center flex flex-col pt-12 px-5 pb-4 overflow-y-auto hide-scrollbar relative">
           
@@ -529,10 +544,9 @@ export function renderHomeApp(store) {
                               const loopIcon = loopMode === 'list' ? 'repeat' : 'repeat-1';
                               const compChar = store.musicCompanionId ? store.contacts.find(c=>c.id===store.musicCompanionId) : null;
                               
-                              // 判断是否有文本歌词
                               const currentTrack = hasTrack ? window.audioPlaylist[window.audioState.currentIndex] : null;
                               const hasLyrics = currentTrack?.lyrics;
-                              const isRawText = hasLyrics && !Array.isArray(hasLyrics);
+                              const isRawText = hasLyrics && !Array.isArray(hasLyrics) || (Array.isArray(hasLyrics) && typeof hasLyrics[0] === 'string');
                               const lyricPlaceholder = isRawText ? '🎵 已挂载纯文本歌词' : (hasLyrics ? '🎵' : '暂无歌词数据');
 
                               return `
@@ -645,8 +659,8 @@ export function renderHomeApp(store) {
       </div> 
       
       <div class="flex justify-center items-center space-x-2 mb-2 pb-4 mt-2 ${isDark ? 'text-white' : 'text-gray-800'} shrink-0 z-20 pointer-events-none">
-         <div id="home-dot-0" class="w-1.5 h-1.5 rounded-full bg-current transition-opacity duration-300" style="opacity: 1;"></div>
-         <div id="home-dot-1" class="w-1.5 h-1.5 rounded-full bg-current transition-opacity duration-300" style="opacity: 0.3;"></div>
+         <div id="home-dot-0" class="w-1.5 h-1.5 rounded-full bg-current transition-opacity duration-300" style="opacity: ${initPageIdx === 0 ? '1' : '0.3'};"></div>
+         <div id="home-dot-1" class="w-1.5 h-1.5 rounded-full bg-current transition-opacity duration-300" style="opacity: ${initPageIdx === 1 ? '1' : '0.3'};"></div>
       </div>
 
       <div class="mx-4 mb-6 px-3 py-3 ${isDark?'bg-black/10 border-black/10':'bg-white/10 border-white/10'} backdrop-blur-xl rounded-[28px] flex justify-between items-center shadow-sm border shrink-0 z-20">
@@ -725,7 +739,7 @@ export function renderHomeApp(store) {
                             <div class="flex flex-col flex-1 overflow-hidden pr-3">
                                 <div class="flex items-center space-x-2">
                                     <span class="text-[14px] font-bold ${window.audioState.currentIndex === idx ? 'text-gray-900' : 'text-gray-600'} truncate">${track.name}</span>
-                                    ${track.lyrics ? `<span class="bg-blue-100 text-blue-500 text-[8px] px-1 rounded-sm border border-blue-200">${Array.isArray(track.lyrics) ? 'LRC' : 'TXT'}</span>` : ''}
+                                    ${track.lyrics ? `<span class="bg-blue-100 text-blue-500 text-[8px] px-1 rounded-sm border border-blue-200">${Array.isArray(track.lyrics) && typeof track.lyrics[0] === 'object' ? 'LRC' : 'TXT'}</span>` : ''}
                                 </div>
                                 <span class="text-[11px] text-gray-400 mt-0.5 truncate">${track.artist || '未知歌手'}</span>
                             </div>
@@ -794,7 +808,21 @@ export function renderHomeApp(store) {
         </div>
         ` : ''}
 
-        <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" style="display:none;" onload="const el = document.getElementById('home-swiper-scroll'); if(el && window.homeState && window.homeState.lastScrollLeft) { el.scrollLeft = window.homeState.lastScrollLeft; } this.remove();" />
+        <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" style="display:none;" onload="
+            window.homeState.isRestoringScroll = true;
+            const el = document.getElementById('home-swiper-scroll');
+            if (el && window.homeState && window.homeState.lastScrollLeft > 10) {
+                el.style.scrollSnapType = 'none';
+                el.scrollLeft = window.homeState.lastScrollLeft;
+                setTimeout(() => {
+                    el.style.scrollSnapType = 'x mandatory';
+                    window.homeState.isRestoringScroll = false;
+                }, 150);
+            } else {
+                window.homeState.isRestoringScroll = false;
+            }
+            this.remove();
+        " />
     </div>
   `;
 }
