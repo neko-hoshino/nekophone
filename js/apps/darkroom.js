@@ -1,21 +1,18 @@
 // js/apps/darkroom.js
 import { store } from '../store.js';
 
-// 初始化数据存储
-if (!store.darkroomPrefs) store.darkroomPrefs = {}; // 记录角色对应的属性
-if (!store.darkroomChats) store.darkroomChats = {}; // 记录小黑屋专属聊天记录
+if (!store.darkroomPrefs) store.darkroomPrefs = {}; 
+if (!store.darkroomChats) store.darkroomChats = {}; 
 
-// 初始化临时状态
 if (!window.darkroomState) {
     window.darkroomState = {
-        view: 'char_select', // 'char_select' | 'role_select' | 'play_select' | 'chat'
+        view: 'char_select', 
         selectedCharId: null,
         selectedTags: [],
         isGenerating: false
     };
 }
 
-// 初始化动作
 if (!window.darkroomActions) {
     window.darkroomActions = {
         closeApp: () => {
@@ -33,7 +30,6 @@ if (!window.darkroomActions) {
         selectChar: (id) => {
             window.darkroomState.selectedCharId = id;
             window.darkroomState.selectedTags = [];
-            // 如果之前选过属性了，直接跳到玩法选择
             if (store.darkroomPrefs[id]?.role) {
                 window.darkroomState.view = 'play_select';
             } else {
@@ -51,13 +47,83 @@ if (!window.darkroomActions) {
         },
         toggleTag: (tag) => {
             const tags = window.darkroomState.selectedTags;
-            if (tags.includes(tag)) {
-                window.darkroomState.selectedTags = tags.filter(t => t !== tag);
-            } else {
-                window.darkroomState.selectedTags.push(tag);
-            }
+            if (tags.includes(tag)) window.darkroomState.selectedTags = tags.filter(t => t !== tag);
+            else window.darkroomState.selectedTags.push(tag);
             window.render();
         },
+
+        // 🌟 提取 30 回合精准上下文
+        getHistoryContext: (charId) => {
+            const msgs = store.darkroomChats[charId] || [];
+            if (msgs.length === 0) return { historyStr: '', recentText: '' };
+
+            let turnsCount = 0; let lastSender = null; let startIndex = 0;
+            const limit = 30; // 严格 30 回合
+            for (let i = msgs.length - 1; i >= 0; i--) {
+                const currentSender = msgs[i].isMe ? 'user' : 'char';
+                if (currentSender !== lastSender) { 
+                    if (lastSender !== null) turnsCount += 0.5; 
+                    lastSender = currentSender; 
+                }
+                if (turnsCount >= limit) { startIndex = i + 1; break; }
+            }
+            const recentMsgs = msgs.slice(startIndex);
+            const historyStr = recentMsgs.map(m => m.msgType === 'system' ? m.text : `[${m.sender}]: ${m.text}`).join('\n');
+            const recentText = recentMsgs.slice(-5).map(m => m.text).join(' '); // 取最近5条触发碎片记忆
+
+            return { historyStr, recentText };
+        },
+
+        // 🌟 核心防 OOC + 记忆扫描引擎
+        buildDarkroomPrompt: (charId, task, recentText = '', historyStr = '') => {
+            const char = store.contacts.find(c => c.id === charId) || store.contacts[0];
+            if (!char) return task; 
+            
+            const chat = store.chats?.find(ch => ch.charId === char.id);
+            const boundPId = chat?.boundPersonaId || char?.boundPersonaId || store.personas[0].id;
+            const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+
+            const globalP = store.globalPrompt ? `\n【通用用户人设】\n${store.globalPrompt}` : '';
+            const boundPrompt = boundP.prompt ? `\n【当前绑定身份】\n${boundP.prompt}` : '';
+            const basePrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n\n【用户】\n当前化名：${boundP.name}${globalP}${boundPrompt}`;
+
+            const coreMem = (store.memories || []).filter(m => m.charId === char.id && m.type === 'core').map(m=>m.content).join('；');
+            const coreMemStr = coreMem ? `\n\n【核心记忆】\n${coreMem}` : '';
+
+            // 🌟 动态碎片记忆扫描
+            let fragMemStr = '';
+            if (recentText) {
+                const frags = (store.memories || []).filter(m => m.charId === charId && m.type === 'fragment').filter(m => {
+                    const kws = (m.keywords || '').split(',').map(k=>k.trim()).filter(k=>k);
+                    return kws.some(k => recentText.includes(k));
+                }).map(m=>m.content).join('；');
+                if (frags) fragMemStr = `\n\n【触发的回忆片段】\n${frags}`;
+            }
+
+            let frontWb = [], middleWb = [], backWb = [];
+            (store.worldbooks || []).forEach(wbItem => {
+                if (!wbItem.enabled) return;
+                let shouldInject = false;
+                if (wbItem.type === 'global') shouldInject = true;
+                else if (wbItem.type === 'local' && char.mountedWorldbooks && char.mountedWorldbooks.includes(wbItem.id)) {
+                    shouldInject = true;
+                }
+                if (shouldInject) {
+                    const entryStr = `【${wbItem.title}】：${wbItem.content}`;
+                    if (wbItem.position === 'front') frontWb.push(entryStr);
+                    else if (wbItem.position === 'back') backWb.push(entryStr);
+                    else middleWb.push(entryStr);
+                }
+            });
+
+            const frontStr = frontWb.length > 0 ? `\n\n[前置世界观设定]\n${frontWb.join('\n')}` : '';
+            const middleStr = middleWb.length > 0 ? `\n\n[当前环境/场景设定]\n${middleWb.join('\n')}` : '';
+            const backStr = backWb.length > 0 ? `\n\n[最新/最高优先级世界书指令]\n${backWb.join('\n')}` : '';
+            const historyPrompt = historyStr ? `\n\n【前文剧情上下文】\n${historyStr}` : '';
+
+            return `${basePrompt}${coreMemStr}${frontStr}\n${middleStr}${fragMemStr}${backStr}${historyPrompt}\n\n【系统任务(沉浸式调教/小黑屋)】\n${task}`;
+        },
+
         enterDarkroom: async () => {
             const state = window.darkroomState;
             if (state.selectedTags.length === 0) return window.actions?.showToast('请至少选择一种今天的玩法');
@@ -65,25 +131,22 @@ if (!window.darkroomActions) {
 
             const charId = state.selectedCharId;
             const char = store.contacts.find(c => c.id === charId);
-            const myRole = store.darkroomPrefs[charId].role; // 用户的属性
-            const chat = store.chats?.find(ch => ch.charId === charId);
-            const boundPId = chat?.boundPersonaId || char?.boundPersonaId || store.personas[0].id;
-            const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
-
+            const myRole = store.darkroomPrefs[charId].role; 
+            
             if (!store.darkroomChats[charId]) store.darkroomChats[charId] = [];
 
             state.isGenerating = true;
             window.render();
 
             try {
-                // 让 AI 生成极具张力的开场白
                 const task = `你现在是【${char.name}】，我们正在进入小黑屋进行 BDSM / 沉浸式调教互动。
-我的属性是：${myRole} (Dom/Sub/Switch)，你的属性是与我相对或契合的。
+我的属性是：${myRole}。你的属性是与我相对或契合的。
 今天我们选择的玩法包含：${state.selectedTags.join(', ')}。
-请你根据我们的属性关系和选定的玩法，直接生成一段极具张力、画面感和压迫感（或臣服感）的开场动作与对话。
+请你根据上方给定的我们两人的性格底色、核心记忆和世界观设定（绝对不能OOC！），结合选定的玩法，直接生成一段极具张力、画面感和压迫感（或臣服感）的开场动作与对话。
 【格式要求】：直接输出正文。使用『』包裹对话，使用（）包裹内心想法，其余为细致的动作与神态描写。字数200字左右。`;
 
-                const promptStr = await window.buildBloggerPrompt ? await window.buildBloggerPrompt(null, char, chat, boundP, { task }) : `【角色设定】\n${char.prompt}\n\n【任务】\n${task}`;
+                // 首次进入没有历史，但把选择的玩法当做触发词
+                const promptStr = window.darkroomActions.buildDarkroomPrompt(charId, task, state.selectedTags.join(', '), '');
 
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
@@ -91,7 +154,6 @@ if (!window.darkroomActions) {
                 });
                 const text = (await res.json()).choices[0].message.content.trim();
 
-                // 插入系统提示和 AI 开场白
                 store.darkroomChats[charId].push({ id: Date.now(), msgType: 'system', text: `【系统】小黑屋已落锁。今日玩法：${state.selectedTags.join(', ')}` });
                 store.darkroomChats[charId].push({ id: Date.now() + 1, sender: char.name, text: text, isMe: false, timestamp: new Date().getTime() });
                 
@@ -124,13 +186,17 @@ if (!window.darkroomActions) {
             setTimeout(() => { const el = document.getElementById('darkroom-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 50);
 
             try {
-                const history = store.darkroomChats[charId].slice(-10).map(m => m.msgType === 'system' ? m.text : `[${m.sender}]: ${m.text}`).join('\n');
-                const task = `这是我们在小黑屋中的最新互动记录：\n${history}\n请作为【${char.name}】，根据之前的氛围和人设，生成接下来的回应。
+                // 🌟 获取 30 回合上下文和最近文本
+                const { historyStr, recentText } = window.darkroomActions.getHistoryContext(charId);
+
+                const task = `请作为【${char.name}】，根据上方的人设、记忆，以及目前前文的调教氛围，生成接下来的回应。绝对不能OOC！
 【格式要求】：直接输出正文。使用『』包裹对话，使用（）包裹内心想法，其余为动作与神态描写。`;
+
+                const promptStr = window.darkroomActions.buildDarkroomPrompt(charId, task, recentText, historyStr);
 
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: `【角色设定】\n${char.prompt}\n\n${task}` }] })
+                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
                 });
                 const replyText = (await res.json()).choices[0].message.content.trim();
 
@@ -153,13 +219,17 @@ if (!window.darkroomActions) {
             window.render();
 
             try {
-                const history = store.darkroomChats[charId].slice(-10).map(m => m.msgType === 'system' ? m.text : `[${m.sender}]: ${m.text}`).join('\n');
-                const task = `这是我们在小黑屋中的最新互动记录：\n${history}\n请作为【${char.name}】，顺着目前的氛围和动作继续往下描写，推动剧情发展。
+                // 🌟 获取 30 回合上下文和最近文本
+                const { historyStr, recentText } = window.darkroomActions.getHistoryContext(charId);
+
+                const task = `请作为【${char.name}】，顺着目前前文的设定氛围和动作继续往下描写，推动张力发展。绝对不能OOC！
 【格式要求】：直接输出正文。使用『』包裹对话，使用（）包裹内心想法，其余为动作与神态描写。`;
+
+                const promptStr = window.darkroomActions.buildDarkroomPrompt(charId, task, recentText, historyStr);
 
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: `【角色设定】\n${char.prompt}\n\n${task}` }] })
+                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
                 });
                 const replyText = (await res.json()).choices[0].message.content.trim();
 
@@ -179,32 +249,25 @@ if (!window.darkroomActions) {
 
 export function renderDarkroomApp(store) {
     const state = window.darkroomState;
-    const actions = window.darkroomActions;
-
-    // 🌟 全局暗黑主题配置
-    const bgClass = 'bg-[#0f0f11]';
-    const textMain = 'text-gray-200';
-    const accentColor = '#900000'; // 迷离的暗红色
-
-    // 预设 BDSM 玩法 Tags
+    
     const playTags = [
         "视觉剥夺", "捆绑束缚", "温和支配", "严厉惩罚", "语言羞辱", "赞美服从",
         "感官刺激", "冰火交替", "边缘控制", "高潮拒绝", "强迫指令", "宠物扮演",
-        "情境扮演", "玩具放置", "体罚(Spanking)", "滴蜡(Wax)"
+        "情境扮演", "玩具放置", "体罚(Spanking)", "滴蜡(Wax)", "野外露出"
     ];
 
     let contentHtml = '';
 
     if (state.view === 'char_select') {
         contentHtml = `
-            <div class="px-6 pt-6 flex-1 overflow-y-auto hide-scrollbar">
-                <h2 class="text-[24px] font-black font-serif text-white tracking-widest mb-2">Darkroom</h2>
+            <div class="px-6 pt-6 flex-1 overflow-y-auto hide-scrollbar z-10">
+                <h2 class="text-[24px] font-black font-serif text-white tracking-widest mb-2 mt-4">Darkroom</h2>
                 <p class="text-[12px] text-gray-500 mb-8 tracking-widest">请选择你要共度小黑屋时光的伴侣。</p>
                 <div class="grid grid-cols-2 gap-4 pb-20">
                     ${(store.contacts || []).map(c => `
                         <div class="bg-[#1a1a1c] border border-[#2a2a2c] rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer hover:border-[#900000] active:scale-95 transition-all shadow-lg" onclick="window.darkroomActions.selectChar('${c.id}')">
                             <img src="${c.avatar}" class="w-16 h-16 rounded-full object-cover mb-3 border-2 border-[#333] grayscale-[30%]">
-                            <span class="text-[14px] font-bold ${textMain}">${c.name}</span>
+                            <span class="text-[14px] font-bold text-gray-200">${c.name}</span>
                             ${store.darkroomPrefs[c.id]?.role ? `<span class="text-[10px] text-red-900/60 mt-1 font-bold border border-red-900/30 px-2 py-0.5 rounded-full">已设属性</span>` : ''}
                         </div>
                     `).join('')}
@@ -214,7 +277,7 @@ export function renderDarkroomApp(store) {
     } else if (state.view === 'role_select') {
         const char = store.contacts.find(c => c.id === state.selectedCharId);
         contentHtml = `
-            <div class="px-6 pt-6 flex-1 flex flex-col hide-scrollbar relative">
+            <div class="px-6 pt-6 flex-1 flex flex-col hide-scrollbar relative z-10">
                 <i data-lucide="chevron-left" class="absolute top-6 left-4 w-6 h-6 text-gray-400 cursor-pointer active:scale-90" onclick="window.darkroomActions.goBack()"></i>
                 <h2 class="text-[20px] font-black font-serif text-white tracking-widest mt-12 mb-2 text-center">属性确立</h2>
                 <p class="text-[12px] text-gray-500 mb-10 tracking-widest text-center leading-relaxed">在这个绝对私密的空间里，<br/>你希望在 ${char.name} 面前展现怎样的自己？</p>
@@ -238,7 +301,7 @@ export function renderDarkroomApp(store) {
     } else if (state.view === 'play_select') {
         const char = store.contacts.find(c => c.id === state.selectedCharId);
         contentHtml = `
-            <div class="px-6 pt-6 flex-1 flex flex-col overflow-y-auto hide-scrollbar relative pb-24">
+            <div class="px-6 pt-6 flex-1 flex flex-col overflow-y-auto hide-scrollbar relative pb-24 z-10">
                 <i data-lucide="chevron-left" class="absolute top-6 left-4 w-6 h-6 text-gray-400 cursor-pointer active:scale-90" onclick="window.darkroomActions.goBack()"></i>
                 <h2 class="text-[20px] font-black font-serif text-white tracking-widest mt-12 mb-2 text-center">Play Menu</h2>
                 <p class="text-[12px] text-gray-500 mb-8 tracking-widest text-center">今晚，想和 ${char.name} 体验些什么？</p>
@@ -261,13 +324,12 @@ export function renderDarkroomApp(store) {
         const char = store.contacts.find(c => c.id === state.selectedCharId);
         const msgs = store.darkroomChats[state.selectedCharId] || [];
 
-        // 🌟 完美移植并黑化的线下模式引擎
         contentHtml = `
         <div class="absolute inset-0 w-full h-full flex flex-col font-serif z-[60] bg-[#0f0f11]">
             <style>
-                .mc-darkroom-dialogue { color: #a30000; font-family: inherit; } /* 暗红色对话 */
-                .mc-darkroom-thought { color: #6b7280; font-family: inherit; } /* 灰色内心 */
-                .mc-darkroom-desc { color: #d1d5db; font-family: inherit; } /* 浅灰动作 */
+                .mc-darkroom-dialogue { color: #a30000; font-family: inherit; }
+                .mc-darkroom-thought { color: #6b7280; font-family: inherit; } 
+                .mc-darkroom-desc { color: #d1d5db; font-family: inherit; } 
             </style>
 
             <div class="bg-[#151518]/90 backdrop-blur-md pt-10 pb-3 px-4 flex items-center justify-between border-b border-[#222] z-10 shadow-sm shrink-0">
@@ -280,12 +342,12 @@ export function renderDarkroomApp(store) {
                 <div class="w-1/4 flex justify-end"></div>
             </div>
             
-            <div id="darkroom-scroll" class="flex-1 p-5 overflow-y-auto hide-scrollbar flex flex-col pb-6 bg-[#0f0f11]">
+            <div id="darkroom-scroll" class="flex-1 p-5 overflow-y-auto hide-scrollbar flex flex-col pb-6 bg-transparent">
                 ${msgs.map((msg, idx) => {
                     if (msg.msgType === 'system') {
                         return `
                         <div class="flex items-center justify-center py-2 mb-6 mt-4">
-                            <span class="text-[11px] text-gray-500 font-bold tracking-widest bg-[#1a1a1c] border border-[#333] px-5 py-1.5 rounded-full">${msg.text}</span>
+                            <span class="text-[11px] text-gray-500 font-bold tracking-widest bg-[#1a1a1c] border border-[#333] px-5 py-1.5 rounded-full shadow-sm">${msg.text}</span>
                         </div>`;
                     }
 
@@ -331,9 +393,18 @@ export function renderDarkroomApp(store) {
     }
 
     return `
-    <div class="w-full h-full flex flex-col ${bgClass} font-sans relative animate-in fade-in duration-300">
+    <div id="mc-darkroom-screen" class="w-full h-full flex flex-col font-sans relative animate-in fade-in duration-300 z-50">
+        <style>
+            #mc-darkroom-screen {
+                background-color: #0f0f11 !important;
+                background-image: none !important;
+                backdrop-filter: none !important;
+                -webkit-backdrop-filter: none !important;
+            }
+        </style>
+        
         ${state.view !== 'chat' ? `
-            <div class="absolute top-10 right-6 z-50 cursor-pointer active:scale-90" onclick="window.darkroomActions.closeApp()">
+            <div class="absolute top-12 right-6 z-50 cursor-pointer active:scale-90 opacity-70 hover:opacity-100 transition-opacity" onclick="window.darkroomActions.closeApp()">
                 <i data-lucide="x" class="w-6 h-6 text-gray-500"></i>
             </div>
         ` : ''}

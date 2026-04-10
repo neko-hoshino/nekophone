@@ -4,17 +4,18 @@ import { store } from '../store.js';
 // 初始化弹窗与定时器状态
 if (!window.homeState) window.homeState = { 
     showAddAudioModal: false, showPlaylistModal: false, showTodoModal: false, showPeriodModal: false, 
-    showCompanionModal: false, tempLyrics: null, isGeneratingReaction: false, isGeneratingFortune: false 
+    showCompanionModal: false, tempLyrics: null, isGeneratingReaction: false, isGeneratingFortune: false,
+    lastScrollLeft: 0 // 🌟 新增：用来记住你滑到了第几页！
 };
 
-// 🌟 全局滚动歌词引擎
+// 全局滚动歌词引擎 (防错版)
 if (!window.lyricTimerInt) {
     window.lyricTimerInt = setInterval(() => {
         const el = document.getElementById('music-lyric-line');
         if(el && window.audioState?.isPlaying && window.audioPlayer?.audio) {
             const ct = window.audioPlayer.audio.currentTime;
             const track = window.audioPlaylist?.[window.audioState.currentIndex];
-            if(track && track.lyrics && track.lyrics.length > 0) {
+            if(track && track.lyrics && Array.isArray(track.lyrics) && track.lyrics.length > 0) {
                 let active = '🎵';
                 for(let i=0; i<track.lyrics.length; i++) {
                     if(ct >= track.lyrics[i].time) active = track.lyrics[i].text;
@@ -24,8 +25,6 @@ if (!window.lyricTimerInt) {
                     el.style.opacity = '0';
                     setTimeout(() => { el.innerText = active; el.style.opacity = '1'; }, 150);
                 }
-            } else {
-                if(el.innerText !== '🎵') el.innerText = '🎵';
             }
         }
     }, 200);
@@ -33,21 +32,32 @@ if (!window.lyricTimerInt) {
 
 if (!window.homeActions) {
   window.homeActions = {
+    // 🌟 核心：无感刷新引擎，彻底治好切页多动症！
+    doRender: () => {
+        const el = document.getElementById('home-swiper-scroll');
+        if (el) window.homeState.lastScrollLeft = el.scrollLeft;
+        window.render();
+        setTimeout(() => {
+            const newEl = document.getElementById('home-swiper-scroll');
+            if (newEl) newEl.scrollLeft = window.homeState.lastScrollLeft || 0;
+        }, 10);
+    },
+
     updateAvatar: (e) => {
       const file = e.target.files[0]; if(!file) return;
-      window.actions.compressImage(file, (base64) => { store.personas[0].avatar = base64; window.render(); });
+      window.actions.compressImage(file, (base64) => { store.personas[0].avatar = base64; window.homeActions.doRender(); });
       e.target.value = '';
     },
-    updateName: (val) => { store.personas[0].name = val; window.render(); },
+    updateName: (val) => { store.personas[0].name = val; window.homeActions.doRender(); },
     
     uploadPolaroid: (e) => {
         const file = e.target.files[0]; if(!file) return;
-        window.actions.compressImage(file, (base64) => { store.homePolaroidImg = base64; window.render(); });
+        window.actions.compressImage(file, (base64) => { store.homePolaroidImg = base64; window.homeActions.doRender(); });
         e.target.value = '';
     },
 
-    openTodoModal: () => { window.homeState.showTodoModal = true; window.render(); },
-    closeTodoModal: () => { window.homeState.showTodoModal = false; window.render(); },
+    openTodoModal: () => { window.homeState.showTodoModal = true; window.homeActions.doRender(); },
+    closeTodoModal: () => { window.homeState.showTodoModal = false; window.homeActions.doRender(); },
     saveTodo: () => {
         const text = document.getElementById('todo-text-input').value.trim();
         const date = document.getElementById('todo-date-input').value; 
@@ -56,24 +66,27 @@ if (!window.homeActions) {
         if (!store.calendarData.todos) store.calendarData.todos = [];
         store.calendarData.todos.push({ id: Date.now(), text, targetDate: date || new Date().toISOString().split('T')[0] });
         window.homeState.showTodoModal = false;
-        if (window.render) window.render(); 
-        if (window.actions.showToast) window.actions.showToast('✅ 事项已安排');
+        if (window.actions.saveStore) window.actions.saveStore();
+        window.homeActions.doRender(); 
+        window.actions?.showToast('✅ 事项已安排');
     },
     deleteTodo: (id) => {
         if(!store.calendarData || !store.calendarData.todos) return;
         store.calendarData.todos = store.calendarData.todos.filter(t => t.id !== id);
-        if (window.render) window.render();
+        if (window.actions.saveStore) window.actions.saveStore();
+        window.homeActions.doRender();
     },
-    openPeriodModal: () => { window.homeState.showPeriodModal = true; window.render(); },
-    closePeriodModal: () => { window.homeState.showPeriodModal = false; window.render(); },
+    openPeriodModal: () => { window.homeState.showPeriodModal = true; window.homeActions.doRender(); },
+    closePeriodModal: () => { window.homeState.showPeriodModal = false; window.homeActions.doRender(); },
     savePeriod: () => {
         const date = document.getElementById('period-date-input').value;
         if (!date) return window.actions.showToast('请选择日期');
         if (!store.calendarData) store.calendarData = { todos: [], lastPeriod: '' };
         store.calendarData.lastPeriod = date;
         window.homeState.showPeriodModal = false;
-        if (window.render) window.render();
-        if (window.actions.showToast) window.actions.showToast('🩸 月经记录已更新'); 
+        if (window.actions.saveStore) window.actions.saveStore();
+        window.homeActions.doRender();
+        window.actions?.showToast('🩸 月经记录已更新'); 
     },
     
     triggerReaction: () => {
@@ -85,36 +98,48 @@ if (!window.homeActions) {
         if(window.audioPlaylist && window.audioPlaylist.length === 0) return window.homeActions.openAddAudioModal();
         if (window.audioState.isPlaying) window.audioPlayer.pause(); 
         else { window.audioPlayer.play(); window.homeActions.triggerReaction(); }
-        window.render();
+        window.homeActions.doRender();
     },
-    nextMusic: () => { if(window.audioPlayer) { window.audioPlayer.next(); window.homeActions.triggerReaction(); window.render(); } },
-    prevMusic: () => { if(window.audioPlayer) { window.audioPlayer.prev(); window.homeActions.triggerReaction(); window.render(); } },
-    toggleLoop: () => { if(window.audioPlayer) window.audioPlayer.toggleLoop(); },
+    nextMusic: () => { if(window.audioPlayer) { window.audioPlayer.next(); window.homeActions.triggerReaction(); window.homeActions.doRender(); } },
+    prevMusic: () => { if(window.audioPlayer) { window.audioPlayer.prev(); window.homeActions.triggerReaction(); window.homeActions.doRender(); } },
+    toggleLoop: () => { if(window.audioPlayer) window.audioPlayer.toggleLoop(); window.homeActions.doRender(); },
     
-    openAddAudioModal: () => { window.homeState.showAddAudioModal = true; window.homeState.tempLyrics = null; window.render(); },
-    closeAddAudioModal: () => { window.homeState.showAddAudioModal = false; window.render(); },
-    openPlaylist: () => { window.homeState.showPlaylistModal = true; window.render(); },
-    closePlaylist: () => { window.homeState.showPlaylistModal = false; window.render(); },
+    openAddAudioModal: () => { window.homeState.showAddAudioModal = true; window.homeState.tempLyrics = null; window.homeActions.doRender(); },
+    closeAddAudioModal: () => { window.homeState.showAddAudioModal = false; window.homeActions.doRender(); },
+    openPlaylist: () => { window.homeState.showPlaylistModal = true; window.homeActions.doRender(); },
+    closePlaylist: () => { window.homeState.showPlaylistModal = false; window.homeActions.doRender(); },
 
+    // 🌟 修复版歌词解析：完美兼容 txt 纯文本！
     uploadLyricFile: (e) => {
         const file = e.target.files[0]; if(!file) return;
         const reader = new FileReader();
         reader.onload = (event) => {
-            const lines = event.target.result.split('\n');
+            const rawText = event.target.result;
+            const lines = rawText.split('\n');
             const result = [];
             const regex = /\[(\d{2}):(\d{2}(?:\.\d{1,3})?)\](.*)/;
+            let hasTimestamp = false;
+            
             lines.forEach(line => {
                 const match = regex.exec(line);
-                if(match && match[3].trim()) result.push({ time: parseInt(match[1])*60 + parseFloat(match[2]), text: match[3].trim() });
+                if(match && match[3].trim()) {
+                    hasTimestamp = true;
+                    result.push({ time: parseInt(match[1])*60 + parseFloat(match[2]), text: match[3].trim() });
+                }
             });
-            window.homeState.tempLyrics = result.length > 0 ? result : null;
-            window.actions?.showToast(result.length > 0 ? '歌词解析成功！' : '解析失败，请检查格式');
-            window.render();
+            
+            if (hasTimestamp) {
+                window.homeState.tempLyrics = result;
+            } else {
+                window.homeState.tempLyrics = rawText.trim(); // 纯文本直接塞进去给 AI 看
+            }
+            window.actions?.showToast(window.homeState.tempLyrics ? '歌词解析成功！' : '解析为空');
+            window.homeActions.doRender();
         };
         reader.readAsText(file); e.target.value = '';
     },
 
-    triggerLocalUpload: () => { document.getElementById('upload-bg-audio').click(); window.homeState.showAddAudioModal = false; window.render(); },
+    triggerLocalUpload: () => { document.getElementById('upload-bg-audio').click(); window.homeState.showAddAudioModal = false; window.homeActions.doRender(); },
     confirmUrlAudio: () => {
         let url = document.getElementById('audio-url-input').value.trim();
         let name = document.getElementById('audio-name-input').value.trim() || '网络音频';
@@ -125,11 +150,15 @@ if (!window.homeActions) {
 
         store.customAudio = store.customAudio || []; 
         store.customAudio.push({ name: name, artist: artist, src: url, lyrics: window.homeState.tempLyrics });
+        if (window.actions.saveStore) window.actions.saveStore(); // 🌟 强制存档
+        
         window.actions.showToast('网络音频添加成功！');
         if (window.updateAudioPlaylist) window.updateAudioPlaylist();
         window.audioState.currentIndex = store.customAudio.length - 1; 
         window.audioPlayer.loadAndPlay();
-        window.homeState.showAddAudioModal = false; window.homeActions.triggerReaction(); window.render();
+        window.homeState.showAddAudioModal = false; 
+        window.homeActions.triggerReaction(); 
+        window.homeActions.doRender();
     },
 
     uploadBgAudio: (e) => {
@@ -142,11 +171,14 @@ if (!window.homeActions) {
             if (!resultStr) return window.actions.showToast('读取失败');
             store.customAudio = store.customAudio || [];
             store.customAudio.push({ name: file.name.replace(/\.[^/.]+$/, ""), artist: '本地导入', src: resultStr, lyrics: window.homeState.tempLyrics });
+            if (window.actions.saveStore) window.actions.saveStore(); // 🌟 强制存档
+            
             window.actions.showToast('本地音乐导入成功！');
             if (window.updateAudioPlaylist) window.updateAudioPlaylist(); 
             window.audioState.currentIndex = store.customAudio.length - 1; 
             window.audioPlayer.loadAndPlay();
-            window.homeActions.triggerReaction(); window.render();
+            window.homeActions.triggerReaction(); 
+            window.homeActions.doRender();
         };
         reader.readAsDataURL(file); e.target.value = '';
     },
@@ -155,67 +187,93 @@ if (!window.homeActions) {
         window.audioState.currentIndex = idx;
         window.audioPlayer.loadAndPlay();
         window.homeActions.triggerReaction();
-        window.render();
+        window.homeActions.doRender();
     },
     deleteTrackFromList: (idx, e) => {
         e.stopPropagation();
         if (!confirm('确定删除这首音乐吗？')) return;
         store.customAudio.splice(idx, 1);
+        if (window.actions.saveStore) window.actions.saveStore(); // 🌟 强制存档
         if (window.updateAudioPlaylist) window.updateAudioPlaylist();
+        
         if (window.audioPlaylist.length === 0) { window.audioState.isPlaying = false; window.audioPlayer.loadAndPlay(); } 
         else { if (window.audioState.currentIndex >= window.audioPlaylist.length) window.audioState.currentIndex = 0; window.audioPlayer.loadAndPlay(); }
-        window.render();
+        window.homeActions.doRender();
     },
 
-    openCompanionSelect: () => { window.homeState.showCompanionModal = true; window.render(); },
-    closeCompanionSelect: () => { window.homeState.showCompanionModal = false; window.render(); },
+    openCompanionSelect: () => { window.homeState.showCompanionModal = true; window.homeActions.doRender(); },
+    closeCompanionSelect: () => { window.homeState.showCompanionModal = false; window.homeActions.doRender(); },
     selectCompanion: (id) => {
         store.musicCompanionId = id;
         store.musicReaction = '正在倾听...';
         window.homeState.showCompanionModal = false;
         window.homeActions.triggerReaction();
-        window.render();
+        window.homeActions.doRender();
     },
+    
+    // 🌟 究极神级 Prompt 听歌感想引擎
     generateMusicReaction: async () => {
         if (!store.apiConfig?.apiKey || !store.musicCompanionId || !window.audioPlaylist || window.audioPlaylist.length === 0) return;
         const track = window.audioPlaylist[window.audioState.currentIndex];
         const char = store.contacts.find(c => c.id === store.musicCompanionId);
         if (!char) return;
+
+        // 精准组装你们的羁绊记忆和人设
+        const chat = store.chats?.find(ch => ch.charId === char.id);
+        const boundPId = chat?.boundPersonaId || char?.boundPersonaId || store.personas[0].id;
+        const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
         
-        window.homeState.isGeneratingReaction = true; window.render();
+        const globalP = store.globalPrompt ? `\n【通用用户人设】\n${store.globalPrompt}` : '';
+        const boundPrompt = boundP.prompt ? `\n【当前绑定身份】\n${boundP.prompt}` : '';
+        const basePrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n\n【用户】\n当前化名：${boundP.name}${globalP}${boundPrompt}`;
+
+        const coreMem = (store.memories || []).filter(m => m.charId === char.id && m.type === 'core').map(m=>m.content).join('；');
+        const coreMemStr = coreMem ? `\n\n【我们之间的核心记忆】\n${coreMem}` : '';
+        
+        // 智能组装歌词
+        let lyricsStr = '';
+        if (track.lyrics) {
+            if (Array.isArray(track.lyrics)) {
+                lyricsStr = `\n\n【当前播放的歌词】\n` + track.lyrics.slice(0, 15).map(l => l.text).join('\n') + `...`;
+            } else if (typeof track.lyrics === 'string') {
+                lyricsStr = `\n\n【当前播放的歌词】\n` + track.lyrics.substring(0, 600) + `...`;
+            }
+        }
+        
+        window.homeState.isGeneratingReaction = true; window.homeActions.doRender();
         try {
-            const task = `用户正在听歌，歌名：《${track.name}》，歌手：${track.artist}。你扮演【${char.name}】，就坐在旁边陪用户听。请结合你的性格，对这首歌发表一句感想、吐槽或是对用户的温情陪伴（15-25字以内，精简自然）。严禁Emoji。输出JSON格式：{"reaction": "感想内容"}`;
+            const task = `用户正在听歌，歌名：《${track.name}》，歌手：${track.artist}。
+你扮演【${char.name}】，就坐在旁边陪用户听。
+请结合上方的人设底色、我们的羁绊记忆，以及这首歌的歌词内容（如果有的话），对这首歌或者对我发表一句感想、吐槽或是温情陪伴。
+【要求】：绝对不能偏离角色性格！15-30字以内，精简自然，就像两人坐在一起随口说的话。严禁Emoji。输出JSON格式：{"reaction": "感想内容"}`;
+            
+            const promptStr = `${basePrompt}${coreMemStr}${lyricsStr}\n\n【任务】\n${task}`;
+
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { 
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, 
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: `【角色设定】\n${char.prompt}\n\n【任务】\n${task}` }] }) 
+                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) 
             });
             const text = (await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0];
             store.musicReaction = JSON.parse(text).reaction;
-        } catch(e) { console.error(e); } finally { window.homeState.isGeneratingReaction = false; window.render(); }
+        } catch(e) { console.error(e); } finally { window.homeState.isGeneratingReaction = false; window.homeActions.doRender(); }
     },
 
-    // 🌟 新增：保存生日
     saveBirthday: (val) => {
         store.birthday = val;
-        window.render();
+        window.homeActions.doRender();
     },
-
-    // 🌟 新增：重新修改生日（重置状态）
     editBirthday: () => {
         store.birthday = null;
-        store.dailyFortune = null; // 清空旧运势强制重新获取
-        window.render();
+        store.dailyFortune = null; 
+        window.homeActions.doRender();
     },
-
-    // 🌟 升级版：专属生辰占星引擎
     generateDailyFortune: async () => {
         if (!store.apiConfig?.apiKey) return window.actions?.showToast('需配置API才能解析运势');
         if (!store.birthday) return window.actions?.showToast('请先设定出生日期哦');
         
-        window.homeState.isGeneratingFortune = true; window.render();
+        window.homeState.isGeneratingFortune = true; window.homeActions.doRender();
         const today = new Date().toISOString().split('T')[0];
         try {
-            // 让 AI 根据生日自动推算星座和当前星象！
             const task = `你是一个类似“测测App”的专业占星/运势解析系统。用户的出生日期是：${store.birthday}。
 请首先根据出生日期算出用户的【星座】，然后结合今天的日期(${today})的真实星象走向，为该星座生成专属的今日运势。
 包含：综合、爱情、事业星级(1-5的整数)，以及一段60字左右的专属运势解读（语气要神秘、温柔、治愈，给用户力量）。严禁Emoji。
@@ -230,10 +288,11 @@ if (!window.homeActions) {
             store.dailyFortune = { date: today, ...parsed };
             if(window.actions.saveStore) window.actions.saveStore();
         } catch(e) { console.error(e); window.actions?.showToast('运势解析失败'); } 
-        finally { window.homeState.isGeneratingFortune = false; window.render(); }
+        finally { window.homeState.isGeneratingFortune = false; window.homeActions.doRender(); }
     },
     
     updateDots: (e) => {
+      window.homeState.lastScrollLeft = e.target.scrollLeft;
       const idx = Math.round(e.target.scrollLeft / e.target.clientWidth);
       const d0 = document.getElementById('home-dot-0');
       const d1 = document.getElementById('home-dot-1');
@@ -306,6 +365,13 @@ export function renderHomeApp(store) {
           </div>
       </div>
   `;
+
+  setTimeout(() => {
+      const today = new Date().toISOString().split('T')[0];
+      if(store.apiConfig?.apiKey && (!store.dailyFortune || store.dailyFortune.date !== today)) {
+          if(!window.homeState.isGeneratingFortune) window.homeActions.generateDailyFortune();
+      }
+  }, 1500);
 
   return `
     <div class="w-full h-full relative flex flex-col overflow-hidden animate-in fade-in duration-300" style="${bgStyle}">
@@ -462,6 +528,12 @@ export function renderHomeApp(store) {
                               const loopMode = window.audioState ? window.audioState.loopMode : 'list';
                               const loopIcon = loopMode === 'list' ? 'repeat' : 'repeat-1';
                               const compChar = store.musicCompanionId ? store.contacts.find(c=>c.id===store.musicCompanionId) : null;
+                              
+                              // 判断是否有文本歌词
+                              const currentTrack = hasTrack ? window.audioPlaylist[window.audioState.currentIndex] : null;
+                              const hasLyrics = currentTrack?.lyrics;
+                              const isRawText = hasLyrics && !Array.isArray(hasLyrics);
+                              const lyricPlaceholder = isRawText ? '🎵 已挂载纯文本歌词' : (hasLyrics ? '🎵' : '暂无歌词数据');
 
                               return `
                               <div class="flex justify-between items-center w-full ${isDark?'text-white':'text-gray-800'} mb-2">
@@ -487,7 +559,7 @@ export function renderHomeApp(store) {
                               </div>
 
                               <div class="mt-2 flex flex-col items-center justify-center w-full h-[20px] overflow-hidden px-1">
-                                  <span id="music-lyric-line" class="text-[11px] font-bold text-center w-full truncate transition-all duration-300 ${isDark?'text-white/80 drop-shadow-sm':'text-gray-600'}">${hasTrack && window.audioPlaylist[window.audioState.currentIndex]?.lyrics ? '🎵' : '暂无歌词数据'}</span>
+                                  <span id="music-lyric-line" class="text-[11px] font-bold text-center w-full truncate transition-all duration-300 ${isDark?'text-white/80 drop-shadow-sm':'text-gray-600'}">${lyricPlaceholder}</span>
                               </div>
 
                               <div class="mt-3 flex items-start w-full space-x-2">
@@ -628,7 +700,7 @@ export function renderHomeApp(store) {
                     </div>
                     
                     <div class="flex items-center justify-between bg-white border border-gray-200 rounded-xl p-3 shadow-sm mt-2">
-                        <div class="flex items-center text-[12px] font-bold text-gray-600"><i data-lucide="subtitles" class="w-4 h-4 mr-2"></i>${window.homeState.tempLyrics ? '<span class="text-green-500">已解析歌词数据</span>' : '挂载 LRC 歌词'}</div>
+                        <div class="flex items-center text-[12px] font-bold text-gray-600"><i data-lucide="subtitles" class="w-4 h-4 mr-2"></i>${window.homeState.tempLyrics ? '<span class="text-green-500">已解析歌词数据</span>' : '挂载 TXT/LRC 歌词'}</div>
                         <input type="file" id="audio-lyric-upload" accept=".lrc,.txt" class="hidden" onchange="window.homeActions.uploadLyricFile(event)" />
                         <button class="bg-gray-100 px-3 py-1.5 rounded-lg text-[10px] font-bold text-gray-700 active:scale-95" onclick="document.getElementById('audio-lyric-upload').click()">${window.homeState.tempLyrics ? '重新上传' : '点击上传'}</button>
                     </div>
@@ -653,7 +725,7 @@ export function renderHomeApp(store) {
                             <div class="flex flex-col flex-1 overflow-hidden pr-3">
                                 <div class="flex items-center space-x-2">
                                     <span class="text-[14px] font-bold ${window.audioState.currentIndex === idx ? 'text-gray-900' : 'text-gray-600'} truncate">${track.name}</span>
-                                    ${track.lyrics ? `<span class="bg-blue-100 text-blue-500 text-[8px] px-1 rounded-sm border border-blue-200">LRC</span>` : ''}
+                                    ${track.lyrics ? `<span class="bg-blue-100 text-blue-500 text-[8px] px-1 rounded-sm border border-blue-200">${Array.isArray(track.lyrics) ? 'LRC' : 'TXT'}</span>` : ''}
                                 </div>
                                 <span class="text-[11px] text-gray-400 mt-0.5 truncate">${track.artist || '未知歌手'}</span>
                             </div>
@@ -722,6 +794,7 @@ export function renderHomeApp(store) {
         </div>
         ` : ''}
 
+        <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" style="display:none;" onload="const el = document.getElementById('home-swiper-scroll'); if(el && window.homeState && window.homeState.lastScrollLeft) { el.scrollLeft = window.homeState.lastScrollLeft; } this.remove();" />
     </div>
   `;
 }

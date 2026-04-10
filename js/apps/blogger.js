@@ -82,9 +82,20 @@ async function buildBloggerPrompt(acc, char, chat, boundP, options = {}) {
         }).map(m=>m.content).join('；');
         if (frags) fragMemStr = `\n\n【触发的回忆】\n${frags}`;
     }
+    // ✅ 修复版：严格按照发送者切换计算 30 回合
     let historyStr = '';
     if (chat && chat.messages) {
-        const recentMsgs = chat.messages.filter(m => m.msgType === 'text').slice(-60);
+        let baseHistory = chat.messages.filter(m => m.msgType === 'text');
+        let turnsCount = 0; let lastSender = null; let startIndex = 0;
+        const limit = 30; // 30回合
+        for (let i = baseHistory.length - 1; i >= 0; i--) {
+            if (baseHistory[i].isMe !== lastSender) { 
+                if (lastSender !== null) turnsCount += 0.5; 
+                lastSender = baseHistory[i].isMe; 
+            }
+            if (turnsCount >= limit) { startIndex = i + 1; break; }
+        }
+        const recentMsgs = baseHistory.slice(startIndex);
         if (recentMsgs.length > 0) historyStr = `\n\n【近期聊天参考】\n` + recentMsgs.map(m => `[${m.sender}]: ${m.text}`).join('\n');
     }
     const platformStyle = acc.platformStyle || '普通社交平台';
