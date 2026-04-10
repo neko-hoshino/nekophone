@@ -341,21 +341,40 @@ if (!window.bloggerActions) {
 
         togglePostDetail: (postId) => {
             const state = window.bloggerState;
+            // 🌟 核心：在渲染前死死抓住当前的滚动位置
+            const scrollEl = document.getElementById('blogger-home-scroll');
+            const st = scrollEl ? scrollEl.scrollTop : 0;
+            
             state.expandedPosts[postId] = !state.expandedPosts[postId];
             if (state.expandedPosts[postId]) {
                 const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
                 const post = acc?.posts?.find(p => p.id === postId);
-                if (post && !post.hasFetchedComments) window.bloggerActions.fetchComments(postId, false);
+                if (post && !post.hasFetchedComments) {
+                    // 如果需要拉取数据，把当前滚动条高度传给 fetchComments
+                    window.bloggerActions.fetchComments(postId, false, st);
+                    return; 
+                }
             }
             window.render();
+            // 🌟 渲染完后，瞬间按回原位
+            setTimeout(() => { const el = document.getElementById('blogger-home-scroll'); if(el) el.scrollTop = st; }, 0);
         },
 
-        fetchComments: async (postId, isLoadMore = false) => {
+        fetchComments: async (postId, isLoadMore = false, preservedScroll = null) => {
             const state = window.bloggerState;
             if (state.isFetchingComments || !store.apiConfig?.apiKey) return;
+            
+            // 🌟 记录或接收滚动位置
+            const scrollEl = document.getElementById('blogger-home-scroll');
+            const st = preservedScroll !== null ? preservedScroll : (scrollEl ? scrollEl.scrollTop : 0);
+            
             const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
             const post = acc?.posts?.find(p => p.id === postId);
             state.isFetchingComments = true; window.render();
+            
+            // 状态变更为 Loading 时也要锁住滚动条
+            setTimeout(() => { const el = document.getElementById('blogger-home-scroll'); if(el) el.scrollTop = st; }, 0);
+
             try {
                 const char = store.contacts.find(c => c.id === acc.charId);
                 const chat = store.chats.find(c => c.charId === acc.charId);
@@ -364,60 +383,39 @@ if (!window.bloggerActions) {
 
                 let context = "";
                 if (isLoadMore) context += "\n已有评论参考：\n" + post.comments.slice(-10).map(c => `[${c.author}]: ${c.content}`).join('\n');
-                
-                if (post.prContext) {
-                    context += `\n【舆论风向控制】：这篇是澄清贴，判定结果为：${post.prContext.success ? '洗白成功' : '越抹越黑'}。请让粉丝评论严格对齐此风向。`;
-                }
+                if (post.prContext) context += `\n【舆论风向控制】：这篇是澄清贴，判定结果为：${post.prContext.success ? '洗白成功' : '越抹越黑'}。请让粉丝评论严格对齐此风向。`;
 
                 const task = `根据平台风格，模拟生成10条社交平台评论。
 1. 其中 7-8 条为普通粉丝/路人/黑粉的【首层评论】。
 2. 评论态度必须混合：嗑CP的狂欢、真诚的羡慕、酸言酸语(judge)、拉踩对比、无厘头玩梗或求同款等。
 【强制要求】你必须挑选其中 3 条，以博主（扮演【${char.name}】）的身份亲自回复（护妻/回怼/撒糖等）。
 严格输出JSON数组：
-[
-  {"author": "路人甲", "content": "好漂亮！", "myReply": ""},
-  {"author": "黑粉乙", "content": "太假了", "myReply": "有本事你拍一个"},
-  {"author": "粉丝丙", "content": "催更", "myReply": "安排上了"}
-]`;
+[{"author": "路人甲", "content": "好漂亮！", "myReply": ""}, {"author": "黑粉乙", "content": "太假了", "myReply": "有本事你拍一个"}]`;
                 
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task: task + context });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { 
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, 
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) 
+                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) 
                 });
-                
                 const data = await res.json();
                 let text = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 let cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
                 
                 const maxLikes = Math.max(10, Math.floor(post.stats.likes * 2));
                 const newCms = cms.map(c => {
-                    const cmtId = 'cmt_'+Math.random().toString(36).substr(2,9);
                     const replies = [];
-                    if (c.myReply && c.myReply.trim() !== "") {
-                        replies.push({ 
-                            author: acc.name, 
-                            content: c.myReply.replace(/<[^>]+>/g, ''), 
-                            isAuthor: true 
-                        });
-                    }
-                    
-                    return { 
-                        id: cmtId, 
-                        author: c.author, 
-                        content: c.content.replace(/<[^>]+>/g, ''), 
-                        likes: Math.floor(Math.random() * maxLikes),
-                        replies: replies 
-                    };
+                    if (c.myReply && c.myReply.trim() !== "") replies.push({ author: acc.name, content: c.myReply.replace(/<[^>]+>/g, ''), isAuthor: true });
+                    return { id: 'cmt_'+Math.random().toString(36).substr(2,9), author: c.author, content: c.content.replace(/<[^>]+>/g, ''), likes: Math.floor(Math.random() * maxLikes), replies: replies };
                 }).sort((a,b) => b.likes - a.likes);
 
                 post.comments = isLoadMore ? [...post.comments, ...newCms] : newCms;
                 post.hasFetchedComments = true;
                 post.stats.commentsCount = Math.max(post.stats.commentsCount, post.comments.length + Math.floor(Math.random()*20));
-                
                 if (window.actions.saveStore) window.actions.saveStore();
-            } catch (e) { console.error(e); } finally { state.isFetchingComments = false; window.render(); }
+            } catch (e) { console.error(e); } finally { 
+                state.isFetchingComments = false; window.render(); 
+                // 🌟 数据回来后，再次把滚动条按回原位！
+                setTimeout(() => { const el = document.getElementById('blogger-home-scroll'); if(el) el.scrollTop = st; }, 0);
+            }
         },
 
         replyToComment: async (postId, commentId) => {
@@ -491,21 +489,33 @@ if (!window.bloggerActions) {
                 const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
 
                 const recent = (acc.posts||[]).slice(0,10).map(p => p.desc).join('；');
-                const task = `结合近期动态[${recent}]，生成5条符合平台风格的匿名提问。2条由【${char.name}】亲自回答，3条留空等待用户回答。严禁Emoji。输出JSON数组：[{"question":"问题","answeredByPartner":"回答内容(若无请留空)"}]`;
+                
+                // 🌟 核心优化：让 AI 明确这个提问是给谁的
+                const task = `结合近期动态[${recent}]，生成5条符合平台风格的粉丝匿名提问。
+【强制路由机制】：
+1. 必须在 "target" 字段明确指定该问题是问谁的（"user"代表问用户，"partner"代表问【${char.name}】，"both"代表问你们俩）。
+2. 如果是问【${char.name}】的，由他亲自犀利/撒糖作答（写在 answeredByPartner 字段）。
+3. 如果是问用户或两人的，必须把答题权留给用户（answeredByPartner 严格留空）。
+严禁Emoji。输出JSON数组：[{"question":"问题", "target": "user/partner/both", "answeredByPartner":"回答内容(若留给用户回答请留空)"}]`;
+                
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                 const text = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 const cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
                 acc.qaBox = []; acc.posts = acc.posts || [];
+                
                 cms.forEach(q => {
-                    if (q.answeredByPartner && q.answeredByPartner.trim() !== '') {
+                    // 🌟 判定：如果是找我的，并且我有回答，直接发主页；否则塞进提问箱留给你答
+                    if (q.target === 'partner' && q.answeredByPartner && q.answeredByPartner.trim() !== '') {
                         const likes = Math.floor(acc.followers * 0.05 + 10);
                         acc.totalLikes += likes;
                         acc.posts.unshift({ id: 'post_' + Math.random().toString(36).substr(2, 9), desc: `回答了匿名提问：${q.question}`, htmlContent: `<div class="bg-gray-100 p-3 rounded mb-2"><span class="font-bold text-gray-900">匿名提问: </span><span class="text-gray-700">${q.question}</span></div><div class="text-gray-800">${q.answeredByPartner}</div>`, mediaDesc: null, showcaseProduct: null, topics: [], stats: { likes, commentsCount: Math.floor(likes*0.1), saves: 0, shares: 0 }, comments: [], hasFetchedComments: false });
-                    } else acc.qaBox.push({ id: 'qa_' + Date.now() + Math.random(), question: q.question });
+                    } else {
+                        acc.qaBox.push({ id: 'qa_' + Date.now() + Math.random(), question: q.question, target: q.target });
+                    }
                 });
                 if (window.actions.saveStore) window.actions.saveStore();
-            } catch(e) {} finally { state.isFetchingQA = false; window.render(); }
+            } catch(e) { console.error(e); } finally { state.isFetchingQA = false; window.render(); }
         },
         answerQA: (id) => {
             const state = window.bloggerState;
@@ -536,12 +546,21 @@ if (!window.bloggerActions) {
                 const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
 
                 const recent = (acc.posts||[]).slice(0,10).map(p => p.desc).join('；');
-                const task = `结合平台风格和近期动态[${recent}]，生成5条私信会话（粉丝/路人/其他博主）。其中2条【${char.name}】已回复，3条未读。严禁Emoji。JSON格式：[{"author": "网名", "messages": [{"sender": "网名", "text": "内容"}, {"sender": "博主", "text": "回复(未回复则删掉此对象)"}]}]`;
+                
+                // 🌟 核心优化：让 AI 明确私信是给谁的
+                const task = `结合平台风格和近期动态[${recent}]，生成5条私信会话（粉丝/路人/狗仔/其他博主）。
+【强制路由机制】：
+1. 必须在 "target" 字段明确指定私信是发给谁的（"user"代表找用户，"partner"代表找【${char.name}】）。
+2. 如果是找【${char.name}】的，由他直接冷酷或幽默地回复（生成两条 messages，一条对方一条博主）。
+3. 如果是找用户的，留空等待用户亲自回复（messages 数组里只生成对方发来的 1 条消息）。
+严禁Emoji。JSON格式：[{"author": "网名", "target": "user/partner", "messages": [{"sender": "网名", "text": "内容"}, {"sender": "博主", "text": "回复(仅找partner时生成)"}]}]`;
+                
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                 const text = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 const cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
                 acc.inbox = []; 
+                
                 cms.forEach(c => {
                     const mappedMsgs = c.messages.map(m => {
                         const isBlogger = m.sender === '博主' || m.sender === acc.name || m.sender === char.name || m.sender === boundP.name;
@@ -551,10 +570,10 @@ if (!window.bloggerActions) {
                             isMe: isBlogger 
                         };
                     });
-                    acc.inbox.push({ id: 'msg_' + Date.now() + Math.random(), author: c.author, messages: mappedMsgs });
+                    acc.inbox.push({ id: 'msg_' + Date.now() + Math.random(), author: c.author, target: c.target, messages: mappedMsgs });
                 });
                 if (window.actions.saveStore) window.actions.saveStore();
-            } catch(e) {} finally { state.isFetchingInbox = false; window.render(); }
+            } catch(e) { console.error(e); } finally { state.isFetchingInbox = false; window.render(); }
         },
         
         notifyPartnerOfPR: (method, result) => {
@@ -826,7 +845,7 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                     const chat = store.chats.find(c => c.charId === acc.charId);
                     const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
                     const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
-                    const task = `博主刚刚开启了情侣直播。请根据你们的定位和伴侣【${char.name}】的性格，生成一个有趣的直播互动小任务（例如：让伴侣夸你、完成一个默契挑战、给粉丝发个福利等）。严格输出JSON：{"taskTitle": "任务描述", "reward": 随机金币数(100到500之间)}`;
+                    const task = `博主刚刚开启了情侣直播。请结合平台风格、账号定位和伴侣【${char.name}】的性格，生成一个有趣的具体的直播互动小任务（例如：让伴侣夸你、给粉丝发个福利等）。严格输出JSON：{"taskTitle": "任务描述", "reward": 随机金币数(100到500之间)}`;
                     const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
                     const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                     const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
@@ -879,77 +898,6 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                 alert(`📊 【直播数据结算单】\n\n🔥 最高热度：${heat.toLocaleString()}\n💬 互动条数：${interactCount}\n💰 礼物收益：￥${live.income.toLocaleString()}\n📈 净增粉丝：${newFollowers.toLocaleString()} 人${extraMsg}\n\n感谢播主，好好休息吧！`);
             }, 300);
         },
-        sendLiveAction: async (val, isRetry = false) => {
-            if(!val || !val.trim()) return;
-            const state = window.bloggerState;
-            const live = state.live;
-            if (live.isActionLoading) return window.actions?.showToast('别急，AI 还在想回复呢...');
-            
-            const inputEl = document.getElementById('live-input');
-            if(inputEl && !isRetry) inputEl.value = '';
-
-            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
-            const char = store.contacts.find(c => c.id === acc.charId);
-            const chat = store.chats.find(c => c.charId === acc.charId);
-            const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
-            const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
-
-            // 🌟 如果是首次发送，把用户的话存进去；如果是重 Roll，清理掉之前的错误气泡
-            if (!isRetry) {
-                live.messages.push({ type: 'user', author: boundP.name, content: val });
-            } else {
-                live.messages = live.messages.filter(m => m.type !== 'error_retry');
-            }
-            
-            live.isActionLoading = true;
-            window.render();
-            setTimeout(() => { const el = document.getElementById('live-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 50);
-
-            if (store.apiConfig?.apiKey) {
-                try {
-                    const prStatus = acc.studioData?.pr?.status === 'active' ? `【紧急：当前处于公关危机中！传闻：${acc.studioData.pr.desc}】` : '';
-                    let pkAddon = '';
-                    if (live.view === 'pk') {
-                        pkAddon = `\n【秀恩爱PK连麦中】：你们正在和主播【${live.pk.opponent.name}】进行PK比拼谁更甜！当前你们的胜率进度是 ${live.pk.score}%。请判定本次互动你们获得了多少进度点数（如果对方秀得更狠，点数为负数）。\n在 JSON 中必须额外生成："opponentReply": "对方的嘲讽或秀恩爱发言", "scoreBoost": 本回合你们增减的胜率(-20到25), "punishment": "若有任意一方到达100或0，赢家对输家的惩罚(否则留空)"`;
-                    }
-                    const task = `情侣直播中，用户刚刚做了：${val}。\n${prStatus}\n【当前互动任务】：${live.task.title}\n【内置礼物】：荧光棒(￥1)、奶茶(￥15)、纯爱钻戒(￥99)、嘉年华(￥500)。\n${pkAddon}\n请生成：1. 伴侣的实时回应。2. 3条弹幕。3. 任务判定：是否【任意一方】达到了要求(isTaskCompleted: boolean)。如果完成立刻生成新任务。4. 随机0-2个粉丝送出礼物。\n严格输出 JSON：{"partnerReply": "伴侣的话语/动作", "danmaku": ["粉丝弹幕1", "弹幕2", "弹幕3"], "gifts": [{"fan": "粉丝网名", "giftName": "奶茶", "value": 15}], "isTaskCompleted": boolean, "newTask": {"title": "新任务", "reward": 金额}, "prResolved": 是否解除危机(boolean), "prFeedback": "若危机改变网友最新评价" ${live.view === 'pk' ? ',"opponentReply": "...","scoreBoost": 0,"punishment": ""' : ''}}`;
-
-                    const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
-                    const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
-                    const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
-
-                    if(json.partnerReply) live.messages.push({ type: 'partner', author: char.name, content: json.partnerReply });
-                    if(live.view === 'pk' && json.opponentReply) {
-                        live.messages.push({ type: 'opponent', author: live.pk.opponent.name, content: json.opponentReply });
-                        live.pk.score = Math.max(0, Math.min(100, live.pk.score + (json.scoreBoost || 0)));
-                        if (live.pk.score >= 100 || live.pk.score <= 0) {
-                            const isWin = live.pk.score >= 100;
-                            live.view = 'normal';
-                            live.messages.push({ type: 'system', author: '系统', content: `🚨 PK 结束！【${isWin ? '你们赢了！' : '你们输了...'}】\n惩罚环节：${json.punishment || '深情表白一分钟'}` });
-                            acc.followers += isWin ? 5000 : -2000; 
-                        }
-                    }
-                    if(json.danmaku) json.danmaku.forEach(d => live.messages.push({ type: 'fan', author: '网友' + Math.floor(Math.random()*999), content: d }));
-                    if(json.gifts) json.gifts.forEach(g => { live.messages.push({ type: 'gift', author: g.fan, giftName: g.giftName }); live.income += (g.value || 0); });
-                    if(json.isTaskCompleted) {
-                        if(live.task.reward > 0) { live.income += live.task.reward; live.messages.push({ type: 'system', author: '系统', content: `🎉 任务达成！奖励￥${live.task.reward}` }); }
-                        if(json.newTask && json.newTask.title) { live.task = { title: json.newTask.title, reward: json.newTask.reward || 200 }; live.messages.push({ type: 'system', author: '系统', content: `🎯 新任务发布：${live.task.title}` }); }
-                    }
-                    if(acc.studioData?.pr?.status === 'active' && json.prResolved) {
-                        acc.studioData.pr.status = 'resolved'; acc.studioData.pr.result = `直播澄清成功！${json.prFeedback}`;
-                        window.bloggerActions.notifyPartnerOfPR('直播澄清', json.prFeedback); window.actions?.showToast('🎉 危机解除！');
-                    }
-                } catch(e) { 
-                    console.error(e); 
-                    // 🌟 核心容错：若 AI 掉链子，生成红色警告气泡，并把刚才输入的话挂到重发按钮上！
-                    live.messages.push({ type: 'error_retry', author: boundP.name, content: 'AI脑细胞过载报错了...', retryVal: val });
-                } finally {
-                    live.isActionLoading = false;
-                    window.render();
-                    setTimeout(() => { const el = document.getElementById('live-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
-                }
-            } else { live.isActionLoading = false; window.render(); }
-        },
         openLiveVote: async () => {
             const state = window.bloggerState;
             const live = state.live;
@@ -964,46 +912,195 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
 
             live.isVotingLoading = true; window.render();
             try {
-                const task = `博主发起了互动投票：“想看主播干什么？”。
-请结合你们的人设，生成3个极具看点、抓马或高甜的选项，并随机分配投票百分比（总和等于100）。
-严格输出 JSON 格式：
-{"options": [{"text": "选项1", "percent": 30}, {"text": "选项2", "percent": 45}, {"text": "选项3", "percent": 25}]}`;
+                const task = `博主发起了互动投票：“想看主播干什么？”。结合平台风格和账号定位，生成3个极具看点、抓马或高甜的选项，要符合直播场景好执行，并随机分配投票百分比(总和100)。输出 JSON 格式：{"options": [{"text": "选项1", "percent": 30}, {"text": "选项2", "percent": 45}, {"text": "选项3", "percent": 25}]}`;
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                 const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                 
-                // 🌟 将结果直接化作炫酷气泡甩在公屏上
+                // 🌟 选出最高票，存入状态供后续提示词使用
+                const winner = json.options.reduce((a, b) => (a.percent > b.percent) ? a : b);
+                live.lastVoteResult = `观众最高票选：${winner.text} (${winner.percent}%)`;
+
                 const voteText = `【想看主播干什么？】\n` + json.options.map(o => `🔹 ${o.text} (${o.percent}%)`).join('\n');
                 live.messages.push({ type: 'vote', author: '互动投票结果', content: voteText });
             } catch(e) { console.error(e); window.actions?.showToast('生成投票失败'); } 
-            finally { live.isVotingLoading = false; window.render(); 
-            setTimeout(() => { const el = document.getElementById('live-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100); }
+            finally { live.isVotingLoading = false; window.render(); setTimeout(() => { const el = document.getElementById('live-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100); }
         },
 
         startLivePK: async () => {
             const state = window.bloggerState;
             const live = state.live;
-            if (live.isPKLoading) return; // 🌟 防连点锁
+            if (live.isPKLoading) return;
             if (!store.apiConfig?.apiKey) return window.actions?.showToast('需配置API');
             const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
             
             live.view = 'pk';
             live.pk = { opponent: { name: '匹配中...' }, score: 50, isActive: true };
             live.messages.push({ type: 'system', author: '系统', content: '🚨 正在匹配情侣连麦对手...' });
-            live.isPKLoading = true; // 🌟 上锁
-            window.render();
+            live.isPKLoading = true; window.render();
 
             try {
-                const task = `请生成一对专门用于直播PK连麦的【对立面情侣博主】（例如：工业糖精网红情侣、搞笑夫妻、做作小情侣等）。输出JSON：{"name": "网名(必须是情侣账号名)"}`;
+                // 🌟 新增：要求生成连麦接通时的开场白！
+                const task = `请结合平台风格，生成一对专门用于直播PK连麦的【对立面情侣博主】（如工业糖精情侣、搞笑夫妻等）。并生成他们连麦接通时的第一句开场白。输出JSON：{"name": "网名(情侣账号)", "greeting": "嚣张或绿茶的连麦开场白"}`;
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: task }] }) });
                 const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                 
                 live.pk.opponent.name = json.name || '做作的网红情侣';
-                live.messages.push({ type: 'system', author: '系统', content: `⚔️ 连麦成功！对手是情侣博主【${live.pk.opponent.name}】！拔河式心动条(起点50%)已就绪，谁先把进度条拉满到100%谁就赢！` });
-            } catch(e) { console.error(e); } finally {
-                live.isPKLoading = false; // 🌟 解锁
-                window.render();
-            }
+                live.messages.push({ type: 'system', author: '系统', content: `⚔️ 连麦成功！心动拔河(50%起始)开启！` });
+                live.messages.push({ type: 'opponent', author: live.pk.opponent.name, content: json.greeting || '哟，看看连到谁了？' });
+            } catch(e) { console.error(e); } finally { live.isPKLoading = false; window.render(); }
+        },
+
+        doLiveTask: async () => {
+            const state = window.bloggerState;
+            const live = state.live;
+            if (live.isTaskDoing) return;
+            if (!store.apiConfig?.apiKey) return window.actions?.showToast('需配置API');
+
+            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
+            const char = store.contacts.find(c => c.id === acc.charId);
+            const chat = store.chats.find(c => c.charId === acc.charId);
+            const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+            const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+
+            live.isTaskDoing = true; window.render();
+            try {
+                // 🌟 上下文引擎 + PK关联
+                const recentHistory = live.messages.filter(m => ['user', 'partner', 'opponent'].includes(m.type)).slice(-4).map(m => `[${m.author}]: ${m.content}`).join('\n');
+                let pkAddon = '';
+                if (live.view === 'pk') {
+                    pkAddon = `\n【PK连麦中】：你们正与主播【${live.pk.opponent.name}】进行PK！当前胜率是 ${live.pk.score}%。请判定本次做任务你们获得了多少进度点数(0到25)。\n必须额外生成："opponentReply": "对方的破防/吐槽反应", "scoreBoost": 胜率增加, "punishment": "若满100赢家对输家的惩罚"`;
+                }
+                const task = `直播任务：【${live.task.title}】。博主按下了“完成任务”按钮，立刻和伴侣互动。\n近期互动记录：\n${recentHistory}\n${pkAddon}\n请直接生成：1. 伴侣配合完成任务的话语和动作。2. 3条粉丝弹幕。3. 随机送出礼物。4. 新任务。\n严格输出 JSON：{"partnerReply": "伴侣反应", "danmaku": ["..."], "gifts": [], "newTask": {"title": "新任务", "reward": 200} ${live.view === 'pk' ? ',"opponentReply": "...","scoreBoost": 0,"punishment": ""' : ''}}`;
+                
+                const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
+                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
+
+                live.messages.push({ type: 'system', author: '系统', content: `🎬 博主与伴侣完成了任务：${live.task.title}` });
+                if(json.partnerReply) live.messages.push({ type: 'partner', author: char.name, content: json.partnerReply });
+                
+                if(live.view === 'pk' && json.opponentReply) {
+                    live.messages.push({ type: 'opponent', author: live.pk.opponent.name, content: json.opponentReply });
+                    live.pk.score = Math.max(0, Math.min(100, live.pk.score + (json.scoreBoost || 15)));
+                    if (live.pk.score >= 100 || live.pk.score <= 0) {
+                        const isWin = live.pk.score >= 100;
+                        live.pkResult = { isWin: isWin, punishment: json.punishment || '输家深情表白一分钟' };
+                        acc.followers += isWin ? 5000 : -2000; 
+                    }
+                }
+
+                if(json.danmaku) json.danmaku.forEach(d => live.messages.push({ type: 'fan', author: '网友' + Math.floor(Math.random()*999), content: d }));
+                if(json.gifts) json.gifts.forEach(g => { live.messages.push({ type: 'gift', author: g.fan || g.name || g.user || '神秘粉丝', giftName: g.giftName || g.gift || g.name || '专属礼物' }); live.income += (Number(g.value) || Number(g.price) || 15); });
+                
+                if(live.task.reward > 0) { live.income += live.task.reward; live.messages.push({ type: 'system', author: '系统', content: `🎉 任务达成！奖励￥${live.task.reward}` }); }
+                if(json.newTask && json.newTask.title) { live.task = { title: json.newTask.title, reward: json.newTask.reward || 200 }; live.messages.push({ type: 'system', author: '系统', content: `🎯 新任务发布：${live.task.title}` }); }
+            } catch(e) { console.error(e); window.actions?.showToast('执行失败，请重试'); }
+            finally { live.isTaskDoing = false; window.render(); setTimeout(() => { const el = document.getElementById('live-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100); }
+        },
+
+        sendLiveAction: async (val, isRetry = false) => {
+            if(!val || !val.trim()) return;
+            const state = window.bloggerState;
+            const live = state.live;
+            if (live.isActionLoading) return;
+            const inputEl = document.getElementById('live-input');
+            if(inputEl && !isRetry) inputEl.value = '';
+
+            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
+            const char = store.contacts.find(c => c.id === acc.charId);
+            const chat = store.chats.find(c => c.charId === acc.charId);
+            const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+            const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+
+            if (!isRetry) live.messages.push({ type: 'user', author: boundP.name, content: val });
+            else live.messages = live.messages.filter(m => m.type !== 'error_retry');
+            
+            live.isActionLoading = true; window.render();
+            setTimeout(() => { const el = document.getElementById('live-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 50);
+
+            if (store.apiConfig?.apiKey) {
+                try {
+                    // 🌟 注入前五次上下文！
+                    const recentHistory = live.messages.filter(m => ['user', 'partner', 'opponent'].includes(m.type)).slice(-5).map(m => `[${m.author}]: ${m.content}`).join('\n');
+                    
+                    const prStatus = acc.studioData?.pr?.status === 'active' ? `【紧急：当前处于公关危机！传闻：${acc.studioData.pr.desc}】` : '';
+                    const voteAddon = live.lastVoteResult ? `\n【最新观众投票】：${live.lastVoteResult}。` : '';
+                    let pkAddon = '';
+                    if (live.view === 'pk') {
+                        pkAddon = `\n【PK连麦中】：你们正在和主播【${live.pk.opponent.name}】进行PK比拼！当前你们胜率是 ${live.pk.score}%。请判定本次互动你们获得了多少进度点数(-20到25)。\n必须额外生成："opponentReply": "对方的嘲讽或秀恩爱发言", "scoreBoost": 胜率点数, "punishment": "若有任意一方到达100或0，赢家对输家的惩罚(否则留空)"`;
+                    }
+                    
+                    // 🌟 核心切除：删掉了【互动任务】的提示，彻底封杀 AI 擅自抢戏做任务的行为
+                    const task = `情侣直播中，用户刚刚做了：${val}。\n近期上下文：\n${recentHistory}\n${prStatus}${voteAddon}\n【内置礼物】：荧光棒(￥1)、奶茶(￥15)、纯爱钻戒(￥99)、嘉年华(￥500)。\n${pkAddon}\n请生成：1. 伴侣的实时回应。2. 3条弹幕。3. 随机0-2个粉丝送出礼物。\n严格输出 JSON：{"partnerReply": "伴侣的话语/动作", "danmaku": ["粉丝弹幕1", "弹幕2", "弹幕3"], "gifts": [{"fan": "粉丝网名", "giftName": "奶茶", "value": 15}], "prResolved": 是否解除危机(boolean), "prFeedback": "若危机改变网友最新评价" ${live.view === 'pk' ? ',"opponentReply": "...","scoreBoost": 0,"punishment": ""' : ''}}`;
+
+                    const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
+                    const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                    const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
+
+                    if(json.partnerReply) live.messages.push({ type: 'partner', author: char.name, content: json.partnerReply });
+                    if(live.view === 'pk' && json.opponentReply) {
+                        live.messages.push({ type: 'opponent', author: live.pk.opponent.name, content: json.opponentReply });
+                        live.pk.score = Math.max(0, Math.min(100, live.pk.score + (json.scoreBoost || 0)));
+                        
+                        if (live.pk.score >= 100 || live.pk.score <= 0) {
+                            const isWin = live.pk.score >= 100;
+                            live.pkResult = { isWin: isWin, punishment: json.punishment || '输家做十个深蹲并夸对方是天下第一' };
+                            acc.followers += isWin ? 5000 : -2000; 
+                        }
+                    }
+                    if(json.danmaku) json.danmaku.forEach(d => live.messages.push({ type: 'fan', author: '网友' + Math.floor(Math.random()*999), content: d }));
+                    
+                    // 🌟 保留了礼物强力兜底
+                    if(json.gifts) json.gifts.forEach(g => { live.messages.push({ type: 'gift', author: g.fan || g.name || g.user || '神秘粉丝', giftName: g.giftName || g.gift || g.name || '专属礼物' }); live.income += (Number(g.value) || Number(g.price) || 15); });
+                    
+                    if(acc.studioData?.pr?.status === 'active' && json.prResolved) {
+                        acc.studioData.pr.status = 'resolved'; acc.studioData.pr.result = `直播澄清成功！${json.prFeedback}`;
+                        window.bloggerActions.notifyPartnerOfPR('直播澄清', json.prFeedback); window.actions?.showToast('🎉 危机解除！');
+                    }
+                } catch(e) { 
+                    console.error(e); 
+                    live.messages.push({ type: 'error_retry', author: boundP.name, content: 'AI脑细胞过载报错了...', retryVal: val });
+                } finally { live.isActionLoading = false; window.render(); setTimeout(() => { const el = document.getElementById('live-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100); }
+            } else { live.isActionLoading = false; window.render(); }
+        },
+
+        // 🌟 新增：执行惩罚并进入 PK 收尾阶段
+        executePKPunishment: async () => {
+            const state = window.bloggerState;
+            const live = state.live;
+            if (!store.apiConfig?.apiKey) return;
+            
+            const punishment = live.pkResult.punishment;
+            const isWin = live.pkResult.isWin;
+            
+            live.pkResult = null; // 隐藏弹窗
+            live.pk.isFinished = true; // 标记 PK 已彻底结束，替换为【结束连麦】按钮
+            live.isActionLoading = true; window.render();
+
+            const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
+            const char = store.contacts.find(c => c.id === acc.charId);
+            const chat = store.chats.find(c => c.charId === acc.charId);
+            const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
+            const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
+            
+            try {
+                const task = `直播PK刚刚结束。${isWin ? `你们赢了，对方【${live.pk.opponent.name}】输了。` : `你们输了，对方【${live.pk.opponent.name}】赢了。`}\n系统指定的惩罚大冒险是：${punishment}。\n请生成：1. 输家执行惩罚时的抓马反应/话语。2. 赢家在一旁看戏、嘲讽或得意的反应。3. 3条粉丝弹幕。\n严格输出JSON：{"loserReaction": "输家的反应", "winnerReaction": "赢家的反应", "danmaku": ["弹幕1", "弹幕2", "弹幕3"]}`;
+                const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
+                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
+                
+                live.messages.push({ type: 'system', author: '系统', content: `💥 进入惩罚环节：${punishment}` });
+                if (isWin) {
+                    live.messages.push({ type: 'opponent', author: live.pk.opponent.name, content: json.loserReaction });
+                    live.messages.push({ type: 'partner', author: char.name, content: json.winnerReaction });
+                } else {
+                    live.messages.push({ type: 'partner', author: char.name, content: json.loserReaction });
+                    live.messages.push({ type: 'opponent', author: live.pk.opponent.name, content: json.winnerReaction });
+                }
+                if(json.danmaku) json.danmaku.forEach(d => live.messages.push({ type: 'fan', author: '网友' + Math.floor(Math.random()*999), content: d }));
+            } catch(e) { console.error(e); }
+            finally { live.isActionLoading = false; window.render(); setTimeout(() => { const el = document.getElementById('live-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100); }
         },
     };
 }
@@ -1039,19 +1136,32 @@ export function renderBloggerApp(store) {
 
         const displayPosts = acc.posts || [];
 
-        // 🌟 1. 直播间全屏覆盖层 (彻底抹除代码缩进带来的前置空格Bug)
+        // 🌟 1. 直播间全屏覆盖层 (修复任务卡截断、新增查看惩罚逻辑)
         const liveOverlay = state.live?.isActive ? `
             <style>
-                @keyframes fly-left { 
-                    0% { transform: translate3d(100vw, 0, 0); } 
-                    100% { transform: translate3d(-150vw, 0, 0); } 
-                }
+                @keyframes fly-left { 0% { transform: translate3d(100vw, 0, 0); } 100% { transform: translate3d(-150vw, 0, 0); } }
                 .danmaku-item { white-space: nowrap; position: absolute; left: 0; will-change: transform; }
-                .live-scroll { -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+                .live-scroll { -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; touch-action: pan-y; }
                 .live-scroll::-webkit-scrollbar { width: 4px; }
                 .live-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.3); border-radius: 4px; }
             </style>
             <div class="absolute inset-0 z-[100] bg-[#1a1a1a] flex flex-col animate-in slide-in-from-bottom duration-500 overflow-hidden">
+                
+                ${state.live.pkResult ? `
+                    <div class="absolute inset-0 z-[120] bg-black/80 backdrop-blur-md flex flex-col items-center justify-center p-6 animate-in zoom-in duration-300">
+                        <div class="text-[60px] mb-4 animate-bounce">${state.live.pkResult.isWin ? '🏆' : '💀'}</div>
+                        <div class="text-[28px] font-black ${state.live.pkResult.isWin ? 'text-yellow-400' : 'text-gray-400'} mb-2 tracking-widest italic font-serif">${state.live.pkResult.isWin ? 'VICTORY' : 'DEFEAT'}</div>
+                        <div class="text-[13px] text-white/70 mb-8 font-serif">PK 结束，${state.live.pkResult.isWin ? '你们赢得了撒糖对决！' : '很遗憾，你们输了...'}</div>
+                        <div class="bg-white/10 border border-white/20 rounded-2xl p-6 w-full max-w-[280px] text-center shadow-2xl">
+                            <div class="text-[10px] ${state.live.pkResult.isWin ? 'text-yellow-400' : 'text-rose-400'} font-bold tracking-widest uppercase mb-4 font-serif">大冒险惩罚内容</div>
+                            <div class="text-[15px] font-bold text-white leading-relaxed whitespace-pre-wrap">${state.live.pkResult.punishment}</div>
+                        </div>
+                        <button class="mt-10 ${state.live.pkResult.isWin ? 'bg-yellow-500 text-gray-900' : 'bg-gray-700 text-white'} px-8 py-3 rounded-full font-bold tracking-widest uppercase active:scale-95 shadow-lg transition-transform flex items-center" onclick="window.bloggerActions.executePKPunishment()">
+                            ${state.live.isActionLoading ? '<i data-lucide="loader" class="w-4 h-4 animate-spin mr-2"></i>生成中...' : '查看惩罚互动'}
+                        </button>
+                    </div>
+                ` : ''}
+
                 <div class="pt-10 px-4 flex flex-col space-y-3 z-50">
                     <div class="flex justify-between items-center">
                         <div class="flex items-center bg-black/40 backdrop-blur-md rounded-full px-3 py-1 border border-white/10 shadow-sm">
@@ -1063,21 +1173,23 @@ export function renderBloggerApp(store) {
                             <button class="bg-rose-500 text-white text-[10px] px-3 py-1 rounded-full font-bold active:scale-95 shadow-lg" onclick="window.bloggerActions.endLive()">下播</button>
                         </div>
                     </div>
-                    <div class="bg-white/10 backdrop-blur-xl border border-white/20 p-3 rounded-xl shadow-2xl relative overflow-hidden">
+                    
+                    <div class="bg-white/10 backdrop-blur-xl border border-white/20 p-3 rounded-xl shadow-2xl relative overflow-hidden flex items-center">
                         <div class="absolute top-0 right-0 w-16 h-16 bg-white/5 rounded-full blur-xl -mr-8 -mt-8 pointer-events-none"></div>
-                        <div class="flex items-center justify-between relative z-10">
-                            <span class="text-[10px] text-white/60 font-serif italic shrink-0">Mission:</span>
-                            <span class="text-[11px] text-white font-bold ml-2 text-right leading-tight flex items-center">${state.live.isTaskLoading ? '<i data-lucide="loader" class="w-3 h-3 animate-spin mr-1.5"></i>' : ''}${state.live.task.title}</span>
+                        <div class="flex flex-col flex-1 min-w-0 mr-3 text-left relative z-10">
+                            <span class="text-[9px] text-white/60 font-serif italic mb-0.5">Live Mission:</span>
+                            <span class="text-[12px] text-white font-bold leading-tight whitespace-normal break-words">${state.live.task.title}</span>
                         </div>
+                        <button class="bg-rose-500/90 hover:bg-rose-500 text-white text-[10px] px-3.5 py-2 rounded-full font-bold tracking-widest uppercase shrink-0 active:scale-95 shadow-md flex items-center transition-transform pointer-events-auto z-10" onclick="window.bloggerActions.doLiveTask()">
+                            ${state.live.isTaskDoing ? '<i data-lucide="loader" class="w-3 h-3 animate-spin"></i>' : '做任务'}
+                        </button>
                     </div>
                 </div>
 
                 <div class="absolute top-[120px] left-0 w-full h-[200px] pointer-events-none z-[60] overflow-hidden">
                     ${(state.live.messages || []).filter(m => m.type === 'fan').slice(-25).map((m) => {
                         const seed = (m.content.length * 47) + (m.content.charCodeAt(0) || 0) + (m.author.length * 13);
-                        const randomTop = seed % 170;
-                        const randomSpeed = 9 + (seed % 7);
-                        return `<div class="danmaku-item text-white/95 font-bold text-[14px] drop-shadow-[0_1.5px_2px_rgba(0,0,0,0.9)] tracking-wide" style="top: ${randomTop}px; animation: fly-left ${randomSpeed}s linear forwards;">${m.content}</div>`;
+                        return `<div class="danmaku-item text-white/95 font-bold text-[14px] drop-shadow-[0_1.5px_2px_rgba(0,0,0,0.9)] tracking-wide" style="top: ${seed % 170}px; animation: fly-left ${9 + (seed % 7)}s linear forwards;">${m.content}</div>`;
                     }).join('')}
                 </div>
 
@@ -1100,7 +1212,7 @@ export function renderBloggerApp(store) {
                                 ${(state.live.messages || []).filter(m => ['user', 'partner', 'vote', 'error_retry'].includes(m.type)).slice(-2).map((m, i, arr) => `
                                     <div class="bg-black/60 backdrop-blur-md px-3 py-3 rounded-2xl rounded-bl-sm border ${m.type === 'error_retry' ? 'border-red-500/50' : 'border-blue-500/30'} shadow-2xl w-full flex flex-col pointer-events-auto shrink-0 ${i === arr.length - 1 ? 'animate-in slide-in-from-left duration-300' : 'opacity-70 scale-95 origin-bottom-left'}">
                                         <div class="text-[9px] font-black tracking-widest uppercase mb-1 ${m.type === 'partner' ? 'text-rose-400' : m.type === 'error_retry' ? 'text-red-400' : 'text-blue-300'} drop-shadow-sm text-left line-clamp-1 shrink-0">${m.type === 'partner' ? '👑 ' : m.type === 'error_retry' ? '⚠️ ' : ''}${m.author}</div>
-                                        <div class="text-[11px] font-bold text-white/90 leading-relaxed drop-shadow-md whitespace-pre-wrap text-left max-h-[120px] overflow-y-auto live-scroll pr-1 block">${m.type === 'error_retry' ? `<div>${m.content}</div><button class="mt-2 bg-red-500/80 text-white px-2 py-1 rounded-[4px] text-[9px] active:scale-95 inline-flex items-center" onclick="window.bloggerActions.sendLiveAction(decodeURIComponent('${encodeURIComponent(m.retryVal)}'), true)"><i data-lucide="refresh-cw" class="w-2.5 h-2.5 mr-1"></i>重roll</button>` : m.content}</div>
+                                        <div class="text-[11px] font-bold text-white/90 leading-relaxed drop-shadow-md whitespace-pre-wrap text-left max-h-[120px] overflow-y-auto live-scroll pr-1 block" style="touch-action: pan-y;">${m.type === 'error_retry' ? `<div>${m.content}</div><button class="mt-2 bg-red-500/80 text-white px-2 py-1 rounded-[4px] text-[9px] active:scale-95 inline-flex items-center" onclick="window.bloggerActions.sendLiveAction(decodeURIComponent('${encodeURIComponent(m.retryVal)}'), true)"><i data-lucide="refresh-cw" class="w-2.5 h-2.5 mr-1"></i>重roll</button>` : m.content}</div>
                                     </div>
                                 `).join('')}
                             </div>
@@ -1108,7 +1220,7 @@ export function renderBloggerApp(store) {
                                 ${(state.live.messages || []).filter(m => m.type === 'opponent').slice(-2).map((m, i, arr) => `
                                     <div class="bg-black/60 backdrop-blur-md px-3 py-3 rounded-2xl rounded-br-sm border border-rose-500/30 shadow-2xl w-full flex flex-col pointer-events-auto shrink-0 ${i === arr.length - 1 ? 'animate-in slide-in-from-right duration-300' : 'opacity-70 scale-95 origin-bottom-right'}">
                                         <div class="text-[9px] font-black tracking-widest uppercase mb-1 text-rose-300 drop-shadow-sm text-right line-clamp-1 shrink-0">😈 ${m.author}</div>
-                                        <div class="text-[11px] font-bold text-white/90 leading-relaxed drop-shadow-md whitespace-pre-wrap text-left max-h-[120px] overflow-y-auto live-scroll pr-1 block">${m.content}</div>
+                                        <div class="text-[11px] font-bold text-white/90 leading-relaxed drop-shadow-md whitespace-pre-wrap text-left max-h-[120px] overflow-y-auto live-scroll pr-1 block" style="touch-action: pan-y;">${m.content}</div>
                                     </div>
                                 `).join('')}
                             </div>
@@ -1116,7 +1228,7 @@ export function renderBloggerApp(store) {
                             ${(state.live.messages || []).filter(m => ['user', 'partner', 'vote', 'error_retry'].includes(m.type)).slice(-2).map((m, i, arr) => `
                                 <div class="bg-black/60 backdrop-blur-md px-5 py-3.5 rounded-3xl border ${m.type === 'error_retry' ? 'border-red-500/50' : 'border-white/10'} shadow-2xl w-full flex flex-col pointer-events-auto shrink-0 ${i === arr.length - 1 ? 'animate-in zoom-in slide-in-from-bottom-4 duration-300' : 'opacity-60 scale-95'}">
                                     <div class="text-[10px] font-black tracking-widest uppercase mb-1.5 ${m.type === 'partner' ? 'text-rose-400' : m.type === 'vote' ? 'text-blue-300' : m.type === 'error_retry' ? 'text-red-400' : 'text-orange-300'} drop-shadow-sm text-center shrink-0">${m.type === 'partner' ? '👑 ' : m.type === 'vote' ? '📊 ' : m.type === 'error_retry' ? '⚠️ ' : ''}${m.author}</div>
-                                    <div class="text-[13px] font-bold text-white/90 leading-relaxed drop-shadow-md whitespace-pre-wrap text-left max-h-[140px] overflow-y-auto live-scroll pr-1 block">${m.type === 'error_retry' ? `<div>${m.content}</div><button class="mt-3 bg-red-500/80 hover:bg-red-500 text-white px-2.5 py-1.5 rounded-md shadow-md active:scale-95 inline-flex items-center transition-transform" onclick="window.bloggerActions.sendLiveAction(decodeURIComponent('${encodeURIComponent(m.retryVal)}'), true)"><i data-lucide="refresh-cw" class="w-3 h-3 mr-1"></i>重roll</button>` : m.content}</div>
+                                    <div class="text-[13px] font-bold text-white/90 leading-relaxed drop-shadow-md whitespace-pre-wrap text-left w-full max-h-[140px] overflow-y-auto live-scroll pr-1 block" style="touch-action: pan-y; word-break: break-word;">${m.type === 'error_retry' ? `<div>${m.content}</div><button class="mt-3 bg-red-500/80 hover:bg-red-500 text-white px-2.5 py-1.5 rounded-md shadow-md active:scale-95 inline-flex items-center transition-transform" onclick="window.bloggerActions.sendLiveAction(decodeURIComponent('${encodeURIComponent(m.retryVal)}'), true)"><i data-lucide="refresh-cw" class="w-3 h-3 mr-1"></i>重roll</button>` : m.content}</div>
                                 </div>
                             `).join('')}
                         `}
@@ -1140,18 +1252,22 @@ export function renderBloggerApp(store) {
                 </div>
 
                 <div class="p-4 bg-gradient-to-t from-black to-transparent flex items-center space-x-3 absolute bottom-0 left-0 w-full z-50">
-                    <div class="flex-1 bg-black/40 backdrop-blur-md border border-white/20 rounded-full px-4 py-2.5 flex items-center shadow-inner pointer-events-auto">
-                        <input id="live-input" type="text" class="bg-transparent border-none outline-none text-white text-[12px] w-full placeholder:text-white/40" placeholder="${state.live.isActionLoading ? 'AI脑暴生成中...' : '打字互动 / 反击 / 撒糖...'}" ${state.live.isActionLoading ? 'disabled' : ''} onkeypress="if(event.key==='Enter') window.bloggerActions.sendLiveAction(this.value);"/>
-                        ${state.live.isActionLoading ? '<i data-lucide="loader" class="w-4 h-4 text-white animate-spin ml-2 shrink-0"></i>' : ''}
-                    </div>
-                    <button class="w-10 h-10 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 text-white active:scale-90 transition-transform shadow-lg relative pointer-events-auto" onclick="window.bloggerActions.openLiveVote()">
-                        <i data-lucide="bar-chart-2" class="w-4 h-4"></i>
-                        ${state.live.isVotingLoading ? '<div class="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center"><i data-lucide="loader" class="w-3 h-3 animate-spin text-white"></i></div>' : ''}
-                    </button>
-                    <button class="w-10 h-10 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 text-white active:scale-90 transition-transform shadow-lg pointer-events-auto" onclick="window.bloggerActions.startLivePK()">
-                        <i data-lucide="swords" class="w-4 h-4"></i>
-                        ${state.live.isPKLoading ? '<div class="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center"><i data-lucide="loader" class="w-3 h-3 animate-spin text-white"></i></div>' : ''}
-                    </button>
+                    ${state.live.pk?.isFinished ? `
+                        <button class="w-full bg-rose-500 text-white py-3 rounded-full font-bold tracking-widest uppercase shadow-lg active:scale-95 pointer-events-auto transition-transform" onclick="window.bloggerState.live.view = 'normal'; window.bloggerState.live.pk = null; window.render();">结束本次连麦</button>
+                    ` : `
+                        <div class="flex-1 bg-black/40 backdrop-blur-md border border-white/20 rounded-full px-4 py-2.5 flex items-center shadow-inner pointer-events-auto">
+                            <input id="live-input" type="text" class="bg-transparent border-none outline-none text-white text-[12px] w-full placeholder:text-white/40" placeholder="${state.live.isActionLoading ? 'AI脑暴生成中...' : '打字互动 / 反击 / 撒糖...'}" ${state.live.isActionLoading ? 'disabled' : ''} onkeypress="if(event.key==='Enter') window.bloggerActions.sendLiveAction(this.value);"/>
+                            ${state.live.isActionLoading ? '<i data-lucide="loader" class="w-4 h-4 text-white animate-spin ml-2 shrink-0"></i>' : ''}
+                        </div>
+                        <button class="w-10 h-10 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 text-white active:scale-90 transition-transform shadow-lg relative pointer-events-auto" onclick="window.bloggerActions.openLiveVote()">
+                            <i data-lucide="bar-chart-2" class="w-4 h-4"></i>
+                            ${state.live.isVotingLoading ? '<div class="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center"><i data-lucide="loader" class="w-3 h-3 animate-spin text-white"></i></div>' : ''}
+                        </button>
+                        <button class="w-10 h-10 bg-black/40 backdrop-blur-md rounded-full flex items-center justify-center border border-white/20 text-white active:scale-90 transition-transform shadow-lg pointer-events-auto" onclick="window.bloggerActions.startLivePK()">
+                            <i data-lucide="swords" class="w-4 h-4"></i>
+                            ${state.live.isPKLoading ? '<div class="absolute inset-0 bg-black/60 rounded-full flex items-center justify-center"><i data-lucide="loader" class="w-3 h-3 animate-spin text-white"></i></div>' : ''}
+                        </button>
+                    `}
                 </div>
             </div>
         ` : '';
