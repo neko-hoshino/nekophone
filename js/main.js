@@ -11,6 +11,8 @@ import { renderForumApp } from './apps/forum.js';
 import { renderPhoneApp } from './apps/phone.js';
 import { renderShoppingApp } from './apps/shopping.js';
 import { renderBloggerApp } from './apps/blogger.js';
+import { renderAo3App } from './apps/ao3.js';
+import { renderDarkroomApp } from './apps/darkroom.js';
 
 // 🌟 核心：全局注入 iOS 开关样式，所有 App 均可白嫖！
 if (!document.getElementById('global-ios-switch-css')) {
@@ -302,6 +304,8 @@ function render() {
   else if (store.currentApp === 'phone') appHtml = renderPhoneApp(store);
   else if (store.currentApp === 'shopping') appHtml = renderShoppingApp(store);
   else if (store.currentApp === 'blogger') appHtml = renderBloggerApp(store);
+  else if (store.currentApp === 'ao3') appHtml = renderAo3App(store);
+  else if (store.currentApp === 'darkroom') appHtml = renderDarkroomApp(store);
   else appHtml = `
       <div class="w-full h-full bg-white flex flex-col items-center justify-center text-gray-400">
         <i data-lucide="hammer" class="w-12 h-12 mb-4 text-gray-300"></i>

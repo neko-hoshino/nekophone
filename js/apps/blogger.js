@@ -845,11 +845,11 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                     const chat = store.chats.find(c => c.charId === acc.charId);
                     const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
                     const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
-                    const task = `博主刚刚开启了情侣直播。请结合平台风格、账号定位和伴侣【${char.name}】的性格，生成一个有趣的具体的直播互动小任务（例如：让伴侣夸你、给粉丝发个福利等）。严格输出JSON：{"taskTitle": "任务描述", "reward": 随机金币数(100到500之间)}`;
+                    const task = `博主刚刚开启了情侣直播。请结合平台风格和账号定位，以后台DM的身份，生成一个有趣的具体的直播互动小任务（例如：让伴侣夸你、给粉丝发个福利等），要具体且有互动性。严格输出JSON：{"taskTitle": "任务描述", "reward": 随机金币数(100到500之间)}`;
                     const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
                     const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                     const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
-                    window.bloggerState.live.task = { title: json.taskTitle, reward: json.reward };
+                    window.bloggerState.live.task = { title: json.taskTitle, reward: json.reward, status: 'unaccepted' };
                     window.bloggerState.live.messages.push({ type: 'system', author: '系统', content: `🎯 直播互动任务已派发：${json.taskTitle}` });
                 } catch(e) { console.error(e); } finally {
                     window.bloggerState.live.isTaskLoading = false; // 🌟 任务加载完毕，解锁
@@ -951,11 +951,19 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             } catch(e) { console.error(e); } finally { live.isPKLoading = false; window.render(); }
         },
 
-        doLiveTask: async () => {
+        // 🌟 新增：手动接取任务（带 AI 主动破冰破局功能）
+        acceptLiveTask: async () => {
             const state = window.bloggerState;
             const live = state.live;
-            if (live.isTaskDoing) return;
-            if (!store.apiConfig?.apiKey) return window.actions?.showToast('需配置API');
+            if (live.isActionLoading) return;
+            
+            // 没配 API 的话就直接变状态
+            if (!store.apiConfig?.apiKey) {
+                state.live.task.status = 'progress';
+                state.live.messages.push({ type: 'system', author: '系统', content: `🎬 已接取互动任务：${state.live.task.title}，快去互动吧！` });
+                window.render();
+                return;
+            }
 
             const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
             const char = store.contacts.find(c => c.id === acc.charId);
@@ -963,40 +971,55 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
             const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
 
-            live.isTaskDoing = true; window.render();
+            live.task.status = 'progress';
+            live.messages.push({ type: 'system', author: '系统', content: `🎬 已接取任务：${live.task.title}` });
+            live.isActionLoading = true; // 🌟 激活输入框边上的转圈圈，锁住输入
+            window.render();
+            setTimeout(() => { const el = document.getElementById('live-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 50);
+
             try {
-                // 🌟 上下文引擎 + PK关联
-                const recentHistory = live.messages.filter(m => ['user', 'partner', 'opponent'].includes(m.type)).slice(-4).map(m => `[${m.author}]: ${m.content}`).join('\n');
                 let pkAddon = '';
                 if (live.view === 'pk') {
-                    pkAddon = `\n【PK连麦中】：你们正与主播【${live.pk.opponent.name}】进行PK！当前胜率是 ${live.pk.score}%。请判定本次做任务你们获得了多少进度点数(0到25)。\n必须额外生成："opponentReply": "对方的破防/吐槽反应", "scoreBoost": 胜率增加, "punishment": "若满100赢家对输家的惩罚"`;
+                    pkAddon = `\n【PK连麦中】：你们正与主播【${live.pk.opponent.name}】进行PK比拼！`;
                 }
-                const task = `直播任务：【${live.task.title}】。博主按下了“完成任务”按钮，立刻和伴侣互动。\n近期互动记录：\n${recentHistory}\n${pkAddon}\n请直接生成：1. 伴侣配合完成任务的话语和动作。2. 3条粉丝弹幕。3. 随机送出礼物。4. 新任务。\n严格输出 JSON：{"partnerReply": "伴侣反应", "danmaku": ["..."], "gifts": [], "newTask": {"title": "新任务", "reward": 200} ${live.view === 'pk' ? ',"opponentReply": "...","scoreBoost": 0,"punishment": ""' : ''}}`;
-                
+
+                // 🌟 核心破冰指令：让伴侣来开这个头！
+                const task = `直播间刚刚接取了一个新互动任务：【${live.task.title}】。
+请你以伴侣【${char.name}】的身份，主动发起互动来引导用户完成这个任务。
+你可以撒娇、调侃、故意使坏，或者直接采取行动，把台阶递给用户。
+${pkAddon}
+请生成：1. 伴侣的主动开头话语/动作。2. 3-5条粉丝起哄弹幕。
+严格输出 JSON：{"partnerReply": "伴侣的话语/动作", "danmaku": ["起哄弹幕1", "弹幕2"]}`;
+
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { 
+                    method: 'POST', 
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, 
+                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) 
+                });
                 const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
 
-                live.messages.push({ type: 'system', author: '系统', content: `🎬 博主与伴侣完成了任务：${live.task.title}` });
+                // 🌟 把伴侣的开头和粉丝的起哄推上公屏
                 if(json.partnerReply) live.messages.push({ type: 'partner', author: char.name, content: json.partnerReply });
-                
-                if(live.view === 'pk' && json.opponentReply) {
-                    live.messages.push({ type: 'opponent', author: live.pk.opponent.name, content: json.opponentReply });
-                    live.pk.score = Math.max(0, Math.min(100, live.pk.score + (json.scoreBoost || 15)));
-                    if (live.pk.score >= 100 || live.pk.score <= 0) {
-                        const isWin = live.pk.score >= 100;
-                        live.pkResult = { isWin: isWin, punishment: json.punishment || '输家深情表白一分钟' };
-                        acc.followers += isWin ? 5000 : -2000; 
-                    }
-                }
-
                 if(json.danmaku) json.danmaku.forEach(d => live.messages.push({ type: 'fan', author: '网友' + Math.floor(Math.random()*999), content: d }));
-                if(json.gifts) json.gifts.forEach(g => { live.messages.push({ type: 'gift', author: g.fan || g.name || g.user || '神秘粉丝', giftName: g.giftName || g.gift || g.name || '专属礼物' }); live.income += (Number(g.value) || Number(g.price) || 15); });
-                
-                if(live.task.reward > 0) { live.income += live.task.reward; live.messages.push({ type: 'system', author: '系统', content: `🎉 任务达成！奖励￥${live.task.reward}` }); }
-                if(json.newTask && json.newTask.title) { live.task = { title: json.newTask.title, reward: json.newTask.reward || 200 }; live.messages.push({ type: 'system', author: '系统', content: `🎯 新任务发布：${live.task.title}` }); }
-            } catch(e) { console.error(e); window.actions?.showToast('执行失败，请重试'); }
-            finally { live.isTaskDoing = false; window.render(); setTimeout(() => { const el = document.getElementById('live-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100); }
+
+            } catch(e) { 
+                console.error(e); 
+                window.actions?.showToast('AI生成开场失败，请手动开始任务吧'); 
+            } finally { 
+                live.isActionLoading = false; 
+                window.render(); 
+                setTimeout(() => { const el = document.getElementById('live-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100); 
+            }
+        },
+
+        // 🌟 新增：手动强制标记完成 (AI犯蠢判不出来时的兜底)
+        forceCompleteLiveTask: () => {
+            const state = window.bloggerState;
+            state.live.task.status = 'completed';
+            state.live.messages.push({ type: 'system', author: '系统', content: `✅ 任务已手动标记完成！(随便发送一条任意互动即可触发系统结算与奖励)` });
+            window.render();
+            setTimeout(() => { const el = document.getElementById('live-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 50);
         },
 
         sendLiveAction: async (val, isRetry = false) => {
@@ -1021,18 +1044,26 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
 
             if (store.apiConfig?.apiKey) {
                 try {
-                    // 🌟 注入前五次上下文！
                     const recentHistory = live.messages.filter(m => ['user', 'partner', 'opponent'].includes(m.type)).slice(-5).map(m => `[${m.author}]: ${m.content}`).join('\n');
-                    
                     const prStatus = acc.studioData?.pr?.status === 'active' ? `【紧急：当前处于公关危机！传闻：${acc.studioData.pr.desc}】` : '';
                     const voteAddon = live.lastVoteResult ? `\n【最新观众投票】：${live.lastVoteResult}。` : '';
+                    
                     let pkAddon = '';
                     if (live.view === 'pk') {
                         pkAddon = `\n【PK连麦中】：你们正在和主播【${live.pk.opponent.name}】进行PK比拼！当前你们胜率是 ${live.pk.score}%。请判定本次互动你们获得了多少进度点数(-20到25)。\n必须额外生成："opponentReply": "对方的嘲讽或秀恩爱发言", "scoreBoost": 胜率点数, "punishment": "若有任意一方到达100或0，赢家对输家的惩罚(否则留空)"`;
                     }
                     
-                    // 🌟 核心切除：删掉了【互动任务】的提示，彻底封杀 AI 擅自抢戏做任务的行为
-                    const task = `情侣直播中，用户刚刚做了：${val}。\n近期上下文：\n${recentHistory}\n${prStatus}${voteAddon}\n【内置礼物】：荧光棒(￥1)、奶茶(￥15)、纯爱钻戒(￥99)、嘉年华(￥500)。\n${pkAddon}\n请生成：1. 伴侣的实时回应。2. 3条弹幕。3. 随机0-2个粉丝送出礼物。\n严格输出 JSON：{"partnerReply": "伴侣的话语/动作", "danmaku": ["粉丝弹幕1", "弹幕2", "弹幕3"], "gifts": [{"fan": "粉丝网名", "giftName": "奶茶", "value": 15}], "prResolved": 是否解除危机(boolean), "prFeedback": "若危机改变网友最新评价" ${live.view === 'pk' ? ',"opponentReply": "...","scoreBoost": 0,"punishment": ""' : ''}}`;
+                    // 🌟 核心升级：严格的状态机路由，不接就不告诉AI，接了就让AI当裁判！
+                    let taskAddon = '';
+                    if (live.task.status === 'progress') {
+                        taskAddon = `\n【当前互动任务(进行中)】：${live.task.title}。请配合用户完成此任务。严厉判定：若本次互动后【任意一方】达到了任务要求，必须将 isTaskCompleted 设为 true，并生成 newTask。`;
+                    } else if (live.task.status === 'completed') {
+                        taskAddon = `\n【当前互动任务(已完成)】：上一任务已被用户手动宣告完成！你必须强制将 isTaskCompleted 设为 true，并下发新任务 newTask。`;
+                    } else {
+                        taskAddon = `\n(目前暂无进行中的互动任务)`;
+                    }
+                    
+                    const task = `情侣直播中，用户刚刚做了：${val}。\n近期上下文：\n${recentHistory}\n${prStatus}${voteAddon}\n【内置礼物】：荧光棒(￥1)、奶茶(￥15)、纯爱钻戒(￥99)、嘉年华(￥500)。\n${pkAddon}${taskAddon}\n请生成：1. 伴侣的实时回应(切忌替用户采取任何行动，仅作回应)。2. 3-5条弹幕。3. 随机0-2个粉丝送出礼物。\n严格输出 JSON：{"partnerReply": "伴侣的话语/动作", "danmaku": ["粉丝弹幕1", "弹幕2", "弹幕3"], "gifts": [{"fan": "粉丝网名", "giftName": "奶茶", "value": 15}], "isTaskCompleted": boolean, "newTask": {"title": "新任务", "reward": 金额}, "prResolved": 是否解除危机(boolean), "prFeedback": "若危机改变网友最新评价" ${live.view === 'pk' ? ',"opponentReply": "...","scoreBoost": 0,"punishment": ""' : ''}}`;
 
                     const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
                     const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
@@ -1051,9 +1082,33 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                     }
                     if(json.danmaku) json.danmaku.forEach(d => live.messages.push({ type: 'fan', author: '网友' + Math.floor(Math.random()*999), content: d }));
                     
-                    // 🌟 保留了礼物强力兜底
-                    if(json.gifts) json.gifts.forEach(g => { live.messages.push({ type: 'gift', author: g.fan || g.name || g.user || '神秘粉丝', giftName: g.giftName || g.gift || g.name || '专属礼物' }); live.income += (Number(g.value) || Number(g.price) || 15); });
-                    
+                    if(json.gifts && Array.isArray(json.gifts)) {
+                        json.gifts.forEach(g => {
+                            if (typeof g === 'string') { live.messages.push({ type: 'gift', author: '热心网友', giftName: g }); live.income += 15; } 
+                            else if (typeof g === 'object' && g !== null) {
+                                const author = g.fan || g.user || g.sender || g.author || g.name || '神秘粉丝';
+                                const giftName = g.giftName || g.gift || g.item || (g.name !== author ? g.name : null) || '专属礼物';
+                                const value = Number(g.value) || Number(g.price) || Number(g.amount) || 15;
+                                live.messages.push({ type: 'gift', author: author, giftName: giftName });
+                                live.income += value;
+                            }
+                        });
+                    }
+
+                    // 🌟 任务判定与新任务下发
+                    const isCompleted = json.isTaskCompleted || live.task.status === 'completed';
+                    if(isCompleted && live.task.status !== 'unaccepted') {
+                        if(live.task.reward > 0) { live.income += live.task.reward; live.messages.push({ type: 'system', author: '系统', content: `🎉 任务达成！奖励￥${live.task.reward}` }); }
+                        if(json.newTask && json.newTask.title) { 
+                            live.task = { title: json.newTask.title, reward: json.newTask.reward || 200, status: 'unaccepted' }; 
+                            live.messages.push({ type: 'system', author: '系统', content: `🎯 新任务发布：${live.task.title}` }); 
+                        } else {
+                            // 兜底防 AI 漏掉新任务
+                            live.task = { title: "给粉丝发个超级福利", reward: 200, status: 'unaccepted' };
+                            live.messages.push({ type: 'system', author: '系统', content: `🎯 新任务发布：${live.task.title}` });
+                        }
+                    }
+
                     if(acc.studioData?.pr?.status === 'active' && json.prResolved) {
                         acc.studioData.pr.status = 'resolved'; acc.studioData.pr.result = `直播澄清成功！${json.prFeedback}`;
                         window.bloggerActions.notifyPartnerOfPR('直播澄清', json.prFeedback); window.actions?.showToast('🎉 危机解除！');
@@ -1178,12 +1233,21 @@ export function renderBloggerApp(store) {
                     <div class="bg-white/10 backdrop-blur-xl border border-white/20 p-3 rounded-xl shadow-2xl relative overflow-hidden flex items-center">
                         <div class="absolute top-0 right-0 w-16 h-16 bg-white/5 rounded-full blur-xl -mr-8 -mt-8 pointer-events-none"></div>
                         <div class="flex flex-col flex-1 min-w-0 mr-3 text-left relative z-10">
-                            <span class="text-[9px] text-white/60 font-serif italic mb-0.5">Live Mission:</span>
-                            <span class="text-[12px] text-white font-bold leading-tight whitespace-normal break-words">${state.live.task.title}</span>
+                            <div class="flex items-center space-x-1.5 mb-1">
+                                <span class="text-[9px] text-white/60 font-serif italic">Live Mission:</span>
+                                ${state.live.task.status === 'unaccepted' ? `<span class="bg-gray-500/50 text-gray-200 text-[8px] px-1.5 py-0.5 rounded border border-gray-400/50">未接取</span>` : 
+                                  state.live.task.status === 'progress' ? `<span class="bg-blue-500/50 text-blue-100 text-[8px] px-1.5 py-0.5 rounded border border-blue-400/50 animate-pulse">进行中</span>` : 
+                                  `<span class="bg-green-500/50 text-green-100 text-[8px] px-1.5 py-0.5 rounded border border-green-400/50">已完成待结算</span>`}
+                            </div>
+                            <span class="text-[12px] text-white font-bold leading-tight whitespace-normal break-words flex items-center">
+                                ${state.live.isTaskLoading ? '<i data-lucide="loader" class="w-3 h-3 animate-spin mr-1.5"></i>' : ''}${state.live.task.title}
+                            </span>
                         </div>
-                        <button class="bg-rose-500/90 hover:bg-rose-500 text-white text-[10px] px-3.5 py-2 rounded-full font-bold tracking-widest uppercase shrink-0 active:scale-95 shadow-md flex items-center transition-transform pointer-events-auto z-10" onclick="window.bloggerActions.doLiveTask()">
-                            ${state.live.isTaskDoing ? '<i data-lucide="loader" class="w-3 h-3 animate-spin"></i>' : '做任务'}
-                        </button>
+                        ${state.live.task.status === 'unaccepted' ? `
+                            <button class="bg-blue-500/90 hover:bg-blue-500 text-white text-[10px] px-3.5 py-2 rounded-full font-bold tracking-widest uppercase shrink-0 active:scale-95 shadow-md transition-transform pointer-events-auto z-10" onclick="window.bloggerActions.acceptLiveTask()">接取</button>
+                        ` : state.live.task.status === 'progress' ? `
+                            <button class="bg-green-500/90 hover:bg-green-500 text-white text-[10px] px-3.5 py-2 rounded-full font-bold tracking-widest uppercase shrink-0 active:scale-95 shadow-md transition-transform pointer-events-auto z-10" onclick="window.bloggerActions.forceCompleteLiveTask()">完成</button>
+                        ` : ''}
                     </div>
                 </div>
 
