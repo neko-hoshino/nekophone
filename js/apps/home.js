@@ -1,6 +1,66 @@
 // js/apps/home.js
 import { store } from '../store.js';
 
+// 🌟 核心升级：脱离 main.js 的全新原生内置播放器引擎！
+if (!window.homeAudioEngine) {
+    window.homeAudioEngine = new Audio();
+    window.homeAudioEngine.setAttribute('playsinline', 'true');
+    window.homeAudioEngine.setAttribute('webkit-playsinline', 'true');
+    
+    window.audioState = window.audioState || { currentIndex: 0, isPlaying: false, loopMode: 'list' };
+    
+    window.homeAudioEngine.onplay = () => { window.audioState.isPlaying = true; window.homeActions?.updateMusicUI?.(); };
+    window.homeAudioEngine.onpause = () => { window.audioState.isPlaying = false; window.homeActions?.updateMusicUI?.(); };
+    window.homeAudioEngine.onended = () => {
+        if (window.audioState.loopMode === 'single') window.homeAudioEngine.play().catch(()=>{});
+        else window.homeActions?.nextMusic?.();
+    };
+
+    window.audioPlayer = {
+        audio: window.homeAudioEngine,
+        getTrackName: () => {
+            const list = store.customAudio || [];
+            return list[window.audioState.currentIndex]?.name || '暂无音乐';
+        },
+        getArtistName: () => {
+            const list = store.customAudio || [];
+            return list[window.audioState.currentIndex]?.artist || '未知歌手';
+        },
+        play: () => { window.homeAudioEngine.play().catch(e=>console.log(e)); },
+        pause: () => { window.homeAudioEngine.pause(); },
+        next: () => {
+            const list = store.customAudio || [];
+            if (list.length <= 1) return;
+            window.audioState.currentIndex = (window.audioState.currentIndex + 1) % list.length;
+            window.audioPlayer.loadAndPlay();
+        },
+        prev: () => {
+            const list = store.customAudio || [];
+            if (list.length <= 1) return;
+            window.audioState.currentIndex = (window.audioState.currentIndex - 1 + list.length) % list.length;
+            window.audioPlayer.loadAndPlay();
+        },
+        toggleLoop: () => { 
+            window.audioState.loopMode = window.audioState.loopMode === 'list' ? 'single' : 'list'; 
+            window.homeActions?.updateMusicUI?.();
+        },
+        loadAndPlay: () => {
+            const list = store.customAudio || [];
+            if (list.length === 0) {
+                window.homeAudioEngine.pause();
+                window.homeAudioEngine.removeAttribute('src');
+                return;
+            }
+            if (window.audioState.currentIndex >= list.length) window.audioState.currentIndex = 0; // 越界保护
+            let src = list[window.audioState.currentIndex].src;
+            if (src.startsWith('http')) src += (src.includes('?') ? '&' : '?') + 't=' + Date.now();
+            window.homeAudioEngine.setAttribute('src', src);
+            window.homeAudioEngine.play().catch(e=>console.log(e));
+            window.homeActions?.updateMusicUI?.();
+        }
+    };
+}
+
 // 初始化弹窗与定时器状态
 if (!window.homeState) window.homeState = { 
     showAddAudioModal: false, showPlaylistModal: false, showTodoModal: false, showPeriodModal: false, 
@@ -9,34 +69,33 @@ if (!window.homeState) window.homeState = {
     isRestoringScroll: false 
 };
 
-// 🌟 终极防崩溃版：滚动歌词引擎 (兼容 LRC 精准时间轴 与 TXT 黑魔法等比估算)
+// 🌟 终极防崩溃歌词引擎 (兼容 LRC 与 TXT 黑魔法估算，并实时对齐最新数据库)
 if (!window.lyricTimerInt) {
     window.lyricTimerInt = setInterval(() => {
         const el = document.getElementById('music-lyric-line');
         if(el && window.audioState?.isPlaying && window.audioPlayer?.audio) {
             const ct = window.audioPlayer.audio.currentTime || 0;
             
-            // 🌟 核心修复：防止 duration 为 NaN 或 0 导致等比进度算术崩溃！
             let rawDuration = window.audioPlayer.audio.duration;
-            if (isNaN(rawDuration) || rawDuration === 0 || rawDuration === Infinity) rawDuration = 200; // 兜底防止崩溃
+            if (!rawDuration || isNaN(rawDuration) || rawDuration === Infinity) rawDuration = 200; 
             const duration = rawDuration;
 
-            const track = window.audioPlaylist?.[window.audioState.currentIndex];
+            const list = store.customAudio || [];
+            const track = list[window.audioState.currentIndex];
             
             if(track && track.lyrics && Array.isArray(track.lyrics) && track.lyrics.length > 0) {
                 let active = '🎵';
                 
                 if (typeof track.lyrics[0] === 'object') {
-                    // LRC 精准模式
                     for(let i=0; i<track.lyrics.length; i++) {
                         if(ct >= track.lyrics[i].time) active = track.lyrics[i].text;
                         else break;
                     }
                 } else if (typeof track.lyrics[0] === 'string') {
-                    // TXT 黑魔法等比模式 (严格控制在 0~1 之间，防止越界)
+                    // TXT 黑魔法等比模式
                     const progress = Math.max(0, Math.min(1, ct / duration));
                     const idx = Math.min(Math.floor(progress * track.lyrics.length), track.lyrics.length - 1);
-                    active = track.lyrics[idx];
+                    active = track.lyrics[idx] || '🎵';
                 }
 
                 if(el.innerText !== active && active) {
@@ -104,8 +163,10 @@ if (!window.homeActions) {
         window.actions?.showToast('🩸 月经记录已更新'); 
     },
     
+    // 🌟 修复后的实时同步 UI 更新
     updateMusicUI: () => {
-        const hasTrack = window.audioPlaylist && window.audioPlaylist.length > 0;
+        const list = store.customAudio || [];
+        const hasTrack = list.length > 0;
         if (hasTrack) {
             const trackName = window.audioPlayer.getTrackName();
             const artistName = window.audioPlayer.getArtistName();
@@ -118,6 +179,13 @@ if (!window.homeActions) {
                 iconEl.setAttribute('data-lucide', window.audioState.isPlaying ? 'pause' : 'play');
                 if (window.lucide) window.lucide.createIcons();
             }
+            
+            const loopIcon = window.audioState.loopMode === 'list' ? 'repeat' : 'repeat-1';
+            const loopEl = document.getElementById('mc-audio-loop-icon');
+            if (loopEl) {
+                loopEl.setAttribute('data-lucide', loopIcon);
+                if (window.lucide) window.lucide.createIcons();
+            }
         }
     },
     triggerReaction: () => {
@@ -126,9 +194,20 @@ if (!window.homeActions) {
         }
     },
     togglePlay: () => {
-        if(window.audioPlaylist && window.audioPlaylist.length === 0) return window.homeActions.openAddAudioModal();
-        if (window.audioState.isPlaying) { window.audioPlayer.pause(); } 
-        else { window.audioPlayer.play(); window.homeActions.triggerReaction(); }
+        const list = store.customAudio || [];
+        if(list.length === 0) return window.homeActions.openAddAudioModal();
+        
+        if (window.audioState.isPlaying) { 
+            window.audioPlayer.pause(); 
+        } else { 
+            // 如果引擎里还没有 src，强制装弹播放
+            if (!window.homeAudioEngine.getAttribute('src')) {
+                window.audioPlayer.loadAndPlay();
+            } else {
+                window.audioPlayer.play(); 
+            }
+            window.homeActions.triggerReaction(); 
+        }
         window.homeActions.updateMusicUI(); 
     },
     nextMusic: () => { if(window.audioPlayer) { window.audioPlayer.next(); window.homeActions.triggerReaction(); window.homeActions.updateMusicUI(); } },
@@ -136,12 +215,7 @@ if (!window.homeActions) {
     toggleLoop: () => { 
         if(window.audioPlayer) {
             window.audioPlayer.toggleLoop(); 
-            const loopIcon = window.audioState.loopMode === 'list' ? 'repeat' : 'repeat-1';
-            const iconEl = document.getElementById('mc-audio-loop-icon');
-            if (iconEl) {
-                iconEl.setAttribute('data-lucide', loopIcon);
-                if (window.lucide) window.lucide.createIcons();
-            }
+            window.homeActions.updateMusicUI();
         }
     },
     
@@ -194,7 +268,6 @@ if (!window.homeActions) {
         if (window.actions.saveStore) window.actions.saveStore(); 
         
         window.actions.showToast('网络音频添加成功！');
-        if (window.updateAudioPlaylist) window.updateAudioPlaylist();
         window.audioState.currentIndex = store.customAudio.length - 1; 
         window.audioPlayer.loadAndPlay();
         window.homeState.showAddAudioModal = false; 
@@ -215,7 +288,6 @@ if (!window.homeActions) {
             if (window.actions.saveStore) window.actions.saveStore(); 
             
             window.actions.showToast('本地音乐导入成功！');
-            if (window.updateAudioPlaylist) window.updateAudioPlaylist(); 
             window.audioState.currentIndex = store.customAudio.length - 1; 
             window.audioPlayer.loadAndPlay();
             window.homeActions.triggerReaction(); 
@@ -235,10 +307,10 @@ if (!window.homeActions) {
         if (!confirm('确定删除这首音乐吗？')) return;
         store.customAudio.splice(idx, 1);
         if (window.actions.saveStore) window.actions.saveStore(); 
-        if (window.updateAudioPlaylist) window.updateAudioPlaylist();
         
-        if (window.audioPlaylist.length === 0) { window.audioState.isPlaying = false; window.audioPlayer.loadAndPlay(); } 
-        else { if (window.audioState.currentIndex >= window.audioPlaylist.length) window.audioState.currentIndex = 0; window.audioPlayer.loadAndPlay(); }
+        const list = store.customAudio || [];
+        if (list.length === 0) { window.audioState.isPlaying = false; window.audioPlayer.loadAndPlay(); } 
+        else { if (window.audioState.currentIndex >= list.length) window.audioState.currentIndex = 0; window.audioPlayer.loadAndPlay(); }
         window.homeActions.doRender();
     },
 
@@ -253,8 +325,9 @@ if (!window.homeActions) {
     },
     
     generateMusicReaction: async () => {
-        if (!store.apiConfig?.apiKey || !store.musicCompanionId || !window.audioPlaylist || window.audioPlaylist.length === 0) return;
-        const track = window.audioPlaylist[window.audioState.currentIndex];
+        const list = store.customAudio || [];
+        if (!store.apiConfig?.apiKey || !store.musicCompanionId || list.length === 0) return;
+        const track = list[window.audioState.currentIndex];
         const char = store.contacts.find(c => c.id === store.musicCompanionId);
         if (!char) return;
 
@@ -294,8 +367,10 @@ if (!window.homeActions) {
     },
 
     saveBirthday: (val) => {
+        if (!val) return window.actions?.showToast('请选择有效的日期');
         store.birthday = val;
-        window.homeActions.doRender();
+        if(window.actions.saveStore) window.actions.saveStore();
+        window.homeActions.generateDailyFortune();
     },
     editBirthday: () => {
         store.birthday = null;
@@ -371,6 +446,13 @@ function createDockIcon(iconName, label, actionStr, mcClass, isDark) {
 }
 
 export function renderHomeApp(store) {
+  // 🌟 核心强绑定：每次刷新页面，强制检查并载入已有的第一首歌，绝不等待！
+  const list = store.customAudio || [];
+  if (list.length > 0 && window.homeAudioEngine && !window.homeAudioEngine.getAttribute('src')) {
+      window.audioState.currentIndex = Math.min(window.audioState.currentIndex || 0, list.length - 1);
+      window.homeAudioEngine.setAttribute('src', list[window.audioState.currentIndex].src);
+  }
+
   const my = (store.personas && store.personas.length > 0) ? store.personas[0] : { name: '', avatar: '' };
   let avatarHtml = `<div class="w-full h-full flex items-center justify-center text-4xl">${my.avatar}</div>`;
   if (my.avatar && (my.avatar.startsWith('http') || my.avatar.startsWith('data:'))) {
@@ -413,8 +495,8 @@ export function renderHomeApp(store) {
 
   return `
     <div class="w-full h-full relative flex flex-col overflow-hidden animate-in fade-in duration-300" style="${bgStyle}">
-      <input type="file" id="upload-bg-audio" accept="audio/*" class="hidden" onchange="window.homeActions.uploadBgAudio(event)" />
       
+      <input type="file" id="upload-bg-audio" accept="audio/*, .mp3, .wav, .m4a, .aac, audio/mpeg, audio/mp4" class="hidden" onchange="window.homeActions.uploadBgAudio(event)" />
       <input type="file" id="home-avatar-upload" accept="image/*" class="hidden" onchange="window.homeActions.updateAvatar(event)" />
       <input type="file" id="home-polaroid-upload" accept="image/*" class="hidden" onchange="window.homeActions.uploadPolaroid(event)" />
 
@@ -561,7 +643,7 @@ export function renderHomeApp(store) {
                       <div id="keep-alive-status" class="w-full h-[340px] shrink-0 flex flex-col rounded-[32px] ${isDark?'bg-black/30':'bg-white/30'} relative z-10 px-5 py-5 animate-in slide-in-from-top-4 duration-500 backdrop-blur-md">
                           
                           ${(() => {
-                              const hasTrack = window.audioPlaylist && window.audioPlaylist.length > 0;
+                              const hasTrack = list && list.length > 0;
                               const trackName = hasTrack ? window.audioPlayer.getTrackName() : "暂无音乐";
                               const artistName = hasTrack ? window.audioPlayer.getArtistName() : "上传歌词让AI陪你听歌";
                               const isPlaying = window.audioState ? window.audioState.isPlaying : false;
@@ -569,7 +651,7 @@ export function renderHomeApp(store) {
                               const loopIcon = loopMode === 'list' ? 'repeat' : 'repeat-1';
                               const compChar = store.musicCompanionId ? store.contacts.find(c=>c.id===store.musicCompanionId) : null;
                               
-                              const currentTrack = hasTrack ? window.audioPlaylist[window.audioState.currentIndex] : null;
+                              const currentTrack = hasTrack ? list[window.audioState.currentIndex] : null;
                               const hasLyrics = currentTrack?.lyrics;
                               const isRawText = hasLyrics && Array.isArray(hasLyrics) && typeof hasLyrics[0] === 'string';
                               const lyricPlaceholder = isRawText ? '🎵 已挂载纯文本歌词' : (hasLyrics ? '🎵' : '暂无歌词数据');
@@ -616,12 +698,16 @@ export function renderHomeApp(store) {
                                           <span>Daily Fortune · 专属运势</span>
                                           ${store.birthday ? `<i data-lucide="edit-2" class="w-3 h-3 cursor-pointer hover:opacity-100" onclick="window.homeActions.editBirthday()" title="修改出生日期"></i>` : ''}
                                       </div>
+                                      ${(store.dailyFortune && store.dailyFortune.date === new Date().toISOString().split('T')[0]) ? `<i data-lucide="refresh-cw" class="w-3.5 h-3.5 cursor-pointer hover:opacity-100 ${window.homeState.isGeneratingFortune ? 'animate-spin' : ''}" onclick="window.homeActions.generateDailyFortune()"></i>` : ''}
                                   </div>
                                   
                                   ${!store.birthday ? `
                                       <div class="flex-1 flex flex-col items-center justify-center opacity-80 z-20">
                                           <span class="text-[10px] tracking-widest font-bold mb-2 ${isDark?'text-white/60':'text-gray-500'}">设定生辰，开启星盘</span>
-                                          <input type="date" onchange="window.homeActions.saveBirthday(this.value)" class="bg-transparent border ${isDark?'border-white/20 text-white':'border-gray-300 text-gray-700'} rounded-lg px-3 py-1 text-[11px] outline-none shadow-sm cursor-pointer">
+                                          <div class="flex items-center space-x-2">
+                                              <input id="fortune-bday-input" type="date" class="bg-transparent border ${isDark?'border-white/20 text-white':'border-gray-300 text-gray-700'} rounded-lg px-2 py-1 text-[11px] outline-none shadow-sm cursor-pointer">
+                                              <button onclick="window.homeActions.saveBirthday(document.getElementById('fortune-bday-input').value)" class="bg-gray-800 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm active:scale-95 transition-transform">确定</button>
+                                          </div>
                                       </div>
                                   ` : (store.dailyFortune && store.dailyFortune.date === new Date().toISOString().split('T')[0]) ? `
                                       <div class="flex flex-col w-full mb-1.5">
@@ -739,7 +825,7 @@ export function renderHomeApp(store) {
                     
                     <div class="flex items-center justify-between bg-white border border-gray-200 rounded-xl p-3 shadow-sm mt-2">
                         <div class="flex items-center text-[12px] font-bold text-gray-600"><i data-lucide="subtitles" class="w-4 h-4 mr-2"></i>${window.homeState.tempLyrics ? '<span class="text-green-500">已解析歌词数据</span>' : '挂载 TXT/LRC 歌词'}</div>
-                        <input type="file" id="audio-lyric-upload" accept=".lrc,.txt" class="hidden" onchange="window.homeActions.uploadLyricFile(event)" />
+                        <input type="file" id="audio-lyric-upload" accept=".lrc,.txt,text/plain" class="hidden" onchange="window.homeActions.uploadLyricFile(event)" />
                         <button class="bg-gray-100 px-3 py-1.5 rounded-lg text-[10px] font-bold text-gray-700 active:scale-95" onclick="document.getElementById('audio-lyric-upload').click()">${window.homeState.tempLyrics ? '重新上传' : '点击上传'}</button>
                     </div>
 
@@ -753,11 +839,11 @@ export function renderHomeApp(store) {
         <div class="absolute inset-0 z-[100] bg-black/40 flex items-center justify-center p-5 backdrop-blur-sm animate-in fade-in" onclick="window.homeActions.closePlaylist()">
             <div class="bg-[#f6f6f6] w-full max-h-[70vh] rounded-[24px] shadow-2xl flex flex-col overflow-hidden animate-in zoom-in-95 duration-200" onclick="event.stopPropagation()">
                 <div class="px-5 py-4 border-b border-gray-100 flex justify-between items-center bg-white shrink-0">
-                    <span class="font-bold text-gray-800 text-[16px] flex items-center"><i data-lucide="list-music" class="w-5 h-5 mr-2 text-gray-800"></i>播放列表 (${window.audioPlaylist?.length || store.customAudio?.length || 0})</span>
+                    <span class="font-bold text-gray-800 text-[16px] flex items-center"><i data-lucide="list-music" class="w-5 h-5 mr-2 text-gray-800"></i>播放列表 (${list.length || 0})</span>
                     <i data-lucide="x" class="w-5 h-5 text-gray-400 cursor-pointer active:scale-90 bg-gray-50 p-1 rounded-full" onclick="window.homeActions.closePlaylist()"></i>
                 </div>
                 <div class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar">
-                    ${((window.audioPlaylist && window.audioPlaylist.length > 0) ? window.audioPlaylist : (store.customAudio || [])).map((track, idx) => `
+                    ${list.map((track, idx) => `
                         <div class="bg-white rounded-[16px] p-3 flex items-center justify-between shadow-sm border ${window.audioState.currentIndex === idx ? 'border-gray-800 bg-gray-50' : 'border-gray-100'} cursor-pointer active:scale-[0.98] transition-all" onclick="window.homeActions.playTrackFromList(${idx})">
                             <div class="w-10 h-10 rounded-lg bg-gray-200 mr-3 overflow-hidden bg-cover bg-center shrink-0 flex items-center justify-center text-gray-400 font-bold">${idx + 1}</div>
                             <div class="flex flex-col flex-1 overflow-hidden pr-3">
@@ -773,7 +859,7 @@ export function renderHomeApp(store) {
                             </div>
                         </div>
                     `).join('')}
-                    ${((window.audioPlaylist && window.audioPlaylist.length > 0) ? window.audioPlaylist : (store.customAudio || [])).length === 0 ? `<div class="text-center py-10 text-gray-400 text-[13px] tracking-widest">列表空空如也，快去添加吧</div>` : ''}
+                    ${list.length === 0 ? `<div class="text-center py-10 text-gray-400 text-[13px] tracking-widest">列表空空如也，快去添加吧</div>` : ''}
                 </div>
             </div>
         </div>
