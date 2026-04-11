@@ -64,60 +64,79 @@ window.settingsActions = {
     if (el) el.innerText = `${mb} MB`;
   },
   // 一键瘦身与无用数据清理引擎
-  optimizeStorage: async () => {
-    window.actions.showToast('正在执行深层瘦身，请勿退出页面...');
-    const beforeSize = JSON.stringify(store).length;
-    // 1. 物理抹杀孤儿数据 (删掉已经被删除的角色的聊天和记忆)
-    const validCharIds = store.contacts.map(c => c.id);
-    store.chats = store.chats.filter(c => validCharIds.includes(c.charId));
-    store.memories = (store.memories || []).filter(m => validCharIds.includes(m.charId));
-    const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
-    const oldMomentsCount = (store.moments || []).length;
-    store.moments = (store.moments || []).filter(m => m.id >= threeDaysAgo);
-    const deletedCount = oldMomentsCount - store.moments.length;
-    if (deletedCount > 0) console.log(`[系统] 已物理销毁 ${deletedCount} 条过期朋友圈数据`);
-    // 🌟 2. 将历史积压的庞大 Base64 原图进行智能分级瘦身
-    const compressPromises = [];
-    const compressIfNeed = (obj, key, isAvatar = false) => {
-       // 头像：只要大于 500KB (约 650000 字符) 就强制触发压缩
-       // 其他图片(壁纸/照片)：大于 5MB (约 6500000 字符) 才执行压缩
-       const threshold = isAvatar ? 650000 : 6500000;
-       if (obj[key] && obj[key].length > threshold && obj[key].startsWith('data:image')) {
-          compressPromises.push(new Promise(res => {
-             // 第三个参数传 isAvatar，决定是否进行 800px 的重度压缩
-             window.actions.compressImage(obj[key], (newBase64) => {
-                obj[key] = newBase64; res();
-             }, isAvatar);
-          }));
-       }
-    };
-    // 明确指定谁是头像，谁是壁纸
-    store.personas.forEach(p => compressIfNeed(p, 'avatar', true));
-    store.contacts.forEach(c => { 
-       compressIfNeed(c, 'avatar', true); 
-       compressIfNeed(c, 'videoAvatar', true); 
-       compressIfNeed(c, 'bgImage', false); // 聊天背景属于大图
-    });
-    // 全局外观里的背景全部免死（只按5MB触发轻度压缩）
-    if (store.appearance) {
-       compressIfNeed(store.appearance, 'wallpaper', false);
-       compressIfNeed(store.appearance, 'topBarBg', false);
-       compressIfNeed(store.appearance, 'bottomBarBg', false);
-       compressIfNeed(store.appearance, 'interfaceBg', false);
-    }
-    if (store.momentBg) compressIfNeed(store, 'momentBg', false);
-    store.chats.forEach(chat => chat.messages.forEach(m => { 
-       if (m.imageUrl) compressIfNeed(m, 'imageUrl', false); 
-    }));
-    store.moments?.forEach(m => { 
-       if (m.imageUrl) compressIfNeed(m, 'imageUrl', false); 
-    });
-    await Promise.all(compressPromises);
-    const afterSize = JSON.stringify(store).length;
-    const savedMb = ((beforeSize - afterSize) / 1024 / 1024).toFixed(2);
-    window.actions.showToast(`瘦身完成！共为您清理出 ${savedMb} MB 空间！`);
-    window.render();
-  },
+    optimizeStorage: async () => {
+        window.actions.showToast('正在执行深层瘦身，请勿退出页面...');
+        const beforeSize = JSON.stringify(store).length;
+        
+        // 1. 物理抹杀孤儿数据 (删掉已经被删除的角色的聊天和记忆)
+        const validCharIds = store.contacts.map(c => c.id);
+        store.chats = store.chats.filter(c => validCharIds.includes(c.charId));
+        store.memories = (store.memories || []).filter(m => validCharIds.includes(m.charId));
+        const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+        const oldMomentsCount = (store.moments || []).length;
+        store.moments = (store.moments || []).filter(m => m.id >= threeDaysAgo);
+        const deletedCount = oldMomentsCount - store.moments.length;
+        if (deletedCount > 0) console.log(`[系统] 已物理销毁 ${deletedCount} 条过期朋友圈数据`);
+        
+        // 🌟 2. 将历史积压的庞大 Base64 原图进行智能分级瘦身
+        const compressPromises = [];
+        const compressIfNeed = (obj, key, isAvatar = false) => {
+            // 头像及UI小图标：只要大于 500KB (约 650000 字符) 就强制触发压缩
+            // 其他图片(壁纸/照片)：大于 5MB (约 6500000 字符) 才执行压缩
+            const threshold = isAvatar ? 650000 : 6500000;
+            if (obj[key] && obj[key].length > threshold && obj[key].startsWith('data:image')) {
+                compressPromises.push(new Promise(res => {
+                    // 第三个参数传 isAvatar，决定是否进行中度/重度分辨率压缩
+                    window.actions.compressImage(obj[key], (newBase64) => {
+                        obj[key] = newBase64; res();
+                    }, isAvatar);
+                }));
+            }
+        };
+
+        // 明确指定谁是头像，谁是壁纸
+        store.personas.forEach(p => compressIfNeed(p, 'avatar', true));
+        store.contacts.forEach(c => { 
+            compressIfNeed(c, 'avatar', true); 
+            compressIfNeed(c, 'videoAvatar', true); 
+            compressIfNeed(c, 'bgImage', false); // 聊天背景属于大图
+        });
+
+        // 🌟 核心升级：外观图库全面纳入监控！
+        if (store.appearance) {
+            compressIfNeed(store.appearance, 'wallpaper', false);
+            compressIfNeed(store.appearance, 'topBarBg', false);
+            compressIfNeed(store.appearance, 'bottomBarBg', false);
+            compressIfNeed(store.appearance, 'interfaceBg', false);
+
+            // 遍历监控所有【桌面 App 图标】
+            if (store.appearance.customIcons) {
+                Object.keys(store.appearance.customIcons).forEach(iconKey => {
+                    compressIfNeed(store.appearance.customIcons, iconKey, true);
+                });
+            }
+            // 遍历监控所有【聊天室与扩展菜单按钮】
+            if (store.appearance.customButtons) {
+                Object.keys(store.appearance.customButtons).forEach(btnKey => {
+                    compressIfNeed(store.appearance.customButtons, btnKey, true);
+                });
+            }
+        }
+
+        if (store.momentBg) compressIfNeed(store, 'momentBg', false);
+        store.chats.forEach(chat => chat.messages.forEach(m => { 
+            if (m.imageUrl) compressIfNeed(m, 'imageUrl', false); 
+        }));
+        store.moments?.forEach(m => { 
+            if (m.imageUrl) compressIfNeed(m, 'imageUrl', false); 
+        });
+
+        await Promise.all(compressPromises);
+        const afterSize = JSON.stringify(store).length;
+        const savedMb = ((beforeSize - afterSize) / 1024 / 1024).toFixed(2);
+        window.actions.showToast(`瘦身完成！共为您清理出 ${savedMb} MB 空间！`);
+        window.render();
+    },
   // 恢复数据也必须写入新的 DB 引擎
   importData: (event) => {
     const file = event.target.files[0]; if(!file) return;

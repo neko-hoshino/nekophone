@@ -4794,19 +4794,23 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
             </div>
 
             <div class="flex justify-between items-center px-5 mt-3 mb-1">
-               <div class="flex flex-col items-center cursor-pointer active:scale-90 transition-transform group" onclick="window.wxActions.openVirtualModal('voice')">
+               <div class="mc-btn-voice flex flex-col items-center cursor-pointer active:scale-90 transition-transform group" onclick="window.wxActions.openVirtualModal('voice')">
                  <i data-lucide="mic" class="text-gray-500 group-hover:text-gray-700" style="width: 26px; height: 26px;"></i>
                </div>
-               <div class="flex flex-col items-center cursor-pointer active:scale-90 transition-transform group" onclick="document.getElementById('real-image-input').click()">
+               
+               <div class="mc-btn-image flex flex-col items-center cursor-pointer active:scale-90 transition-transform group" onclick="document.getElementById('real-image-input').click()">
                  <i data-lucide="image" class="text-gray-500 group-hover:text-gray-700" style="width: 26px; height: 26px;"></i>
                </div>
-               <div class="flex flex-col items-center cursor-pointer active:scale-90 transition-transform group" onclick="window.wxActions.openVirtualModal('image')">
+               
+               <div class="mc-btn-camera flex flex-col items-center cursor-pointer active:scale-90 transition-transform group" onclick="window.wxActions.openVirtualModal('image')">
                  <i data-lucide="camera" class="text-gray-500 group-hover:text-gray-700" style="width: 26px; height: 26px;"></i>
                </div>
-               <div class="flex flex-col items-center cursor-pointer active:scale-90 transition-transform group" onclick="window.wxActions.toggleEmojiMenu()">
+               
+               <div class="mc-btn-emoji flex flex-col items-center cursor-pointer active:scale-90 transition-transform group" onclick="window.wxActions.toggleEmojiMenu()">
                  <i data-lucide="smile" class="transition-colors ${wxState.showEmojiMenu ? 'text-[#07c160]' : 'text-gray-500 group-hover:text-gray-700'}" style="width: 26px; height: 26px;"></i>
                </div>
-               <div class="flex flex-col items-center cursor-pointer active:scale-90 transition-transform group" onclick="window.wxActions.togglePlusMenu()">
+               
+               <div class="mc-btn-plus flex flex-col items-center cursor-pointer active:scale-90 transition-transform group" onclick="window.wxActions.togglePlusMenu()">
                  <i data-lucide="plus-circle" class="transition-all duration-200 ${wxState.showPlusMenu ? 'rotate-45 text-[#07c160]' : 'text-gray-500 group-hover:text-gray-700'}" style="width: 26px; height: 26px;"></i>
                </div>
             </div>

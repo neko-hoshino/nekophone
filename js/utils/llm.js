@@ -11,7 +11,7 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
 
   const userPersona = store.personas.find(p => p.id === char.boundPersonaId) || store.personas[0];
   const myName = userPersona.name; 
-  const myRemark = (chat && chat.myRemark && !groupInfo) ? `\n（提示：在该聊天室里，对方习惯称呼你的备注是“${chat.myRemark}”，你可以参考使用）` : '';
+  const myRemark = (chat && chat.myRemark && !groupInfo) ? `\n（提示：在该聊天室里，你给用户的备注是“${chat.myRemark}”，你可以参考使用）` : '';
   const charName = char.name;
   const charRemark = (chat && chat.charRemark && !groupInfo) ? `（用户给你设置的备注是：${chat.charRemark}）` : '';
 
@@ -76,7 +76,7 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
   if (targetObj.emojis === 'disabled') {
      emo = '\n【系统最高指令】：你被明确禁止使用任何表情包！绝对不可输出任何带 [表情包] 字样的指令。';
   } else if (targetObj.emojis) {
-     emo = `\n【你拥有的表情包词典】\n允许使用的表情名字：${targetObj.emojis}\n❗注意：只能且必须使用上方词典内包含的名字，绝对禁止瞎编！`;
+     emo = `\n【你拥有的表情包词典】\n允许使用的表情名字：${targetObj.emojis}\n❗注意：只能且必须使用上方词典内包含的名字，【绝对禁止】瞎编！`;
      emojiRule = `\n   - 发表情包：[表情包]: 名字`;
   }
 
@@ -149,7 +149,8 @@ ${emojiRule}
 ❗聊天格式红线：
 1. 单句严禁超过24字！长句必须用换行符(\\n)断句换行！必须保持口语化的断句习惯！
 2. 每一行的末尾禁止使用单个句号或逗号！可以使用多个句号表示无语，但不能只用一个句号或逗号！
-3. 你回复时【绝对禁止】模仿和输出时间戳或系统标签！绝对禁止动作描写！
+3. 你回复时【绝对禁止】模仿和输出时间戳或系统标签！
+4. 【绝对禁止】任何动作描写！
 ❗特殊红线：如果你要发送 网页/HTML代码/小程序卡片，必须将其完整包裹在 \`\`\`html 和 \`\`\` 之间！在代码块内部【绝对禁止】为了字数限制而随意换行！
 `;
   }
@@ -168,7 +169,7 @@ ${emojiRule}
    - 闹钟/定时发送：[设置闹钟]: 分钟数 / [定时发送]: 08:00（如果你和用户约定了时间，就使用这个功能！例如：你说了半小时后到家给你打电话，或者用户说了半小时后喊我睡觉，你就要输出一个[设置闹钟]: 30）
    - 换头像：[更换头像]（当且仅当用户提出要你换头像时使用❗必须严格按格式独占一行！）
    - 修改备注：[修改备注]: 新称呼（当你想给用户起新外号/爱称时使用）
-   - 撤回消息：[撤回上一条消息]（当你打错字或觉得说错话时使用）
+   - 撤回消息：[撤回上一条消息]（当你打错字或觉得说错话时使用❗必须紧跟在你想要撤回的话后面一行！禁止在回复的第一行使用！！）
    - 发朋友圈：[发朋友圈]动态内容（注意格式是直接跟内容，绝不加冒号！）
    - 戳一戳用户：[戳一戳]
    - 修改被戳提示：[修改被戳动作:捏了捏] 和 [修改被戳后缀:的脸]（这里改的是用户戳你的动作，并非你戳用户的动作，如果想戳用户，请用[戳一戳]）

@@ -180,8 +180,49 @@ function render() {
     }
     fontCss += `body * { font-family: ${fontName}, sans-serif !important; }`;
   }
+  // 🌟 核心破局：纯数值比例缩放引擎！严格防范 px * px 的非法数学错误
   if (ap.sysFontSize) {
-    fontCss += `:root { --chat-font-size: ${ap.sysFontSize}px !important; }`;
+    fontCss += `
+      :root { 
+          --chat-font-size: ${ap.sysFontSize}px !important; 
+          /* 核心修复：只取数字计算，确保出来的系数是个纯比例！ */
+          --font-scale: calc(${ap.sysFontSize} / 14) !important; 
+      }
+    `;
+    
+    // 遍历强行覆盖所有你在代码里写死的 Tailwind 字号
+    const sizes = [8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 28, 32];
+    sizes.forEach(s => {
+        fontCss += `.text-\\[${s}px\\] { font-size: calc(${s}px * var(--font-scale)) !important; }\n`;
+    });
+    
+    // 覆盖默认的 Tailwind 相对字号
+    fontCss += `
+        .text-xs { font-size: calc(0.75rem * var(--font-scale)) !important; }
+        .text-sm { font-size: calc(0.875rem * var(--font-scale)) !important; }
+        .text-base { font-size: calc(1rem * var(--font-scale)) !important; }
+        .text-lg { font-size: calc(1.125rem * var(--font-scale)) !important; }
+        .text-xl { font-size: calc(1.25rem * var(--font-scale)) !important; }
+        .text-2xl { font-size: calc(1.5rem * var(--font-scale)) !important; }
+        .text-4xl { font-size: calc(2.25rem * var(--font-scale)) !important; }
+        
+        /* 针对各种聊天和看文的正文特殊区域，连同间距一起放大防拥挤 */
+        #mc-chat-scroll .whitespace-pre-wrap,
+        #offline-scroll .offline-dialogue,
+        #offline-scroll .offline-thought,
+        #offline-scroll .offline-desc,
+        #darkroom-scroll .mc-darkroom-dialogue,
+        #darkroom-scroll .mc-darkroom-thought,
+        #darkroom-scroll .mc-darkroom-desc {
+           font-size: calc(15px * var(--font-scale)) !important;
+           line-height: 1.6 !important;
+        }
+        #ao3-detail-scroll .break-words,
+        #blogger-home-scroll .whitespace-pre-wrap {
+           font-size: calc(15px * var(--font-scale)) !important;
+           line-height: 1.8 !important;
+        }
+    `;
   }
 
   // 2. 界面背景图与智能毛玻璃
@@ -249,27 +290,51 @@ function render() {
     `;
   }
 
-  const injectCustomItems = (dict) => {
+  // 🌟 1. 桌面图标渲染引擎 (替换整个大容器)
+  const injectCustomIcons = (dict) => {
     if (!dict) return;
     Object.keys(dict).forEach(k => {
       if (!dict[k]) return;
       fontCss += `
-        .${k} svg, .${k} i { display: none !important; opacity: 0 !important; visibility: hidden !important; }
+        .${k} svg, .${k} i { display: none !important; }
         .${k} { 
            background-image: url('${dict[k]}') !important; 
            background-position: center !important;
            background-size: contain !important;
            background-repeat: no-repeat !important;
-           color: transparent !important; 
+           background-color: transparent !important;
            border: none !important; 
            box-shadow: none !important;
-           background-color: transparent !important;
         }
       `;
     });
   };
-  injectCustomItems(ap.customIcons);
-  injectCustomItems(ap.customButtons);
+
+  // 🌟 2. 聊天室按钮渲染引擎 (核心修复：非破坏性精准夺舍！)
+  const injectCustomButtons = (dict) => {
+    if (!dict) return;
+    Object.keys(dict).forEach(k => {
+      if (!dict[k]) return;
+      fontCss += `
+        /* ① 把原生图标的线条和填充变透明，但绝对保留它的宽高度和物理占位！ */
+        .${k} svg, .${k} i { 
+           stroke: transparent !important;
+           fill: transparent !important;
+           color: transparent !important;
+           /* ② 直接在原生图标的盒子里渲染你上传的图片 */
+           background-image: url('${dict[k]}') !important; 
+           background-position: center !important;
+           background-size: contain !important;
+           background-repeat: no-repeat !important;
+        }
+        /* 顺手把部分按钮的灰色底板去掉，让自定义图片更清爽 */
+        .${k} { background-color: transparent !important; border: none !important; box-shadow: none !important; }
+      `;
+    });
+  };
+
+  injectCustomIcons(ap.customIcons);
+  injectCustomButtons(ap.customButtons);
   // 隐藏所有文件上传输入框 + 修复头像被吞噬的层级问题
   fontCss += `
     input[type="file"] { display: none !important; position: absolute !important; width: 0 !important; height: 0 !important; opacity: 0 !important; z-index: -9999 !important; pointer-events: none !important; }

@@ -17,31 +17,38 @@ const apState = { view: 'main' };
 const iconList = [
   { id: 'mc-icon-wechat', name: '桌面 - 微信', icon: 'message-circle' },
   { id: 'mc-icon-forum', name: '桌面 - 论坛', icon: 'messages-square' },
-  { id: 'mc-icon-x', name: '桌面 - X', icon: 'twitter' },
+  { id: 'mc-icon-sync', name: '桌面 - Sync (博主)', icon: 'infinity' },
   { id: 'mc-icon-diary', name: '桌面 - 情侣空间', icon: 'book-heart' },
+  { id: 'mc-icon-shop', name: '桌面 - 购物', icon: 'shopping-bag' },
+  { id: 'mc-icon-phone', name: '桌面 - 查手机', icon: 'smartphone' },
+  { id: 'mc-icon-ao3', name: '桌面 - AO3', icon: 'feather' },
+  { id: 'mc-icon-darkroom', name: '桌面 - 小黑屋', icon: 'lock' },
+  { id: 'mc-icon-transmigrate', name: '桌面 - 快穿系统', icon: 'zap' },
+  { id: 'mc-icon-jubensha', name: '桌面 - 占位(剧本杀)', icon: 'clapperboard' },
   { id: 'mc-icon-worldbook', name: 'Dock栏 - 世界书', icon: 'book-open' },
   { id: 'mc-icon-memory', name: 'Dock栏 - 记忆库', icon: 'brain' },
   { id: 'mc-icon-appearance', name: 'Dock栏 - 外观', icon: 'palette' },
   { id: 'mc-icon-settings', name: 'Dock栏 - 设置', icon: 'settings' }
 ];
 
-// 聊天室里的各种功能键 + 扩展菜单
+// 🌟 全面同步最新的微信聊天室功能键 + 扩展菜单
 const buttonList = [
-  { id: 'mc-btn-back', name: '聊天室 - 左上返回键', icon: 'chevron-left' },
-  { id: 'mc-btn-more', name: '聊天室 - 右上菜单键', icon: 'more-horizontal' },
-  { id: 'mc-btn-plus', name: '聊天室 - 底部加号', icon: 'plus-circle' },
-  { id: 'mc-btn-emoji', name: '聊天室 - 表情包', icon: 'smile' },
-  { id: 'mc-btn-send', name: '聊天室 - 发送信息', icon: 'send' },
-  { id: 'mc-btn-ai', name: '聊天室 - 获取回复', icon: 'sparkles' },
+  { id: 'mc-btn-back', name: '顶栏 - 左上返回键', icon: 'chevron-left' },
+  { id: 'mc-btn-more', name: '顶栏 - 右上菜单键', icon: 'more-horizontal' },
+  { id: 'mc-btn-ai', name: '底栏 - AI回复(星芒)', icon: 'sparkles' },
+  { id: 'mc-btn-voice', name: '底栏 - 语音', icon: 'mic' },
+  { id: 'mc-btn-image', name: '底栏 - 相片', icon: 'image' },
+  { id: 'mc-btn-camera', name: '底栏 - 拍照', icon: 'camera' },
+  { id: 'mc-btn-emoji', name: '底栏 - 表情包', icon: 'smile' },
+  { id: 'mc-btn-plus', name: '底栏 - 扩展加号', icon: 'plus-circle' },
   { id: 'mc-tool-reroll', name: '扩展 - 重roll回复', icon: 'refresh-cw' },
   { id: 'mc-tool-extract', name: '扩展 - 提取记忆', icon: 'brain-circuit' },
-  { id: 'mc-tool-image', name: '扩展 - 发送图片', icon: 'image' },
-  { id: 'mc-tool-camera', name: '扩展 - 虚拟拍照', icon: 'camera' },
-  { id: 'mc-tool-mic', name: '扩展 - 发送语音', icon: 'mic' },
   { id: 'mc-tool-transfer', name: '扩展 - 发起转账', icon: 'credit-card' },
+  { id: 'mc-tool-location', name: '扩展 - 发送定位', icon: 'map-pin' },
   { id: 'mc-tool-voicecall', name: '扩展 - 语音通话', icon: 'phone' },
   { id: 'mc-tool-videocall', name: '扩展 - 视频通话', icon: 'video' },
-  { id: 'mc-tool-offline', name: '扩展 - 线下剧情', icon: 'coffee' }
+  { id: 'mc-tool-offline', name: '扩展 - 线下剧情', icon: 'coffee' },
+  { id: 'mc-tool-read', name: '扩展 - 一起看书', icon: 'book-open' }
 ];
 
 if (!window.apActions) {
@@ -50,9 +57,10 @@ if (!window.apActions) {
     goBack: () => { apState.view = 'main'; window.render(); },
     goView: (v) => { apState.view = v; window.render(); },
     toggleStatusBar: () => { store.appearance.hideStatusBar = !store.appearance.hideStatusBar; window.render(); },
-    toggleDarkMode: () => { store.appearance.darkMode = !store.appearance.darkMode; window.render(); }, // 深色模式
+    toggleDarkMode: () => { store.appearance.darkMode = !store.appearance.darkMode; window.render(); }, 
     updateFont: (key, val) => { store.appearance[key] = val; window.render(); },
-    // 静默实时更新字号（绝对不重绘页面，防止拉条回弹）
+    
+    // 🌟 静默实时更新字号比例（极其丝滑，彻底防崩溃）
     updateFontSizeRealtime: (val) => {
       document.getElementById('mc-font-size-display').innerText = val + 'px';
       let styleTag = document.getElementById('mc-realtime-font');
@@ -61,9 +69,12 @@ if (!window.apActions) {
         styleTag.id = 'mc-realtime-font';
         document.head.appendChild(styleTag);
       }
-      styleTag.innerHTML = `:root { --chat-font-size: ${val}px !important; }`;
+      styleTag.innerHTML = `:root { 
+          --chat-font-size: ${val}px !important; 
+          --font-scale: calc(${val} / 14) !important; 
+      }`;
     },
-    // 松手时才保存数据
+    
     saveFontSize: (val) => {
       store.appearance.sysFontSize = val;
       window.actions.showToast('字号已保存');
@@ -72,7 +83,6 @@ if (!window.apActions) {
     
     handleImageUpload: (key, event) => {
       const file = event.target.files[0]; if (!file) return;
-      // 接入全局压缩引擎
       window.actions.compressImage(file, (base64) => {
          store.appearance[key] = base64;
          window.actions.showToast('图片已极速加载！'); 
@@ -191,7 +201,7 @@ export function renderAppearanceApp(store) {
 
   return `
     <div class="w-full h-full bg-[#f6f7f9] flex flex-col relative animate-in slide-in-from-bottom-4 duration-300 z-50">
-      <div class="bg-white/80 backdrop-blur-md px-4 pt-8 pb-3 flex justify-between items-center shadow-sm relative shrink-0 z-10">
+      <div class="bg-white/80 backdrop-blur-md px-4 pt-12 pb-3 flex justify-between items-center shadow-sm relative shrink-0 z-10">
         <div class="cursor-pointer active:opacity-50 p-1" onclick="window.apActions.closeApp()"><i data-lucide="chevron-left" class="w-6 h-6 text-gray-800"></i></div>
         <span class="absolute left-1/2 -translate-x-1/2 font-black text-gray-800 text-[17px] tracking-wide">外观与美化</span>
         <div class="w-6"></div>
