@@ -174,22 +174,26 @@ function render() {
   let fontCss = '';
   
   if (ap.sysFont) {
-    const fontName = ap.sysFont.includes('http') ? 'MC_CustomFont' : ap.sysFont;
+    // 🌟 修复1：严格包裹单引号！满足手机端教导主任般的 CSS 语法要求
+    const fontName = ap.sysFont.includes('http') ? "'MC_CustomFont'" : `'${ap.sysFont}'`;
+    
     if (ap.sysFont.includes('http') && ap.sysFont.match(/\.(ttf|otf|woff|woff2)/i)) {
-       // 🌟 核心修复 1：把链接里的中文（如"生气喵"）进行 URL 编码，否则手机浏览器会直接罢工！
        const safeUrl = encodeURI(ap.sysFont.trim());
-       
-       // 🌟 核心修复 2：增加 format 提示，给手机浏览器发通行证
-       let formatHint = '';
-       if (safeUrl.toLowerCase().includes('.ttf')) formatHint = "format('truetype')";
-       else if (safeUrl.toLowerCase().includes('.woff2')) formatHint = "format('woff2')";
-       else if (safeUrl.toLowerCase().includes('.woff')) formatHint = "format('woff')";
-       else if (safeUrl.toLowerCase().includes('.otf')) formatHint = "format('opentype')";
-       
-       fontCss += `@font-face { font-family: 'MC_CustomFont'; src: url('${safeUrl}') ${formatHint}; font-display: swap; }`;
+       // 🌟 修复2：去掉 format 提示，让浏览器不要“按图索骥”，直接暴力解析文件内容！
+       fontCss += `@font-face { font-family: 'MC_CustomFont'; src: url('${safeUrl}'); font-display: swap; }\n`;
     }
-    // 加上通用的备用字体族，防止在加载出新字体前排版错乱
-    fontCss += `body * { font-family: ${fontName}, system-ui, -apple-system, sans-serif !important; }`;
+    
+    // 🌟 修复3：全方位火力覆盖！彻底击穿 Tailwind 自带的无衬线、衬线等强制字体集！
+    fontCss += `
+        body, 
+        body *, 
+        .font-sans, 
+        .font-serif, 
+        .font-mono, 
+        .font-cursive { 
+            font-family: ${fontName}, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important; 
+        }
+    `;
   }
   // 🌟 核心破局：纯数值比例缩放引擎！严格防范 px * px 的非法数学错误
   if (ap.sysFontSize) {
