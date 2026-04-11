@@ -69,7 +69,7 @@ if (!window.homeState) window.homeState = {
     isRestoringScroll: false 
 };
 
-// 全局歌词引擎 (兼容 LRC 与 TXT 黑魔法估算)
+// 全局歌词引擎
 if (!window.lyricTimerInt) {
     window.lyricTimerInt = setInterval(() => {
         const el = document.getElementById('music-lyric-line');
@@ -431,18 +431,18 @@ if (!window.homeActions) {
   };
 }
 
-// 🌟 原汁原味完美复刻的图标生成器！坚决不改动一毫米的尺寸！
+// 🌟 为网格专门优化的居中图标，大小绝对受控
 function createAppIcon(iconName, label, actionStr, mcClass, isDark) {
   const bgClass = isDark ? 'bg-black/50 border-black/20' : 'bg-white/50 border-white/20';
   const iconClass = isDark ? 'text-white opacity-90' : 'text-gray-900 opacity-60';
   const textClass = isDark ? 'text-white drop-shadow-md' : 'text-gray-800 opacity-80';
 
   return `
-    <div class="flex flex-col items-center justify-center space-y-2 cursor-pointer group" onclick="${actionStr}">
-      <div class="${mcClass} w-[3.5rem] h-[3.5rem] flex items-center justify-center ${bgClass} rounded-[16px] group-active:scale-95 transition-transform duration-200 shadow-sm border">
-        <i data-lucide="${iconName}" class="${iconClass}" style="width: 26px; height: 26px;"></i>
+    <div class="flex flex-col items-center justify-center cursor-pointer group w-full h-full" onclick="${actionStr}">
+      <div class="${mcClass} w-12 h-12 sm:w-14 sm:h-14 flex items-center justify-center ${bgClass} rounded-[14px] sm:rounded-[16px] group-active:scale-95 transition-transform duration-200 shadow-sm border shrink-0 mb-1">
+        <i data-lucide="${iconName}" class="${iconClass} w-6 h-6 sm:w-7 sm:h-7"></i>
       </div>
-      <span class="${textClass} text-[10px] font-bold tracking-wider">${label}</span>
+      <span class="${textClass} text-[10px] font-bold tracking-wider text-center w-full truncate px-0.5">${label}</span>
     </div>
   `;
 }
@@ -453,11 +453,11 @@ function createDockIcon(iconName, label, actionStr, mcClass, isDark) {
   const textClass = isDark ? 'text-white drop-shadow-md' : 'text-gray-800 opacity-80';
 
   return `
-    <div class="flex flex-col items-center justify-center cursor-pointer group active:scale-95 transition-transform" onclick="${actionStr}">
-      <div class="${mcClass} flex items-center justify-center w-[3.5rem] h-[3.5rem] ${bgClass} rounded-[16px] mb-1.5 shadow-sm border">
-        <i data-lucide="${iconName}" class="${iconClass} group-active:opacity-100 transition-opacity" style="width: 26px; height: 26px;"></i>
+    <div class="flex flex-col items-center justify-center cursor-pointer group active:scale-95 transition-transform w-[22%] shrink-0" onclick="${actionStr}">
+      <div class="${mcClass} flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 ${bgClass} rounded-[14px] sm:rounded-[16px] mb-1 shadow-sm border shrink-0">
+        <i data-lucide="${iconName}" class="${iconClass} w-6 h-6 sm:w-7 sm:h-7 group-active:opacity-100 transition-opacity"></i>
       </div>
-      <span class="${textClass} text-[10px] font-bold tracking-widest">${label}</span>
+      <span class="${textClass} text-[10px] font-bold tracking-widest truncate w-full text-center">${label}</span>
     </div>
   `;
 }
@@ -485,17 +485,19 @@ export function renderHomeApp(store) {
 
   const polaroidImg = store.homePolaroidImg || '';
   const polaroidHtml = `
-      <div class="relative w-32 h-40 cursor-pointer group active:scale-95 transition-transform" onclick="document.getElementById('home-polaroid-upload').click()">
-          <div class="absolute top-1 -left-2 w-full h-full bg-white/70 rounded-sm shadow-md border border-white/40 transform -rotate-6 flex flex-col p-1.5 z-0 transition-transform group-hover:-rotate-12 duration-300">
-              <div class="w-full flex-1 bg-gray-300/30 rounded-sm"></div>
-              <div class="h-6"></div>
-          </div>
-          <div class="absolute top-0 right-0 w-full h-full bg-[#fdfdfd] rounded-sm shadow-xl border border-white/60 transform rotate-3 flex flex-col p-1.5 z-10 transition-transform group-hover:rotate-6 duration-300">
-              <div class="w-full flex-1 bg-gray-100 rounded-sm overflow-hidden flex items-center justify-center relative">
-                  ${polaroidImg ? `<img src="${polaroidImg}" class="w-full h-full object-cover" />` : `<i data-lucide="image-plus" class="w-6 h-6 text-gray-300"></i>`}
-                  <div class="absolute inset-0 shadow-[inset_0_2px_10px_rgba(0,0,0,0.1)] pointer-events-none"></div>
+      <div class="w-full h-full flex items-center justify-center transform scale-[0.85]">
+          <div class="relative w-full h-full max-w-[140px] max-h-[170px] cursor-pointer group active:scale-95 transition-transform" onclick="document.getElementById('home-polaroid-upload').click()">
+              <div class="absolute top-1 -left-2 w-full h-full bg-white/70 rounded-sm shadow-md border border-white/40 transform -rotate-6 flex flex-col p-1 z-0 transition-transform group-hover:-rotate-12 duration-300">
+                  <div class="w-full flex-1 bg-gray-300/30 rounded-sm"></div>
+                  <div class="h-5"></div>
               </div>
-              <div class="h-7 flex items-center justify-center"><span class="text-[9px] font-cursive text-gray-500 opacity-70 tracking-widest uppercase">Memories</span></div>
+              <div class="absolute top-0 right-0 w-full h-full bg-[#fdfdfd] rounded-sm shadow-xl border border-white/60 transform rotate-3 flex flex-col p-1 z-10 transition-transform group-hover:rotate-6 duration-300">
+                  <div class="w-full flex-1 bg-gray-100 rounded-sm overflow-hidden flex items-center justify-center relative">
+                      ${polaroidImg ? `<img src="${polaroidImg}" class="w-full h-full object-cover" />` : `<i data-lucide="image-plus" class="w-6 h-6 text-gray-300"></i>`}
+                      <div class="absolute inset-0 shadow-[inset_0_2px_10px_rgba(0,0,0,0.1)] pointer-events-none"></div>
+                  </div>
+                  <div class="h-6 flex items-center justify-center"><span class="text-[9px] font-cursive text-gray-500 opacity-70 tracking-widest uppercase">Memories</span></div>
+              </div>
           </div>
       </div>
   `;
@@ -510,172 +512,167 @@ export function renderHomeApp(store) {
   const initPageIdx = window.homeState?.lastScrollLeft > 50 ? 1 : 0;
 
   return `
-    <div class="w-full h-full relative flex flex-col overflow-hidden animate-in fade-in duration-300" style="${bgStyle}">
+    <div class="w-full h-full relative grid grid-cols-1 overflow-hidden animate-in fade-in duration-300" style="grid-template-rows: repeat(8, minmax(0, 1fr)); ${bgStyle}">
       
       <input type="file" id="upload-bg-audio" accept="audio/*, .mp3, .wav, .m4a, .aac, audio/mpeg, audio/mp4" class="hidden" onchange="window.homeActions.uploadBgAudio(event)" />
       <input type="file" id="home-avatar-upload" accept="image/*" class="hidden" onchange="window.homeActions.updateAvatar(event)" />
       <input type="file" id="home-polaroid-upload" accept="image/*" class="hidden" onchange="window.homeActions.uploadPolaroid(event)" />
 
-      <div id="home-swiper-scroll" class="flex-1 w-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar" onscroll="if(!window.homeState.isRestoringScroll) window.homeActions.updateDots(event)">
+      <div id="home-swiper-scroll" class="row-span-6 w-full h-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar relative z-10" onscroll="if(!window.homeState.isRestoringScroll) window.homeActions.updateDots(event)">
         
-        <div class="w-full h-full flex-shrink-0 snap-center flex flex-col pt-12 px-5 pb-4 overflow-y-auto hide-scrollbar relative">
-          
-          ${(() => {
-              if (!store.calendarData) store.calendarData = { todos: [], lastPeriod: '' };
-              const now = new Date();
-              const currentMonthEng = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][now.getMonth()];
-              const currentYear = now.getFullYear();
+        <div class="w-full h-full flex-shrink-0 snap-center pt-8 sm:pt-10 px-4 sm:px-5 pb-0 relative">
+           
+           <div class="w-full h-full grid grid-cols-4 gap-x-2 gap-y-2 sm:gap-x-3 sm:gap-y-3" style="grid-template-rows: repeat(6, minmax(0, 1fr));">
               
-              const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); 
-              const monday = new Date(now); monday.setDate(now.getDate() - dayOfWeek + 1);
-              
-              const eventsList = [];
-              const monZero = new Date(monday); monZero.setHours(0,0,0,0);
-              const sunEnd = new Date(monday); sunEnd.setDate(monday.getDate() + 6); sunEnd.setHours(23,59,59,999);
-
-              const activeAnniversaries = store.anniversaries || [];
-              activeAnniversaries.forEach(a => {
-                  if (!a.date) return;
-                  const aMonthDay = a.date.substring(5, 10); 
-                  for (let i = 0; i < 7; i++) {
-                      const d = new Date(monZero); d.setDate(monZero.getDate() + i);
-                      if (aMonthDay === (String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'))) {
-                          const charName = (store.contacts || []).find(c => String(c.id) === String(a.charId))?.name || 'TA';
-                          eventsList.push({ date: d.getFullYear() + '-' + aMonthDay, text: `${charName} | ${a.name}`, dotColor: "bg-orange-400" });
-                      }
-                  }
-              });
-
-              const activeTodos = store.calendarData.todos || [];
-              activeTodos.forEach(t => {
-                  const tDate = new Date(t.targetDate || t.date.split('T')[0]);
-                  if (tDate >= monZero && tDate <= sunEnd) eventsList.push({ date: t.targetDate || t.date.split('T')[0], text: t.text, dotColor: "bg-purple-400" });
-              });
-
-              let periodText = ''; let periodDot = '';
-              if (store.calendarData.lastPeriod) {
-                  const daysSince = Math.floor((new Date(now).setHours(0,0,0,0) - new Date(store.calendarData.lastPeriod).setHours(0,0,0,0)) / 86400000);
-                  if (daysSince >= 0) {
-                      if (daysSince % 28 < 5) { periodText = daysSince < 28 ? '月经期中，注意保暖' : '预测月经期，注意身体'; periodDot = daysSince < 28 ? 'bg-rose-400' : 'bg-rose-200'; }
-                      else if (28 - (daysSince % 28) <= 3) { periodText = `距预测月经期约 ${28 - (daysSince % 28)} 天`; periodDot = 'bg-rose-200'; }
-                  }
-              }
-              if (periodText) eventsList.unshift({ date: 'general', text: periodText, dotColor: periodDot, isGeneral: true });
-              if (eventsList.length === 0) eventsList.push({ text: "本周暂无特殊安排", dotColor: "bg-gray-400", isGeneral: true });
-
-              const weekHtml = ['一', '二', '三', '四', '五', '六', '日'].map((dayName, idx) => {
-                  const d = new Date(monday); d.setDate(monday.getDate() + idx);
-                  const isToday = d.getDate() === now.getDate() && d.getMonth() === now.getMonth();
-                  const dStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-
-                  let pType = null, isS = false, isE = false;
-                  if (store.calendarData.lastPeriod) {
-                      const diffDays = Math.floor((new Date(d).setHours(0,0,0,0) - new Date(store.calendarData.lastPeriod).setHours(0,0,0,0)) / 86400000);
-                      if (diffDays >= 0 && diffDays % 28 < 5) { pType = diffDays < 28 ? 'actual' : 'predicted'; if (diffDays % 28 === 0) isS = true; if (diffDays % 28 === 4) isE = true; }
-                  }
-
-                  let rClass = (isS && isE) ? 'rounded-md' : isS ? 'rounded-l-md' : isE ? 'rounded-r-md' : '';
-                  let hHtml = pType === 'actual' ? `<div class="absolute inset-y-0 -inset-x-0 bg-rose-200/80 z-0 ${rClass}"></div>` : pType === 'predicted' ? `<div class="absolute inset-y-0 -inset-x-0 bg-rose-100/50 z-0 ${rClass}"></div>` : '';
-                  const dotsForDay = eventsList.filter(e => !e.isGeneral && e.date === dStr);
-                  const dotsHtml = dotsForDay.length > 0 ? `<div class="flex space-x-0.5 mt-0.5 h-1 justify-center z-10 relative">` + dotsForDay.map(e => `<div class="w-1 h-1 rounded-full ${e.dotColor}"></div>`).join('') + `</div>` : `<div class="mt-0.5 h-1 z-10 relative"></div>`;
-
-                  return `
-                  <div class="flex flex-col items-center py-1 w-full">
-                    <span class="text-[10px] font-bold opacity-50 z-10 mb-1">${dayName}</span>
-                    <div class="relative w-full flex flex-col items-center justify-center">
-                        ${hHtml}
-                        ${isToday ? `<div class="relative flex items-center justify-center z-10 w-full h-7"><div class="bg-white/60 border border-white/50 rounded-full w-7 h-7 flex items-center justify-center text-[14px] font-bold shadow-sm backdrop-blur-sm text-gray-900">${d.getDate()}</div></div>` : `<span class="text-[14px] font-bold opacity-80 relative z-10 h-7 flex items-center justify-center w-full">${d.getDate()}</span>`}
-                    </div>
-                    ${dotsHtml}
-                  </div>`;
-              }).join('');
-
-              const eventsHtml = eventsList.map(e => `
-                  <div class="flex items-start space-x-2"><div class="w-1.5 h-1.5 rounded-full ${e.dotColor} shrink-0 mt-1"></div><span class="text-[11px] font-bold tracking-wide leading-snug line-clamp-2">${e.text}</span></div>
-              `).join('');
-
-              return `
-              <div class="w-full pt-2 shrink-0 ${txtMain}">
-                 <div class="flex justify-between items-end mb-3 px-1">
-                    <div class="flex items-baseline space-x-2">
-                        <span class="font-monospace text-4xl tracking-wider opacity-90 uppercase">${currentMonthEng}</span>
-                        <span class="text-sm font-bold opacity-50 uppercase tracking-widest">${currentYear}</span>
-                    </div>
-                    <div class="flex space-x-3 mb-1">
-                        <i data-lucide="calendar-plus" class="w-[22px] h-[22px] cursor-pointer active:scale-90 transition-transform opacity-70 hover:opacity-100 ${isDark ? 'text-white' : 'text-gray-800'}" onclick="window.homeActions.openTodoModal()"></i>
-                        <i data-lucide="droplet" class="w-[22px] h-[22px] cursor-pointer active:scale-90 transition-transform opacity-70 hover:opacity-100 text-rose-400" onclick="window.homeActions.openPeriodModal()"></i>
-                    </div>
-                 </div>
-                 <div class="grid grid-cols-7 gap-0 px-1 mb-0">${weekHtml}</div>
-              </div>
-
-              <div class="flex-1 flex flex-col min-h-0 mt-1.5">
-                  <div class="grid grid-cols-2 gap-3 flex-1 min-h-0">
-                      <div class="flex flex-col h-full min-w-0">
-                          <div class="px-1 pt-0.5 pb-2 flex flex-col space-y-1 overflow-hidden cursor-pointer active:opacity-70 transition-opacity ${isDark ? 'text-white/90 drop-shadow-md' : 'text-gray-800/90 drop-shadow-sm'}" onclick="window.homeActions.openTodoModal()">
-                              ${eventsHtml}
-                          </div>
-                          <div class="flex-1"></div> 
-                          <div class="grid grid-cols-2 gap-y-4 gap-x-2 pb-2 mt-2 shrink-0">
-                             ${createAppIcon('message-circle', '微信', "window.actions.setCurrentApp('wechat')", 'mc-icon-wechat', isDark)}
-                             ${createAppIcon('messages-square', '论坛', "window.actions.setCurrentApp('forum')", 'mc-icon-forum', isDark)}
-                             ${createAppIcon('infinity', 'Sync', "window.actions.setCurrentApp('blogger')", 'mc-icon-sync', isDark)}
-                             ${createAppIcon('book-heart', '情侣空间', "window.actions.setCurrentApp('couple')", 'mc-icon-diary', isDark)}
-                          </div>
-                      </div>
-
-                      <div class="flex flex-col items-end pt-2 h-full min-w-0 pr-1">
-                          <div class="flex flex-col items-end text-right shrink-0">
-                             <div class="w-[4.5rem] h-[4.5rem] rounded-full overflow-hidden ${isDark?'bg-black/30 border-black/20':'bg-white/30 border-white/20'} mb-3 cursor-pointer active:scale-95 transition-transform shadow-sm border" onclick="document.getElementById('home-avatar-upload').click()">
-                               ${avatarHtml}
-                             </div>
-                             <input type="text" value="${my.name}" onchange="window.homeActions.updateName(this.value)" class="font-bold ${txtMain} text-2xl tracking-wide bg-transparent outline-none text-right w-full ${isDark?'placeholder-white/30':'placeholder-gray-800/40'}" style="font-size: 18px !important" placeholder="点击编辑" />
-                          </div>
-                          <div class="mt-4 flex flex-col justify-center items-end relative w-full shrink-0">
-                             ${polaroidHtml}
-                          </div>
-                      </div>
-                  </div>
-
-                  <div class="w-full flex justify-between items-end pb-8 px-1 pt-4 shrink-0">
-                      <div class="flex flex-col items-start space-y-4 w-1/2 shrink-0">
-                         <input type="text" value="正在进入..." class="w-[80%] ${inputBg} backdrop-blur-2xl px-3 py-1 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm" style="font-size: 12px !important" onclick="event.stopPropagation()" />
-                         <input type="text" value="梦之旅途" class="w-[80%] ml-[20%] ${inputBg} backdrop-blur-2xl px-3 py-1 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm" style="font-size: 12px !important" onclick="event.stopPropagation()" />
-                      </div>
-                      <div class="flex justify-end space-x-8 pr-1 shrink-0">
-                         ${createAppIcon('shopping-bag', '购物', "window.actions.setCurrentApp('shopping')", 'mc-icon-shop', isDark)}
-                         ${createAppIcon('smartphone', '查手机', "window.actions.setCurrentApp('phone')", 'mc-icon-phone', isDark)}
-                      </div>
-                  </div>
-              </div>
-              `;
-          })()}
-        </div>
-
-        <div class="w-full h-full flex-shrink-0 snap-center flex flex-col pt-12 px-5 pb-4 overflow-y-auto hide-scrollbar relative">
-            <div class="flex-1 flex flex-col min-h-0 mt-1.5">
-                 
-                 <div class="flex flex-col flex-1 min-h-0">
-                      <div id="keep-alive-status" class="w-full h-[340px] shrink-0 flex flex-col rounded-[32px] ${isDark?'bg-black/30':'bg-white/30'} relative z-10 px-5 py-5 animate-in slide-in-from-top-4 duration-500 backdrop-blur-md">
+              <div class="col-span-4 row-span-3 flex flex-col w-full h-full min-h-0">
+                  <div class="h-1/2 flex flex-col justify-end pb-1 shrink-0 ${txtMain}">
+                      ${(() => {
+                          if (!store.calendarData) store.calendarData = { todos: [], lastPeriod: '' };
+                          const now = new Date();
+                          const currentMonthEng = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][now.getMonth()];
                           
-                          ${(() => {
-                              const hasTrack = list && list.length > 0;
-                              const trackName = hasTrack ? window.audioPlayer.getTrackName() : "暂无音乐";
-                              const artistName = hasTrack ? window.audioPlayer.getArtistName() : "上传歌词让AI陪你听歌";
-                              const isPlaying = window.audioState ? window.audioState.isPlaying : false;
-                              const loopMode = window.audioState ? window.audioState.loopMode : 'list';
-                              const loopIcon = loopMode === 'list' ? 'repeat' : 'repeat-1';
-                              const compChar = store.musicCompanionId ? store.contacts.find(c=>c.id===store.musicCompanionId) : null;
-                              
-                              const currentTrack = hasTrack ? list[window.audioState.currentIndex] : null;
-                              const hasLyrics = currentTrack?.lyrics;
-                              const isRawText = hasLyrics && Array.isArray(hasLyrics) && typeof hasLyrics[0] === 'string';
-                              const lyricPlaceholder = isRawText ? '🎵 已挂载纯文本歌词' : (hasLyrics ? '🎵' : '暂无歌词数据');
+                          const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); 
+                          const monday = new Date(now); monday.setDate(now.getDate() - dayOfWeek + 1);
+                          const eventsList = [];
+                          const monZero = new Date(monday); monZero.setHours(0,0,0,0);
+                          const sunEnd = new Date(monday); sunEnd.setDate(monday.getDate() + 6); sunEnd.setHours(23,59,59,999);
+
+                          const activeAnniversaries = store.anniversaries || [];
+                          activeAnniversaries.forEach(a => {
+                              if (!a.date) return;
+                              const aMonthDay = a.date.substring(5, 10); 
+                              for (let i = 0; i < 7; i++) {
+                                  const d = new Date(monZero); d.setDate(monZero.getDate() + i);
+                                  if (aMonthDay === (String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'))) {
+                                      const charName = (store.contacts || []).find(c => String(c.id) === String(a.charId))?.name || 'TA';
+                                      eventsList.push({ date: d.getFullYear() + '-' + aMonthDay, text: `${charName} | ${a.name}`, dotColor: "bg-orange-400" });
+                                  }
+                              }
+                          });
+
+                          const activeTodos = store.calendarData.todos || [];
+                          activeTodos.forEach(t => {
+                              const tDate = new Date(t.targetDate || t.date.split('T')[0]);
+                              if (tDate >= monZero && tDate <= sunEnd) eventsList.push({ date: t.targetDate || t.date.split('T')[0], text: t.text, dotColor: "bg-purple-400" });
+                          });
+
+                          let periodText = ''; let periodDot = '';
+                          if (store.calendarData.lastPeriod) {
+                              const daysSince = Math.floor((new Date(now).setHours(0,0,0,0) - new Date(store.calendarData.lastPeriod).setHours(0,0,0,0)) / 86400000);
+                              if (daysSince >= 0) {
+                                  if (daysSince % 28 < 5) { periodText = daysSince < 28 ? '月经期中' : '预测月经期'; periodDot = daysSince < 28 ? 'bg-rose-400' : 'bg-rose-200'; }
+                                  else if (28 - (daysSince % 28) <= 3) { periodText = `距预测月经 ${28 - (daysSince % 28)} 天`; periodDot = 'bg-rose-200'; }
+                              }
+                          }
+                          if (periodText) eventsList.unshift({ date: 'general', text: periodText, dotColor: periodDot, isGeneral: true });
+                          if (eventsList.length === 0) eventsList.push({ text: "本周暂无特殊安排", dotColor: "bg-gray-400", isGeneral: true });
+
+                          // 把生成的 eventsList 挂在全局方便下半部分读取
+                          window.tempEventsList = eventsList;
+
+                          const weekHtml = ['一', '二', '三', '四', '五', '六', '日'].map((dayName, idx) => {
+                              const d = new Date(monday); d.setDate(monday.getDate() + idx);
+                              const isToday = d.getDate() === now.getDate() && d.getMonth() === now.getMonth();
+                              const dStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+                              const dotsForDay = eventsList.filter(e => !e.isGeneral && e.date === dStr);
+                              const dotsHtml = dotsForDay.length > 0 ? `<div class="flex space-x-0.5 mt-0.5 h-1 justify-center z-10 relative">` + dotsForDay.map(e => `<div class="w-1 h-1 rounded-full ${e.dotColor}"></div>`).join('') + `</div>` : `<div class="mt-0.5 h-1 z-10 relative"></div>`;
+
+                              let pType = null, isS = false, isE = false;
+                              if (store.calendarData.lastPeriod) {
+                                  const diffDays = Math.floor((new Date(d).setHours(0,0,0,0) - new Date(store.calendarData.lastPeriod).setHours(0,0,0,0)) / 86400000);
+                                  if (diffDays >= 0 && diffDays % 28 < 5) { pType = diffDays < 28 ? 'actual' : 'predicted'; if (diffDays % 28 === 0) isS = true; if (diffDays % 28 === 4) isE = true; }
+                              }
+                              let rClass = (isS && isE) ? 'rounded-md' : isS ? 'rounded-l-md' : isE ? 'rounded-r-md' : '';
+                              let hHtml = pType === 'actual' ? `<div class="absolute inset-y-0 -inset-x-0 bg-rose-200/80 z-0 ${rClass}"></div>` : pType === 'predicted' ? `<div class="absolute inset-y-0 -inset-x-0 bg-rose-100/50 z-0 ${rClass}"></div>` : '';
 
                               return `
-                              <div class="flex justify-between items-center w-full ${isDark?'text-white':'text-gray-800'} mb-2">
-                                  <div class="w-12 flex items-center justify-start"><i data-lucide="plus" class="w-[18px] h-[18px] cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onclick="window.homeActions.openAddAudioModal()" title="添加音乐"></i></div>
-                                  
+                              <div class="flex flex-col items-center w-full">
+                                <span class="text-[9px] font-bold opacity-50 z-10 mb-1">${dayName}</span>
+                                <div class="relative w-full flex flex-col items-center justify-center">
+                                    ${hHtml}
+                                    ${isToday ? `<div class="relative flex items-center justify-center z-10 w-full h-6"><div class="bg-white/60 border border-white/50 rounded-full w-6 h-6 flex items-center justify-center text-[12px] font-bold shadow-sm backdrop-blur-sm text-gray-900">${d.getDate()}</div></div>` : `<span class="text-[13px] font-bold opacity-80 relative z-10 h-6 flex items-center justify-center w-full">${d.getDate()}</span>`}
+                                </div>
+                                ${dotsHtml}
+                              </div>`;
+                          }).join('');
+
+                          return `
+                             <div class="flex justify-between items-end mb-2 px-1 w-full">
+                                <div class="flex items-baseline space-x-2">
+                                    <span class="font-monospace text-4xl tracking-wider opacity-90 uppercase leading-none">${currentMonthEng}</span>
+                                    <span class="text-sm font-bold opacity-50 uppercase tracking-widest">${now.getFullYear()}</span>
+                                </div>
+                                <div class="flex space-x-3 mb-1">
+                                    <i data-lucide="calendar-plus" class="w-[20px] h-[20px] sm:w-[22px] sm:h-[22px] cursor-pointer active:scale-90 transition-transform opacity-70 hover:opacity-100 ${isDark ? 'text-white' : 'text-gray-800'}" onclick="window.homeActions.openTodoModal()"></i>
+                                    <i data-lucide="droplet" class="w-[20px] h-[20px] sm:w-[22px] sm:h-[22px] cursor-pointer active:scale-90 transition-transform opacity-70 hover:opacity-100 text-rose-400" onclick="window.homeActions.openPeriodModal()"></i>
+                                </div>
+                             </div>
+                             <div class="grid grid-cols-7 gap-0 px-1 w-full">${weekHtml}</div>
+                          `;
+                      })()}
+                  </div>
+                  <div class="h-1/2 flex flex-row w-full min-h-0 pt-2">
+                      <div class="w-[55%] h-full flex flex-col justify-start pl-1 space-y-1.5 overflow-hidden cursor-pointer active:opacity-70 transition-opacity ${isDark ? 'text-white/90 drop-shadow-md' : 'text-gray-800/90 drop-shadow-sm'}" onclick="window.homeActions.openTodoModal()">
+                          ${(window.tempEventsList || []).slice(0, 3).map(e => `
+                              <div class="flex items-start space-x-2 w-full"><div class="w-1.5 h-1.5 rounded-full ${e.dotColor} shrink-0 mt-1"></div><span class="text-[11px] font-bold tracking-wide leading-snug truncate w-full pr-2">${e.text}</span></div>
+                          `).join('')}
+                      </div>
+                      <div class="w-[45%] h-full flex flex-col items-end justify-start pr-1 min-h-0">
+                          <div class="w-[4rem] h-[4rem] sm:w-[4.5rem] sm:h-[4.5rem] rounded-full overflow-hidden ${isDark?'bg-black/30 border-black/20':'bg-white/30 border-white/20'} mb-1.5 cursor-pointer active:scale-95 transition-transform shadow-sm border shrink-0" onclick="document.getElementById('home-avatar-upload').click()">
+                             ${avatarHtml}
+                          </div>
+                          <input type="text" value="${my.name}" onchange="window.homeActions.updateName(this.value)" class="font-bold ${txtMain} text-xl sm:text-2xl tracking-wide bg-transparent outline-none text-right w-full ${isDark?'placeholder-white/30':'placeholder-gray-800/40'} shrink-0" placeholder="点击编辑" />
+                      </div>
+                  </div>
+              </div>
+
+              <div class="col-span-2 row-span-2 grid grid-cols-2 grid-rows-2 gap-1 min-h-0 w-full h-full items-center justify-items-center pt-2">
+                 ${createAppIcon('message-circle', '微信', "window.actions.setCurrentApp('wechat')", 'mc-icon-wechat', isDark)}
+                 ${createAppIcon('messages-square', '论坛', "window.actions.setCurrentApp('forum')", 'mc-icon-forum', isDark)}
+                 ${createAppIcon('infinity', 'Sync', "window.actions.setCurrentApp('blogger')", 'mc-icon-sync', isDark)}
+                 ${createAppIcon('book-heart', '情侣空间', "window.actions.setCurrentApp('couple')", 'mc-icon-diary', isDark)}
+              </div>
+
+              <div class="col-span-2 row-span-2 flex items-center justify-end min-h-0 w-full h-full pr-1 pt-2">
+                 ${polaroidHtml}
+              </div>
+
+              <div class="col-span-2 row-span-1 flex flex-col justify-center space-y-2 min-h-0 w-full h-full pr-2">
+                 <input type="text" value="正在进入..." class="w-[80%] ${inputBg} backdrop-blur-2xl px-3 py-1.5 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm shrink-0" onclick="event.stopPropagation()" />
+                 <input type="text" value="梦之旅途" class="w-[80%] ml-[20%] ${inputBg} backdrop-blur-2xl px-3 py-1.5 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm shrink-0" onclick="event.stopPropagation()" />
+              </div>
+
+              <div class="col-span-2 row-span-1 grid grid-cols-2 gap-1 min-h-0 w-full h-full items-center pl-1">
+                 ${createAppIcon('shopping-bag', '购物', "window.actions.setCurrentApp('shopping')", 'mc-icon-shop', isDark)}
+                 ${createAppIcon('smartphone', '查手机', "window.actions.setCurrentApp('phone')", 'mc-icon-phone', isDark)}
+              </div>
+
+           </div>
+        </div>
+
+        <div class="w-full h-full flex-shrink-0 snap-center pt-8 sm:pt-10 px-4 sm:px-5 pb-0 relative overflow-hidden">
+            <div class="w-full h-full grid grid-cols-4 gap-y-2 gap-x-2" style="grid-template-rows: repeat(6, minmax(0, 1fr));">
+                 
+                 <div id="keep-alive-status" class="col-span-4 row-span-4 w-full h-full grid grid-rows-4 gap-y-1 rounded-[32px] ${isDark?'bg-black/30':'bg-white/30'} relative z-10 p-4 sm:p-5 backdrop-blur-md min-h-0 shadow-sm border ${isDark?'border-white/10':'border-white/40'}">
+                      
+                      ${(() => {
+                          const hasTrack = list && list.length > 0;
+                          const trackName = hasTrack ? window.audioPlayer.getTrackName() : "暂无音乐";
+                          const artistName = hasTrack ? window.audioPlayer.getArtistName() : "上传歌词让AI陪你听歌";
+                          const isPlaying = window.audioState ? window.audioState.isPlaying : false;
+                          const loopMode = window.audioState ? window.audioState.loopMode : 'list';
+                          const loopIcon = loopMode === 'list' ? 'repeat' : 'repeat-1';
+                          const compChar = store.musicCompanionId ? store.contacts.find(c=>c.id===store.musicCompanionId) : null;
+                          
+                          const currentTrack = hasTrack ? list[window.audioState.currentIndex] : null;
+                          const hasLyrics = currentTrack?.lyrics;
+                          const isRawText = hasLyrics && Array.isArray(hasLyrics) && typeof hasLyrics[0] === 'string';
+                          const lyricPlaceholder = isRawText ? '🎵 已挂载纯文本歌词' : (hasLyrics ? '🎵' : '暂无歌词数据');
+
+                          return `
+                          <div class="row-span-1 flex flex-col justify-center min-h-0 w-full h-full">
+                              <div class="flex justify-between items-center w-full ${isDark?'text-white':'text-gray-800'} mb-1.5 sm:mb-2">
+                                  <div class="w-10 flex items-center justify-start"><i data-lucide="plus" class="w-[18px] h-[18px] cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onclick="window.homeActions.openAddAudioModal()" title="添加音乐"></i></div>
                                   <div class="flex items-center space-x-5">
                                       <i data-lucide="skip-back" class="w-4 h-4 cursor-pointer active:scale-90 transition-transform" onclick="window.homeActions.prevMusic()"></i>
                                       <div onclick="window.homeActions.togglePlay()" class="cursor-pointer active:scale-90 transition-transform">
@@ -683,117 +680,106 @@ export function renderHomeApp(store) {
                                       </div>
                                       <i data-lucide="skip-forward" class="w-4 h-4 cursor-pointer active:scale-90 transition-transform" onclick="window.homeActions.nextMusic()"></i>
                                   </div>
-                                  
-                                  <div class="w-12 flex items-center justify-end space-x-3">
+                                  <div class="w-10 flex items-center justify-end space-x-3">
                                       <i id="mc-audio-loop-icon" data-lucide="${loopIcon}" class="w-[18px] h-[18px] cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onclick="window.homeActions.toggleLoop()" title="切换循环模式"></i>
                                       <i data-lucide="list-music" class="w-[18px] h-[18px] cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onclick="window.homeActions.openPlaylist()" title="播放列表"></i>
                                   </div>
                               </div>
-
                               <div class="flex flex-col items-start w-full px-1 ${isDark?'text-white':'text-gray-900'}">
-                                  <span id="mc-audio-name" class="text-[15px] font-black tracking-wide truncate w-full font-serif">${trackName}</span>
-                                  <span id="mc-audio-artist" class="text-[10px] opacity-60 truncate tracking-widest mt-0.5">${artistName}</span>
+                                  <span id="mc-audio-name" class="text-[14px] sm:text-[15px] font-black tracking-wide truncate w-full font-serif">${trackName}</span>
+                                  <span id="mc-audio-artist" class="text-[9px] sm:text-[10px] opacity-60 truncate tracking-widest mt-0.5">${artistName}</span>
                               </div>
+                          </div>
 
-                              <div class="mt-2 flex flex-col items-center justify-center w-full h-[20px] overflow-hidden px-1">
+                          <div class="row-span-1 flex flex-col justify-center min-h-0 w-full h-full">
+                              <div class="flex flex-col items-center justify-center w-full min-h-[16px] overflow-hidden px-1 mb-1">
                                   <span id="music-lyric-line" class="text-[11px] font-bold text-center w-full truncate transition-all duration-300 ${isDark?'text-white/80 drop-shadow-sm':'text-gray-600'}">${lyricPlaceholder}</span>
                               </div>
-
-                              <div class="mt-3 flex items-start w-full space-x-2">
-                                  <div class="w-[2.5rem] h-[2.5rem] rounded-full overflow-hidden border ${isDark?'border-white/20 bg-black/40':'border-gray-200 bg-white'} flex items-center justify-center cursor-pointer shadow-sm shrink-0 active:scale-95 transition-transform" onclick="window.homeActions.openCompanionSelect()">
+                              <div class="flex items-center w-full space-x-2 shrink-0 px-1">
+                                  <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-full overflow-hidden border ${isDark?'border-white/20 bg-black/40':'border-gray-200 bg-white'} flex items-center justify-center cursor-pointer shadow-sm shrink-0 active:scale-95 transition-transform" onclick="window.homeActions.openCompanionSelect()">
                                       ${compChar ? `<img src="${compChar.avatar}" class="w-full h-full object-cover grayscale-[20%]">` : `<i data-lucide="plus" class="w-4 h-4 ${isDark?'text-white/40':'text-gray-400'}"></i>`}
                                   </div>
-                                  <div class="mt-1 flex-1 ${isDark?'bg-[#262628] text-white':'bg-[#E9E9EB] text-gray-800'} rounded-2xl rounded-tl-[4px] px-3.5 py-2 relative shadow-sm min-h-[36px] flex items-center justify-start max-w-[85%]">
-                                      <span class="text-[11px] leading-snug font-medium ${window.homeState.isGeneratingReaction ? 'animate-pulse' : ''} line-clamp-2">${store.musicReaction || (compChar ? '正在陪你听歌...' : '点击头像选人')}</span>
+                                  <div class="flex-1 ${isDark?'bg-[#262628] text-white':'bg-[#E9E9EB] text-gray-800'} rounded-2xl rounded-tl-[4px] px-3 py-1.5 relative shadow-sm flex items-center justify-start min-w-0">
+                                      <span class="text-[10px] leading-snug font-medium ${window.homeState.isGeneratingReaction ? 'animate-pulse' : ''} line-clamp-1 sm:line-clamp-2 w-full">${store.musicReaction || (compChar ? '正在陪你听歌...' : '点击选人')}</span>
                                   </div>
+                              </div>
+                          </div>
+                          
+                          <div class="row-span-2 border-t ${isDark?'border-white/10':'border-gray-300/40'} pt-2 flex flex-col relative px-1 justify-center min-h-0">
+                              <div class="text-[9px] font-bold opacity-40 tracking-widest uppercase mb-1 font-serif flex items-center justify-between ${isDark?'text-white':'text-gray-600'}">
+                                  <div class="flex items-center space-x-2">
+                                      <span>Daily Fortune · 专属运势</span>
+                                      ${store.birthday ? `<i data-lucide="edit-2" class="w-3 h-3 cursor-pointer hover:opacity-100" onclick="window.homeActions.editBirthday()" title="修改出生日期"></i>` : ''}
+                                  </div>
+                                  ${(store.dailyFortune && store.dailyFortune.date === new Date().toISOString().split('T')[0]) ? `<i data-lucide="refresh-cw" class="w-3.5 h-3.5 cursor-pointer hover:opacity-100 ${window.homeState.isGeneratingFortune ? 'animate-spin' : ''}" onclick="window.homeActions.generateDailyFortune()"></i>` : ''}
                               </div>
                               
-                              <div class="flex-1 mt-4 border-t ${isDark?'border-white/10':'border-gray-300/40'} pt-3 flex flex-col relative px-1">
-                                  <div class="text-[9px] font-bold opacity-40 tracking-widest uppercase mb-1.5 font-serif flex items-center justify-between ${isDark?'text-white':'text-gray-600'}">
+                              ${!store.birthday ? `
+                                  <div class="flex flex-col items-center justify-center opacity-80 z-20 py-1.5 sm:py-2">
+                                      <span class="text-[10px] tracking-widest font-bold mb-2 ${isDark?'text-white/60':'text-gray-500'}">设定生辰，开启星盘</span>
                                       <div class="flex items-center space-x-2">
-                                          <span>Daily Fortune · 专属运势</span>
-                                          ${store.birthday ? `<i data-lucide="edit-2" class="w-3 h-3 cursor-pointer hover:opacity-100" onclick="window.homeActions.editBirthday()" title="修改出生日期"></i>` : ''}
+                                          <input id="fortune-bday-input" type="date" class="bg-transparent border ${isDark?'border-white/20 text-white':'border-gray-300 text-gray-700'} rounded-lg px-2 py-1 text-[11px] outline-none shadow-sm cursor-pointer">
+                                          <button onclick="window.homeActions.saveBirthday(document.getElementById('fortune-bday-input').value)" class="bg-gray-800 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm active:scale-95 transition-transform">确定</button>
                                       </div>
-                                      ${(store.dailyFortune && store.dailyFortune.date === new Date().toISOString().split('T')[0]) ? `<i data-lucide="refresh-cw" class="w-3.5 h-3.5 cursor-pointer hover:opacity-100 ${window.homeState.isGeneratingFortune ? 'animate-spin' : ''}" onclick="window.homeActions.generateDailyFortune()"></i>` : ''}
                                   </div>
-                                  
-                                  ${!store.birthday ? `
-                                      <div class="flex-1 flex flex-col items-center justify-center opacity-80 z-20">
-                                          <span class="text-[10px] tracking-widest font-bold mb-2 ${isDark?'text-white/60':'text-gray-500'}">设定生辰，开启星盘</span>
-                                          <div class="flex items-center space-x-2">
-                                              <input id="fortune-bday-input" type="date" class="bg-transparent border ${isDark?'border-white/20 text-white':'border-gray-300 text-gray-700'} rounded-lg px-2 py-1 text-[11px] outline-none shadow-sm cursor-pointer">
-                                              <button onclick="window.homeActions.saveBirthday(document.getElementById('fortune-bday-input').value)" class="bg-gray-800 text-white px-3 py-1.5 rounded-lg text-[10px] font-bold shadow-sm active:scale-95 transition-transform">确定</button>
+                              ` : (store.dailyFortune && store.dailyFortune.date === new Date().toISOString().split('T')[0]) ? `
+                                  <div class="flex flex-col w-full mb-1 mt-1">
+                                      <div class="text-[11px] sm:text-[12px] font-black tracking-widest text-center w-full mb-1 ${isDark?'text-white':'text-gray-800'}">✨ ${store.dailyFortune.sign || '专属'}运势 ✨</div>
+                                      <div class="flex justify-between items-center px-2 sm:px-4 w-full">
+                                          <div class="flex flex-col items-center space-y-0.5">
+                                              <span class="text-[8px] ${isDark?'text-white/50':'text-gray-500'} font-bold">综合</span>
+                                              <div class="flex space-x-[1px] text-yellow-400">${Array(5).fill(0).map((_,i)=>`<i data-lucide="star" class="w-2.5 h-2.5 ${i<store.dailyFortune.comprehensive?'fill-current':''}"></i>`).join('')}</div>
+                                          </div>
+                                          <div class="w-px h-3 ${isDark?'bg-white/10':'bg-gray-300/50'}"></div>
+                                          <div class="flex flex-col items-center space-y-0.5">
+                                              <span class="text-[8px] ${isDark?'text-white/50':'text-gray-500'} font-bold">爱情</span>
+                                              <div class="flex space-x-[1px] text-rose-400">${Array(5).fill(0).map((_,i)=>`<i data-lucide="star" class="w-2.5 h-2.5 ${i<store.dailyFortune.love?'fill-current':''}"></i>`).join('')}</div>
+                                          </div>
+                                          <div class="w-px h-3 ${isDark?'bg-white/10':'bg-gray-300/50'}"></div>
+                                          <div class="flex flex-col items-center space-y-0.5">
+                                              <span class="text-[8px] ${isDark?'text-white/50':'text-gray-500'} font-bold">事业</span>
+                                              <div class="flex space-x-[1px] text-blue-400">${Array(5).fill(0).map((_,i)=>`<i data-lucide="star" class="w-2.5 h-2.5 ${i<store.dailyFortune.career?'fill-current':''}"></i>`).join('')}</div>
                                           </div>
                                       </div>
-                                  ` : (store.dailyFortune && store.dailyFortune.date === new Date().toISOString().split('T')[0]) ? `
-                                      <div class="flex flex-col w-full mb-1.5">
-                                          <div class="text-[12px] font-black tracking-widest text-center w-full mb-1.5 ${isDark?'text-white':'text-gray-800'}">✨ ${store.dailyFortune.sign || '专属'}运势 ✨</div>
-                                          
-                                          <div class="flex justify-between items-center px-4 w-full">
-                                              <div class="flex flex-col items-center space-y-1">
-                                                  <span class="text-[9px] ${isDark?'text-white/50':'text-gray-500'} font-bold">综合</span>
-                                                  <div class="flex space-x-[1px] text-yellow-400">${Array(5).fill(0).map((_,i)=>`<i data-lucide="star" class="w-2.5 h-2.5 ${i<store.dailyFortune.comprehensive?'fill-current':''}"></i>`).join('')}</div>
-                                              </div>
-                                              <div class="w-px h-4 ${isDark?'bg-white/10':'bg-gray-300/50'}"></div>
-                                              <div class="flex flex-col items-center space-y-1">
-                                                  <span class="text-[9px] ${isDark?'text-white/50':'text-gray-500'} font-bold">爱情</span>
-                                                  <div class="flex space-x-[1px] text-rose-400">${Array(5).fill(0).map((_,i)=>`<i data-lucide="star" class="w-2.5 h-2.5 ${i<store.dailyFortune.love?'fill-current':''}"></i>`).join('')}</div>
-                                              </div>
-                                              <div class="w-px h-4 ${isDark?'bg-white/10':'bg-gray-300/50'}"></div>
-                                              <div class="flex flex-col items-center space-y-1">
-                                                  <span class="text-[9px] ${isDark?'text-white/50':'text-gray-500'} font-bold">事业</span>
-                                                  <div class="flex space-x-[1px] text-blue-400">${Array(5).fill(0).map((_,i)=>`<i data-lucide="star" class="w-2.5 h-2.5 ${i<store.dailyFortune.career?'fill-current':''}"></i>`).join('')}</div>
-                                              </div>
-                                          </div>
-                                      </div>
-                                      <p class="text-[11px] leading-relaxed ${isDark?'text-white/80':'text-gray-700'} font-serif line-clamp-2">${store.dailyFortune.text}</p>
-                                  ` : `
-                                      <div class="flex-1 flex flex-col items-center justify-center opacity-60 z-20">
-                                          <i data-lucide="loader" class="w-6 h-6 mb-2 animate-spin ${isDark?'text-white/60':'text-gray-400'}"></i>
-                                          <span class="text-[10px] tracking-widest font-bold ${isDark?'text-white/60':'text-gray-500'}">正在为您观测今日星象...</span>
-                                      </div>
-                                  `}
-                              </div>
-                              `;
-                          })()}
-                      </div>
-                      
-                      <div class="flex-1"></div>
-                      
-                      <div class="grid grid-cols-4 gap-x-2 pb-4 mt-2 shrink-0">
-                          ${createAppIcon('feather', 'AO3', "window.actions.setCurrentApp('ao3')", 'mc-icon-ao3', isDark)}
-                          ${createAppIcon('lock', '小黑屋', "window.actions.setCurrentApp('darkroom')", 'mc-icon-darkroom', isDark)}
-                          ${createAppIcon('zap', '快穿系统', "window.actions.setCurrentApp('transmigrate')", 'mc-icon-transmigrate', isDark)}
-                          ${createAppIcon('clapperboard', '占位', "window.actions.setCurrentApp('jubensha')", 'mc-icon-jubensha', isDark)}
-                      </div>
+                                  </div>
+                                  <p class="text-[9px] sm:text-[10px] leading-snug ${isDark?'text-white/80':'text-gray-700'} font-serif line-clamp-2 mt-1">${store.dailyFortune.text}</p>
+                              ` : `
+                                  <div class="flex flex-col items-center justify-center opacity-60 z-20 py-2 sm:py-3">
+                                      <i data-lucide="loader" class="w-5 h-5 sm:w-6 sm:h-6 mb-1.5 animate-spin ${isDark?'text-white/60':'text-gray-400'}"></i>
+                                      <span class="text-[10px] tracking-widest font-bold ${isDark?'text-white/60':'text-gray-500'}">正在为您观测今日星象...</span>
+                                  </div>
+                              `}
+                          </div>
+                          `;
+                      })()}
                  </div>
                  
-                 <div class="w-full flex justify-between items-end pb-8 px-1 pt-4 shrink-0 opacity-0 pointer-events-none">
-                     <div class="flex flex-col items-start space-y-4 w-1/2 shrink-0">
-                        <input type="text" class="w-[80%] px-3 py-1" style="font-size: 12px !important" />
-                        <input type="text" class="w-[90%] px-3 py-1" style="font-size: 12px !important" />
-                     </div>
-                     <div class="flex justify-end space-x-8 pr-1 shrink-0">
-                        <div class="w-[3.5rem] h-[3.5rem]"></div>
-                        <div class="w-[3.5rem] h-[3.5rem]"></div>
-                     </div>
+                 <div class="col-span-4 row-span-1 grid grid-cols-4 gap-2 w-full h-full items-center justify-items-center">
+                     ${createAppIcon('feather', 'AO3', "window.actions.setCurrentApp('ao3')", 'mc-icon-ao3', isDark)}
+                     ${createAppIcon('lock', '小黑屋', "window.actions.setCurrentApp('darkroom')", 'mc-icon-darkroom', isDark)}
+                     ${createAppIcon('zap', '快穿系统', "window.actions.setCurrentApp('transmigrate')", 'mc-icon-transmigrate', isDark)}
+                     ${createAppIcon('clapperboard', '占位', "window.actions.setCurrentApp('jubensha')", 'mc-icon-jubensha', isDark)}
                  </div>
+
+                 <div class="col-span-4 row-span-1 w-full h-full"></div>
 
             </div>
         </div>
 
       </div> 
       
-      <div class="flex justify-center items-center space-x-2 mb-2 pb-4 mt-2 ${isDark ? 'text-white' : 'text-gray-800'} shrink-0 z-20 pointer-events-none">
+      <div class="row-span-1 w-full h-full flex justify-center items-center space-x-2 shrink-0 z-20 pointer-events-none ${isDark ? 'text-white' : 'text-gray-800'}">
          <div id="home-dot-0" class="w-1.5 h-1.5 rounded-full bg-current transition-opacity duration-300" style="opacity: ${initPageIdx === 0 ? '1' : '0.3'};"></div>
          <div id="home-dot-1" class="w-1.5 h-1.5 rounded-full bg-current transition-opacity duration-300" style="opacity: ${initPageIdx === 1 ? '1' : '0.3'};"></div>
       </div>
 
-      <div class="mx-4 mb-6 px-3 py-3 ${isDark?'bg-black/10 border-black/10':'bg-white/10 border-white/10'} backdrop-blur-xl rounded-[28px] flex justify-between items-center shadow-sm border shrink-0 z-20">
-         ${createDockIcon('book-open', '世界书', "window.actions.setCurrentApp('worldbook')", 'mc-icon-worldbook', isDark)}
-         ${createDockIcon('brain', '记忆库', "window.actions.setCurrentApp('memory')", 'mc-icon-memory', isDark)}
-         ${createDockIcon('palette', '外观', "window.actions.setCurrentApp('appearance')", 'mc-icon-appearance', isDark)}
-         ${createDockIcon('settings', '设置', "window.actions.setCurrentApp('settings')", 'mc-icon-settings', isDark)}
+      <div class="row-span-1 w-full h-full px-4 pb-5 pt-0 z-20 shrink-0">
+         <div class="w-full h-full ${isDark?'bg-black/10 border-black/10':'bg-white/10 border-white/10'} backdrop-blur-xl rounded-[24px] sm:rounded-[28px] flex justify-around items-center shadow-sm border px-2 sm:px-3">
+             ${createDockIcon('book-open', '世界书', "window.actions.setCurrentApp('worldbook')", 'mc-icon-worldbook', isDark)}
+             ${createDockIcon('brain', '记忆库', "window.actions.setCurrentApp('memory')", 'mc-icon-memory', isDark)}
+             ${createDockIcon('palette', '外观', "window.actions.setCurrentApp('appearance')", 'mc-icon-appearance', isDark)}
+             ${createDockIcon('settings', '设置', "window.actions.setCurrentApp('settings')", 'mc-icon-settings', isDark)}
+         </div>
       </div>
 
         ${window.homeState?.showCompanionModal ? `

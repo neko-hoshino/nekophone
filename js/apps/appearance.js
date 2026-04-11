@@ -219,7 +219,7 @@ export function renderAppearanceApp(store) {
 
   return `
     <div class="w-full h-full bg-[#f6f7f9] flex flex-col relative animate-in slide-in-from-bottom-4 duration-300 z-50">
-      <div class="bg-white/80 backdrop-blur-md px-4 pt-12 pb-3 flex justify-between items-center shadow-sm relative shrink-0 z-10">
+      <div class="bg-white/80 backdrop-blur-md px-4 pt-8 pb-3 flex justify-between items-center shadow-sm relative shrink-0 z-10">
         <div class="cursor-pointer active:opacity-50 p-1" onclick="window.apActions.closeApp()"><i data-lucide="chevron-left" class="w-6 h-6 text-gray-800"></i></div>
         <span class="absolute left-1/2 -translate-x-1/2 font-black text-gray-800 text-[17px] tracking-wide">外观与美化</span>
         <div class="w-6"></div>
