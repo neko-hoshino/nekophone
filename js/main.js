@@ -176,9 +176,20 @@ function render() {
   if (ap.sysFont) {
     const fontName = ap.sysFont.includes('http') ? 'MC_CustomFont' : ap.sysFont;
     if (ap.sysFont.includes('http') && ap.sysFont.match(/\.(ttf|otf|woff|woff2)/i)) {
-       fontCss += `@font-face { font-family: 'MC_CustomFont'; src: url('${ap.sysFont}'); font-display: swap; }`;
+       // 🌟 核心修复 1：把链接里的中文（如"生气喵"）进行 URL 编码，否则手机浏览器会直接罢工！
+       const safeUrl = encodeURI(ap.sysFont.trim());
+       
+       // 🌟 核心修复 2：增加 format 提示，给手机浏览器发通行证
+       let formatHint = '';
+       if (safeUrl.toLowerCase().includes('.ttf')) formatHint = "format('truetype')";
+       else if (safeUrl.toLowerCase().includes('.woff2')) formatHint = "format('woff2')";
+       else if (safeUrl.toLowerCase().includes('.woff')) formatHint = "format('woff')";
+       else if (safeUrl.toLowerCase().includes('.otf')) formatHint = "format('opentype')";
+       
+       fontCss += `@font-face { font-family: 'MC_CustomFont'; src: url('${safeUrl}') ${formatHint}; font-display: swap; }`;
     }
-    fontCss += `body * { font-family: ${fontName}, sans-serif !important; }`;
+    // 加上通用的备用字体族，防止在加载出新字体前排版错乱
+    fontCss += `body * { font-family: ${fontName}, system-ui, -apple-system, sans-serif !important; }`;
   }
   // 🌟 核心破局：纯数值比例缩放引擎！严格防范 px * px 的非法数学错误
   if (ap.sysFontSize) {
