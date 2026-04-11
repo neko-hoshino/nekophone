@@ -352,7 +352,6 @@ if (!window.bloggerActions) {
 
         togglePostDetail: (postId) => {
             const state = window.bloggerState;
-            // 🌟 核心：在渲染前死死抓住当前的滚动位置
             const scrollEl = document.getElementById('blogger-home-scroll');
             const st = scrollEl ? scrollEl.scrollTop : 0;
             
@@ -361,13 +360,11 @@ if (!window.bloggerActions) {
                 const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
                 const post = acc?.posts?.find(p => p.id === postId);
                 if (post && !post.hasFetchedComments) {
-                    // 如果需要拉取数据，把当前滚动条高度传给 fetchComments
                     window.bloggerActions.fetchComments(postId, false, st);
                     return; 
                 }
             }
             window.render();
-            // 🌟 渲染完后，瞬间按回原位
             setTimeout(() => { const el = document.getElementById('blogger-home-scroll'); if(el) el.scrollTop = st; }, 0);
         },
 
@@ -375,7 +372,6 @@ if (!window.bloggerActions) {
             const state = window.bloggerState;
             if (state.isFetchingComments || !store.apiConfig?.apiKey) return;
             
-            // 🌟 记录或接收滚动位置
             const scrollEl = document.getElementById('blogger-home-scroll');
             const st = preservedScroll !== null ? preservedScroll : (scrollEl ? scrollEl.scrollTop : 0);
             
@@ -383,7 +379,6 @@ if (!window.bloggerActions) {
             const post = acc?.posts?.find(p => p.id === postId);
             state.isFetchingComments = true; window.render();
             
-            // 状态变更为 Loading 时也要锁住滚动条
             setTimeout(() => { const el = document.getElementById('blogger-home-scroll'); if(el) el.scrollTop = st; }, 0);
 
             try {
@@ -424,7 +419,6 @@ if (!window.bloggerActions) {
                 if (window.actions.saveStore) window.actions.saveStore();
             } catch (e) { console.error(e); } finally { 
                 state.isFetchingComments = false; window.render(); 
-                // 🌟 数据回来后，再次把滚动条按回原位！
                 setTimeout(() => { const el = document.getElementById('blogger-home-scroll'); if(el) el.scrollTop = st; }, 0);
             }
         },
@@ -501,7 +495,6 @@ if (!window.bloggerActions) {
 
                 const recent = (acc.posts||[]).slice(0,10).map(p => p.desc).join('；');
                 
-                // 🌟 核心优化：让 AI 明确这个提问是给谁的
                 const task = `结合近期动态[${recent}]，生成5条符合平台风格的粉丝匿名提问。
 【强制路由机制】：
 1. 必须在 "target" 字段明确指定该问题是问谁的（"user"代表问用户，"partner"代表问【${char.name}】，"both"代表问你们俩）。
@@ -516,7 +509,6 @@ if (!window.bloggerActions) {
                 acc.qaBox = []; acc.posts = acc.posts || [];
                 
                 cms.forEach(q => {
-                    // 🌟 判定：如果是找我的，并且我有回答，直接发主页；否则塞进提问箱留给你答
                     if (q.target === 'partner' && q.answeredByPartner && q.answeredByPartner.trim() !== '') {
                         const likes = Math.floor(acc.followers * 0.05 + 10);
                         acc.totalLikes += likes;
@@ -558,7 +550,6 @@ if (!window.bloggerActions) {
 
                 const recent = (acc.posts||[]).slice(0,10).map(p => p.desc).join('；');
                 
-                // 🌟 核心优化：让 AI 明确私信是给谁的
                 const task = `结合平台风格和近期动态[${recent}]，生成5条私信会话（粉丝/路人/狗仔/其他博主）。
 【强制路由机制】：
 1. 必须在 "target" 字段明确指定私信是发给谁的（"user"代表找用户，"partner"代表找【${char.name}】）。
@@ -592,7 +583,6 @@ if (!window.bloggerActions) {
             const chat = store.chats.find(c => c.charId === acc.charId);
             if(chat && acc.studioData?.pr) {
                 const pr = acc.studioData.pr;
-                // 🌟 升级版：处理结果反馈 Prompt，更具沉浸感和角色代入感
                 const hiddenText = `[系统最高优先级隐藏指令：危机处理反馈]
 【事件回顾】：我们的情侣账号之前遭遇了“${pr.title}”的危机。
 【真相是】：${pr.truth}
@@ -630,7 +620,6 @@ if (!window.bloggerActions) {
                     truthContext = `【重要设定】：这则造谣/丑闻是冲着你的伴侣(用户)来的！因为传闻是关于用户的，所以你目前**不知道**真相！实际的真相其实是：${pr.truth}（但你不能直接全知全能地说出来）。请表现出震惊、护短、吃醋或疑惑，去质问/询问用户到底是怎么回事。`;
                 }
                 
-                // 🌟 史诗级补丁：绝对防降智、防复读机机制设定
                 const hiddenPrompt = `[系统最高优先级隐藏指令] 
 【当前情境】：你和用户共同运营的“情侣博主账号”刚刚遭遇了外界的公关危机！网上的恶劣传闻是：“${pr.desc}”。
 用户刚刚把这条负面新闻转发给了你。
@@ -650,12 +639,12 @@ ${truthContext}
         },
         handlePR: async (type) => {
             const state = window.bloggerState;
-            if (state.isHandlingPR) return; // 🌟 防连点锁
+            if (state.isHandlingPR) return; 
             const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
             const pr = acc.studioData?.pr;
             if(!pr) return;
 
-            state.isHandlingPR = type; // 🌟 激活按钮 loading
+            state.isHandlingPR = type; 
             window.render();
 
             if (type === 'ignore') {
@@ -693,7 +682,7 @@ ${truthContext}
                     } catch(e) { console.error(e); window.actions?.showToast('网络波动，请重试'); }
                 }
                 if (window.actions.saveStore) window.actions.saveStore();
-                state.isHandlingPR = null; // 🌟 解锁
+                state.isHandlingPR = null; 
                 window.render();
             } else if (type === 'post') {
                 state.isHandlingPR = null;
@@ -831,7 +820,7 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             if (!store.apiConfig?.apiKey) return window.actions.showToast('⚠️ 配置 API 后即可获取商单与活动');
             
             const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
-            const lv = bloggerUtils.calcLevel(acc.followers);
+            const lv = window.bloggerUtils.calcLevel(acc.followers);
             state.isGeneratingStudio = true; window.render();
             try {
                 const char = store.contacts.find(c => c.id === acc.charId);
@@ -864,12 +853,25 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             const acc = store.syncAccounts.find(a => a.id === window.bloggerState.currentAccountId);
             window.bloggerState.live = {
                 isActive: true, view: 'normal', viewers: Math.floor(acc.followers * 0.05 + 100), income: 0,
-                task: { title: '正在连接弹幕网络...', reward: 0 },
+                task: { title: '正在连接弹幕网络...', reward: 0, status: 'unaccepted' },
                 messages: [{ type: 'system', author: '系统', content: '直播间已开启，当前处于共创模式' }],
                 pk: { opponent: null, score: 50, isActive: false },
-                isVotingLoading: false, isPKLoading: false, isActionLoading: false, isTaskLoading: true // 🌟 初始化各种锁
+                isVotingLoading: false, isPKLoading: false, isActionLoading: false, isTaskLoading: true
             };
             window.render();
+
+            // 🌟 1. 危机公关拦截：直接硬编码第一个强制澄清任务
+            if (acc.studioData?.pr?.status === 'active') {
+                window.bloggerState.live.task = {
+                    title: `【紧急澄清】正面回应传闻：“${acc.studioData.pr.desc}”，向观众说明真相！`,
+                    reward: 500,
+                    status: 'unaccepted'
+                };
+                window.bloggerState.live.messages.push({ type: 'system', author: '系统', content: `🚨 检测到公关危机，已强制派发澄清任务！` });
+                window.bloggerState.live.isTaskLoading = false;
+                window.render();
+                return; // 直接拦截 AI 生成
+            }
 
             if (store.apiConfig?.apiKey) {
                 try {
@@ -884,7 +886,7 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                     window.bloggerState.live.task = { title: json.taskTitle, reward: json.reward, status: 'unaccepted' };
                     window.bloggerState.live.messages.push({ type: 'system', author: '系统', content: `🎯 直播互动任务已派发：${json.taskTitle}` });
                 } catch(e) { console.error(e); } finally {
-                    window.bloggerState.live.isTaskLoading = false; // 🌟 任务加载完毕，解锁
+                    window.bloggerState.live.isTaskLoading = false;
                     window.render();
                 }
             }
@@ -896,28 +898,23 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             
             const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
             
-            // 🌟 1. 提取各项维度数据
             const interactCount = live.messages.length;
-            const heat = live.viewers + interactCount * 50 + Math.floor(Math.random() * 1000); // 综合热度
+            const heat = live.viewers + interactCount * 50 + Math.floor(Math.random() * 1000); 
             
-            // 🌟 2. 基础涨粉算法 (观众转化 + 互动加成)
             let newFollowers = Math.floor(live.viewers * (Math.random() * 0.05 + 0.02) + interactCount * (Math.random() * 10 + 5));
             let extraMsg = '';
 
-            // 🌟 3. 公关危机暴击判定
-            if (live.messages.some(m => m.type === 'system' && m.content.includes('公关大获全胜'))) {
-                const prBoost = Math.floor(acc.followers * 0.03 + 3000); // 成功平息风波，大量吸粉
+            if (live.messages.some(m => m.type === 'system' && m.content.includes('危机解除'))) {
+                const prBoost = Math.floor(acc.followers * 0.03 + 3000); 
                 newFollowers += prBoost;
                 extraMsg += '\n🎉 危机公关非常成功，路人转粉暴击！';
             }
             
-            // 🌟 4. PK 胜利奖励判定
             if (live.view === 'pk' && live.pk.myScore > live.pk.opScore) {
                 newFollowers += 1500;
                 extraMsg += '\n⚔️ PK 压倒性胜利，获得平台流量扶持！';
             }
 
-            // 🌟 5. 结算入账
             acc.followers += newFollowers;
             acc.extraIncome = (acc.extraIncome || 0) + live.income;
             live.isActive = false;
@@ -925,7 +922,6 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             if (window.actions.saveStore) window.actions.saveStore();
             window.render();
             
-            // 🌟 6. 弹出华丽的结算成绩单
             setTimeout(() => {
                 alert(`📊 【直播数据结算单】\n\n🔥 最高热度：${heat.toLocaleString()}\n💬 互动条数：${interactCount}\n💰 礼物收益：￥${live.income.toLocaleString()}\n📈 净增粉丝：${newFollowers.toLocaleString()} 人${extraMsg}\n\n感谢播主，好好休息吧！`);
             }, 300);
@@ -949,7 +945,6 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                 const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                 
-                // 🌟 选出最高票，存入状态供后续提示词使用
                 const winner = json.options.reduce((a, b) => (a.percent > b.percent) ? a : b);
                 live.lastVoteResult = `观众最高票选：${winner.text} (${winner.percent}%)`;
 
@@ -972,7 +967,6 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             live.isPKLoading = true; window.render();
 
             try {
-                // 🌟 新增：要求生成连麦接通时的开场白！
                 const task = `请结合平台风格，生成一对专门用于直播PK连麦的【对立面情侣博主】（如工业糖精情侣、搞笑夫妻等）。并生成他们连麦接通时的第一句开场白。输出JSON：{"name": "网名(情侣账号)", "greeting": "嚣张或绿茶的连麦开场白"}`;
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: task }] }) });
                 const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
@@ -983,13 +977,11 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             } catch(e) { console.error(e); } finally { live.isPKLoading = false; window.render(); }
         },
 
-        // 🌟 新增：手动接取任务（带 AI 主动破冰破局功能）
         acceptLiveTask: async () => {
             const state = window.bloggerState;
             const live = state.live;
             if (live.isActionLoading) return;
             
-            // 没配 API 的话就直接变状态
             if (!store.apiConfig?.apiKey) {
                 state.live.task.status = 'progress';
                 state.live.messages.push({ type: 'system', author: '系统', content: `🎬 已接取互动任务：${state.live.task.title}，快去互动吧！` });
@@ -1005,7 +997,7 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
 
             live.task.status = 'progress';
             live.messages.push({ type: 'system', author: '系统', content: `🎬 已接取任务：${live.task.title}` });
-            live.isActionLoading = true; // 🌟 激活输入框边上的转圈圈，锁住输入
+            live.isActionLoading = true; 
             window.render();
             setTimeout(() => { const el = document.getElementById('live-chat-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 50);
 
@@ -1015,7 +1007,6 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                     pkAddon = `\n【PK连麦中】：你们正与主播【${live.pk.opponent.name}】进行PK比拼！`;
                 }
 
-                // 🌟 核心破冰指令：让伴侣来开这个头！
                 const task = `直播间刚刚接取了一个新互动任务：【${live.task.title}】。
 请你以伴侣【${char.name}】的身份，主动发起互动来引导用户完成这个任务。
 你可以撒娇、调侃、故意使坏，或者直接采取行动，把台阶递给用户。
@@ -1031,7 +1022,6 @@ ${pkAddon}
                 });
                 const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
 
-                // 🌟 把伴侣的开头和粉丝的起哄推上公屏
                 if(json.partnerReply) live.messages.push({ type: 'partner', author: char.name, content: json.partnerReply });
                 if(json.danmaku) json.danmaku.forEach(d => live.messages.push({ type: 'fan', author: '网友' + Math.floor(Math.random()*999), content: d }));
 
@@ -1045,7 +1035,6 @@ ${pkAddon}
             }
         },
 
-        // 🌟 新增：手动强制标记完成 (AI犯蠢判不出来时的兜底)
         forceCompleteLiveTask: () => {
             const state = window.bloggerState;
             state.live.task.status = 'completed';
@@ -1077,7 +1066,10 @@ ${pkAddon}
             if (store.apiConfig?.apiKey) {
                 try {
                     const recentHistory = live.messages.filter(m => ['user', 'partner', 'opponent'].includes(m.type)).slice(-5).map(m => `[${m.author}]: ${m.content}`).join('\n');
-                    const prStatus = acc.studioData?.pr?.status === 'active' ? `【紧急：当前处于公关危机！传闻：${acc.studioData.pr.desc}】` : '';
+                    
+                    const isPRActive = acc.studioData?.pr?.status === 'active';
+                    const prStatus = isPRActive ? `【紧急：当前处于公关危机！传闻：${acc.studioData.pr.desc}，实际真相：${acc.studioData.pr.truth}】\n你需要判定用户的澄清是否足以说服观众。` : '';
+                    
                     const voteAddon = live.lastVoteResult ? `\n【最新观众投票】：${live.lastVoteResult}。` : '';
                     
                     let pkAddon = '';
@@ -1085,7 +1077,6 @@ ${pkAddon}
                         pkAddon = `\n【PK连麦中】：你们正在和主播【${live.pk.opponent.name}】进行PK比拼！当前你们胜率是 ${live.pk.score}%。请判定本次互动你们获得了多少进度点数(-20到25)。\n必须额外生成："opponentReply": "对方的嘲讽或秀恩爱发言", "scoreBoost": 胜率点数, "punishment": "若有任意一方到达100或0，赢家对输家的惩罚(否则留空)"`;
                     }
                     
-                    // 🌟 核心升级：严格的状态机路由，不接就不告诉AI，接了就让AI当裁判！
                     let taskAddon = '';
                     if (live.task.status === 'progress') {
                         taskAddon = `\n【当前互动任务(进行中)】：${live.task.title}。请配合用户完成此任务。严厉判定：若本次互动后【任意一方】达到了任务要求，必须将 isTaskCompleted 设为 true，并生成 newTask。`;
@@ -1095,7 +1086,7 @@ ${pkAddon}
                         taskAddon = `\n(目前暂无进行中的互动任务)`;
                     }
                     
-                    const task = `情侣直播中，用户刚刚做了：${val}。\n近期上下文：\n${recentHistory}\n${prStatus}${voteAddon}\n【内置礼物】：荧光棒(￥1)、奶茶(￥15)、纯爱钻戒(￥99)、嘉年华(￥500)。\n${pkAddon}${taskAddon}\n请生成：1. 伴侣的实时回应(切忌替用户采取任何行动，仅作回应)。2. 3-5条弹幕。3. 随机0-2个粉丝送出礼物。\n严格输出 JSON：{"partnerReply": "伴侣的话语/动作", "danmaku": ["粉丝弹幕1", "弹幕2", "弹幕3"], "gifts": [{"fan": "粉丝网名", "giftName": "奶茶", "value": 15}], "isTaskCompleted": boolean, "newTask": {"title": "新任务", "reward": 金额}, "prResolved": 是否解除危机(boolean), "prFeedback": "若危机改变网友最新评价" ${live.view === 'pk' ? ',"opponentReply": "...","scoreBoost": 0,"punishment": ""' : ''}}`;
+                    const task = `情侣直播中，用户刚刚做了：${val}。\n近期上下文：\n${recentHistory}\n${prStatus}${voteAddon}\n【内置礼物】：荧光棒(￥1)、奶茶(￥15)、纯爱钻戒(￥99)、嘉年华(￥500)。\n${pkAddon}${taskAddon}\n请生成：1. 伴侣的实时回应(切忌替用户采取任何行动，仅作回应)。2. 3-5条弹幕。3. 随机0-2个粉丝送出礼物。\n${isPRActive ? "【极其重要】：由于在公关危机中，若需下发newTask，必须是关于进一步澄清、拿出证据、转移视线或安抚粉丝的具体公关任务！\n" : ""}严格输出 JSON：{"partnerReply": "伴侣的话语/动作", "danmaku": ["粉丝弹幕1", "弹幕2", "弹幕3"], "gifts": [{"fan": "粉丝网名", "giftName": "奶茶", "value": 15}], "isTaskCompleted": boolean, "newTask": {"title": "新任务", "reward": 金额}, "prResolved": 是否解除危机(boolean), "prFeedback": "若危机改变网友最新评价" ${live.view === 'pk' ? ',"opponentReply": "...","scoreBoost": 0,"punishment": ""' : ''}}`;
 
                     const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
                     const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
@@ -1127,24 +1118,39 @@ ${pkAddon}
                         });
                     }
 
+                    // 🌟 处理公关危机解除
+                    if(isPRActive && json.prResolved) {
+                        acc.studioData.pr.status = 'resolved'; acc.studioData.pr.result = `直播澄清成功！${json.prFeedback}`;
+                        window.bloggerActions.notifyPartnerOfPR('直播澄清', json.prFeedback); window.actions?.showToast('🎉 危机解除！');
+                    }
+
                     // 🌟 任务判定与新任务下发
                     const isCompleted = json.isTaskCompleted || live.task.status === 'completed';
                     if(isCompleted && live.task.status !== 'unaccepted') {
                         if(live.task.reward > 0) { live.income += live.task.reward; live.messages.push({ type: 'system', author: '系统', content: `🎉 任务达成！奖励￥${live.task.reward}` }); }
-                        if(json.newTask && json.newTask.title) { 
-                            live.task = { title: json.newTask.title, reward: json.newTask.reward || 200, status: 'unaccepted' }; 
-                            live.messages.push({ type: 'system', author: '系统', content: `🎯 新任务发布：${live.task.title}` }); 
+                        
+                        const currentlyInPR = acc.studioData?.pr?.status === 'active'; 
+
+                        if (currentlyInPR) {
+                            // 2. 防发散闭环：如果还在危机中，强制设定新任务为公关相关的
+                            const fallbackPRTask = "【继续公关】危机未解除，请继续拿出证据、转移视线或安抚粉丝情绪！";
+                            live.task = { 
+                                title: (json.newTask && json.newTask.title && (json.newTask.title.includes('澄清') || json.newTask.title.includes('粉丝') || json.newTask.title.includes('解释'))) ? json.newTask.title : fallbackPRTask, 
+                                reward: json.newTask?.reward || 300, 
+                                status: 'unaccepted' 
+                            };
+                            live.messages.push({ type: 'system', author: '系统', content: `🚨 危机尚未解除，新任务发布：${live.task.title}` });
                         } else {
-                            // 兜底防 AI 漏掉新任务
-                            live.task = { title: "给粉丝发个超级福利", reward: 200, status: 'unaccepted' };
-                            live.messages.push({ type: 'system', author: '系统', content: `🎯 新任务发布：${live.task.title}` });
+                            if(json.newTask && json.newTask.title) { 
+                                live.task = { title: json.newTask.title, reward: json.newTask.reward || 200, status: 'unaccepted' }; 
+                                live.messages.push({ type: 'system', author: '系统', content: `🎯 新任务发布：${live.task.title}` }); 
+                            } else {
+                                live.task = { title: "给粉丝发个超级福利", reward: 200, status: 'unaccepted' };
+                                live.messages.push({ type: 'system', author: '系统', content: `🎯 新任务发布：${live.task.title}` });
+                            }
                         }
                     }
 
-                    if(acc.studioData?.pr?.status === 'active' && json.prResolved) {
-                        acc.studioData.pr.status = 'resolved'; acc.studioData.pr.result = `直播澄清成功！${json.prFeedback}`;
-                        window.bloggerActions.notifyPartnerOfPR('直播澄清', json.prFeedback); window.actions?.showToast('🎉 危机解除！');
-                    }
                 } catch(e) { 
                     console.error(e); 
                     live.messages.push({ type: 'error_retry', author: boundP.name, content: 'AI脑细胞过载报错了...', retryVal: val });
@@ -1152,7 +1158,6 @@ ${pkAddon}
             } else { live.isActionLoading = false; window.render(); }
         },
 
-        // 🌟 新增：执行惩罚并进入 PK 收尾阶段
         executePKPunishment: async () => {
             const state = window.bloggerState;
             const live = state.live;
@@ -1161,8 +1166,8 @@ ${pkAddon}
             const punishment = live.pkResult.punishment;
             const isWin = live.pkResult.isWin;
             
-            live.pkResult = null; // 隐藏弹窗
-            live.pk.isFinished = true; // 标记 PK 已彻底结束，替换为【结束连麦】按钮
+            live.pkResult = null; 
+            live.pk.isFinished = true; 
             live.isActionLoading = true; window.render();
 
             const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
