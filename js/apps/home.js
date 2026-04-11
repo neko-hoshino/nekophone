@@ -107,7 +107,6 @@ if (!window.lyricTimerInt) {
 
 if (!window.homeActions) {
   window.homeActions = {
-    // 🌟 神级滑动结界：彻底解决所有手机上的自动跳页乱象
     doRender: () => {
         const el = document.getElementById('home-swiper-scroll');
         if (el && !window.homeState.isRestoringScroll) {
@@ -117,7 +116,7 @@ if (!window.homeActions) {
         
         const newEl = document.getElementById('home-swiper-scroll');
         if (newEl && window.homeState.lastScrollLeft > 10) {
-            newEl.style.scrollSnapType = 'none'; // 强制解除系统的磁吸功能
+            newEl.style.scrollSnapType = 'none'; 
             newEl.scrollLeft = window.homeState.lastScrollLeft;
             requestAnimationFrame(() => {
                 newEl.scrollLeft = window.homeState.lastScrollLeft;
@@ -258,7 +257,6 @@ if (!window.homeActions) {
         reader.readAsText(file); e.target.value = '';
     },
 
-    // 🌟 核心修复：绝对不在这里关弹窗！让文件选择器活下来！
     triggerLocalUpload: () => { document.getElementById('upload-bg-audio').click(); },
     confirmUrlAudio: () => {
         let url = document.getElementById('audio-url-input').value.trim();
@@ -281,7 +279,6 @@ if (!window.homeActions) {
         window.homeActions.doRender();
     },
 
-    // 🌟 核心修复：在这里关掉弹窗，完美保护系统的文件导入机制
     uploadBgAudio: (e) => {
         const file = e.target.files[0]; if (!file) return;
         if (file.size > 15 * 1024 * 1024) return window.actions.showToast('音频过大！请选择 15MB 以内'); 
@@ -298,7 +295,7 @@ if (!window.homeActions) {
             window.audioPlaylist = store.customAudio;
             window.audioState.currentIndex = store.customAudio.length - 1; 
             window.audioPlayer.loadAndPlay();
-            window.homeState.showAddAudioModal = false; // 等选完文件再关弹窗
+            window.homeState.showAddAudioModal = false; 
             window.homeActions.triggerReaction(); 
             window.homeActions.doRender();
         };
@@ -326,7 +323,6 @@ if (!window.homeActions) {
     openCompanionSelect: () => { window.homeState.showCompanionModal = true; window.homeActions.doRender(); },
     closeCompanionSelect: () => { window.homeState.showCompanionModal = false; window.homeActions.doRender(); },
     
-    // 🌟 新增：取消陪伴，独自听歌
     removeCompanion: () => {
         store.musicCompanionId = null;
         store.musicReaction = '';
@@ -342,7 +338,6 @@ if (!window.homeActions) {
         window.homeActions.doRender();
     },
     
-    // 🌟 史诗级听歌反应引擎：防直男 OOC 专用审核！
     generateMusicReaction: async () => {
         const list = store.customAudio || [];
         if (!store.apiConfig?.apiKey || !store.musicCompanionId || list.length === 0) return;
@@ -351,7 +346,7 @@ if (!window.homeActions) {
         if (!char) return;
 
         const chat = store.chats?.find(ch => ch.charId === char.id);
-        const boundPId = chat?.boundPersonaId || char?.boundPersonaId || store.personas[0].id;
+        const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
         const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
         
         const globalP = store.globalPrompt ? `\n【通用用户人设】\n${store.globalPrompt}` : '';
@@ -436,6 +431,7 @@ if (!window.homeActions) {
   };
 }
 
+// 🌟 原汁原味完美复刻的图标生成器！坚决不改动一毫米的尺寸！
 function createAppIcon(iconName, label, actionStr, mcClass, isDark) {
   const bgClass = isDark ? 'bg-black/50 border-black/20' : 'bg-white/50 border-white/20';
   const iconClass = isDark ? 'text-white opacity-90' : 'text-gray-900 opacity-60';
@@ -656,7 +652,7 @@ export function renderHomeApp(store) {
           })()}
         </div>
 
-        <div class="w-full h-full flex-shrink-0 snap-center flex flex-col pt-12 px-5 pb-4 relative">
+        <div class="w-full h-full flex-shrink-0 snap-center flex flex-col pt-12 px-5 pb-4 overflow-y-auto hide-scrollbar relative">
             <div class="flex-1 flex flex-col min-h-0 mt-1.5">
                  
                  <div class="flex flex-col flex-1 min-h-0">
@@ -764,7 +760,7 @@ export function renderHomeApp(store) {
                       
                       <div class="flex-1"></div>
                       
-                      <div class="grid grid-cols-4 gap-x-2 pb-0 mt-2 shrink-0">
+                      <div class="grid grid-cols-4 gap-x-2 pb-4 mt-2 shrink-0">
                           ${createAppIcon('feather', 'AO3', "window.actions.setCurrentApp('ao3')", 'mc-icon-ao3', isDark)}
                           ${createAppIcon('lock', '小黑屋', "window.actions.setCurrentApp('darkroom')", 'mc-icon-darkroom', isDark)}
                           ${createAppIcon('zap', '快穿系统', "window.actions.setCurrentApp('transmigrate')", 'mc-icon-transmigrate', isDark)}
@@ -772,7 +768,7 @@ export function renderHomeApp(store) {
                       </div>
                  </div>
                  
-                 <div class="w-full flex justify-between items-end pb-12 px-1 pt-4 shrink-0 opacity-0 pointer-events-none">
+                 <div class="w-full flex justify-between items-end pb-8 px-1 pt-4 shrink-0 opacity-0 pointer-events-none">
                      <div class="flex flex-col items-start space-y-4 w-1/2 shrink-0">
                         <input type="text" class="w-[80%] px-3 py-1" style="font-size: 12px !important" />
                         <input type="text" class="w-[90%] px-3 py-1" style="font-size: 12px !important" />

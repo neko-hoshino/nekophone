@@ -173,35 +173,45 @@ function render() {
   const ap = store.appearance || {};
   let fontCss = '';
 
-  // 🌟 1. 独立字体注入引擎 (独立Style标签，防打断)
   if (ap.sysFont) {
     let safeUrl = ap.sysFont.trim();
     let fontName = 'system-ui, -apple-system, sans-serif';
 
-    if (safeUrl.includes('http')) {
-      fontName = 'MC_CustomFont';
-      // 自动推断格式 (补回 format 通行证)
-      let fontFormat = '';
-      if (safeUrl.toLowerCase().includes('.ttf')) fontFormat = "format('truetype')";
-      else if (safeUrl.toLowerCase().includes('.otf')) fontFormat = "format('opentype')";
-      else if (safeUrl.toLowerCase().includes('.woff2')) fontFormat = "format('woff2')";
-      else if (safeUrl.toLowerCase().includes('.woff')) fontFormat = "format('woff')";
+    // 🌟 兼容判断：无论是 http 链接，还是我们刚刚一键导入的 data:base64 数据，统统接管！
+    if (safeUrl.includes('http') || safeUrl.startsWith('data:')) {
+        fontName = 'MC_CustomFont';
+        
+        let fontFormat = '';
+        if (safeUrl.startsWith('data:')) {
+            // 解析本地 Base64 的格式
+            if (safeUrl.includes('font/ttf') || safeUrl.includes('application/x-font-ttf')) fontFormat = "format('truetype')";
+            else if (safeUrl.includes('font/otf')) fontFormat = "format('opentype')";
+            else if (safeUrl.includes('font/woff2')) fontFormat = "format('woff2')";
+            else if (safeUrl.includes('font/woff')) fontFormat = "format('woff')";
+        } else {
+            // 解析网络直链的格式
+            safeUrl = encodeURI(safeUrl); 
+            if (safeUrl.toLowerCase().includes('.ttf')) fontFormat = "format('truetype')";
+            else if (safeUrl.toLowerCase().includes('.otf')) fontFormat = "format('opentype')";
+            else if (safeUrl.toLowerCase().includes('.woff2')) fontFormat = "format('woff2')";
+            else if (safeUrl.toLowerCase().includes('.woff')) fontFormat = "format('woff')";
+        }
 
-      // 🌟 核心突破：独立创建 @font-face 标签，绝不和其他 CSS 混在一起！
-      let fontStyleTag = document.getElementById('mc-font-face-style');
-      if (!fontStyleTag) {
-        fontStyleTag = document.createElement('style');
-        fontStyleTag.id = 'mc-font-face-style';
-        document.head.appendChild(fontStyleTag);
-      }
-      // 直接把原链接塞进去，手机浏览器会自动处理中文编码
-      fontStyleTag.innerHTML = `@font-face { font-family: '${fontName}'; src: url('${safeUrl}') ${fontFormat}; font-display: swap; }`;
+        // 斩杀旧标签，建新标签
+        let existingStyle = document.getElementById('mc-custom-font-style');
+        if (existingStyle) existingStyle.remove();
+
+        const style = document.createElement('style');
+        style.id = 'mc-custom-font-style';
+        style.textContent = `@font-face { font-family: '${fontName}'; src: url('${safeUrl}') ${fontFormat}; font-display: swap; }`;
+        document.head.appendChild(style);
+        
     } else {
-      // 如果用户填的是 Arial 等本地自带字体
-      fontName = safeUrl; 
+        // 本地系统字体名 (如 Arial)
+        fontName = safeUrl;
     }
 
-    // 🌟 利用 CSS 变量和 !important，强行覆盖 Tailwind 的默认字体
+    // 覆盖全域
     fontCss += `
       :root {
          --system-font: '${fontName}', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;

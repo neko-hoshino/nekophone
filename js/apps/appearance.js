@@ -122,6 +122,24 @@ if (!window.apActions) {
       window.actions.showToast('已恢复全部原生组件'); 
       window.render();
     },
+    handleFontUpload: (event) => {
+      const file = event.target.files[0]; 
+      if (!file) return;
+      // 字体一般比较大，设个 20MB 的拦截线
+      if (file.size > 20 * 1024 * 1024) return window.actions.showToast('字体文件过大！请选择 20MB 以内的字体'); 
+      
+      window.actions.showToast('正在解析字体文件，请稍候...');
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        // 直接把解析出来的巨长 Base64 塞进系统字体变量里
+        store.appearance.sysFont = e.target.result; 
+        if (window.actions.saveStore) window.actions.saveStore();
+        window.actions.showToast('🎉 本地字体导入成功！'); 
+        window.render();
+      };
+      reader.readAsDataURL(file); // 自动把文件转成 Base64 文本
+      event.target.value = '';
+    },
 
     handleAudioUpload: (key, event) => {
       const file = event.target.files[0]; if (!file) return;
@@ -244,9 +262,14 @@ export function renderAppearanceApp(store) {
         <div class="space-y-2">
           <span class="text-[11px] font-black text-gray-600 uppercase tracking-widest pl-2">排版引擎</span>
           <div class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100 space-y-4">
-             <div>
-                <span class="text-[12px] font-bold text-gray-800 block mb-2">系统字体 (填自带字体名 或 TTF/WOFF直链)</span>
-                <input type="text" value="${ap.sysFont}" onchange="window.apActions.updateFont('sysFont', this.value)" class="w-full bg-gray-50 border border-gray-100 rounded-xl p-3 outline-none text-[13px] font-bold text-gray-800 focus:border-[#07c160]" placeholder="例如：Microsoft YaHei, 或 http://.../font.ttf" />
+            <div>
+                <span class="text-[12px] font-bold text-gray-800 block mb-2">系统字体 (网络直链 或 本地一键导入)</span>
+                <div class="flex space-x-2 mb-2">
+                    <input type="text" value="${ap.sysFont && ap.sysFont.startsWith('data:') ? '' : ap.sysFont}" onchange="window.apActions.updateFont('sysFont', this.value)" class="flex-1 bg-gray-50 border border-gray-100 rounded-xl p-3 outline-none text-[13px] font-bold text-gray-800 focus:border-[#07c160]" placeholder="${ap.sysFont && ap.sysFont.startsWith('data:') ? '已挂载本地字体 (输入新链接覆盖)' : '填入网络字体链接...'}" />
+                    <button class="bg-[#07c160] text-white px-3 py-2 rounded-xl text-[12px] font-bold active:scale-95 transition-transform shrink-0 shadow-sm flex items-center" onclick="document.getElementById('ap-font-upload').click()"><i data-lucide="upload" class="w-4 h-4 mr-0"></i></button>
+                    <input type="file" id="ap-font-upload" accept=".ttf,.otf,.woff,.woff2" class="hidden" onchange="window.apActions.handleFontUpload(event)" />
+                </div>
+                ${ap.sysFont && ap.sysFont.startsWith('data:') ? `<div class="text-[11px] text-[#07c160] font-bold mt-1 flex items-center animate-in fade-in"><i data-lucide="check-circle" class="w-3 h-3 mr-1"></i>本地字体读取成功，已接管系统排版</div>` : ''}
              </div>
              <div class="border-t border-gray-50 pt-4">
                 <div class="flex justify-between items-center mb-2">

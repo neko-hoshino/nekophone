@@ -390,7 +390,7 @@ export function renderAo3App(store) {
                     
                     <div class="mt-12 flex justify-center pt-4">
                         <button class="px-5 py-2.5 ${state.chapterError ? 'bg-red-50 border-red-200 text-red-600' : 'bg-[#f5f5f5] border-[#ccc] text-[#333]'} rounded shadow-sm text-[13px] font-bold active:scale-95 flex items-center transition-transform" onclick="window.ao3Actions.generateNextChapter('${fic.id}')">
-                            ${state.isGeneratingChapter ? '<i data-lucide="loader" class="w-4 h-4 animate-spin mr-2"></i> 太太正在爆肝码字中...' : (state.chapterError ? '<i data-lucide="refresh-cw" class="w-4 h-4 mr-2"></i> 续写失败，重新催更' : '<i data-lucide="pen-tool" class="w-4 h-4 mr-2"></i> 催更 (AI续写下一章)')}
+                            ${state.isGeneratingChapter ? '<i data-lucide="loader" class="w-4 h-4 animate-spin mr-2"></i> 太太正在爆肝码字中...' : (state.chapterError ? '<i data-lucide="refresh-cw" class="w-4 h-4 mr-2"></i> 续写失败，重新催更' : '<i data-lucide="pen-tool" class="w-4 h-4 mr-2"></i> 催更')}
                         </button>
                     </div>
                 </div>
@@ -452,7 +452,7 @@ export function renderAo3App(store) {
                     ${state.isSearching ? `
                         <div class="flex flex-col items-center justify-center mt-20 opacity-60 ${textMain}">
                             <i data-lucide="loader" class="w-10 h-10 mb-3 animate-spin text-[#900000]"></i>
-                            <span class="text-[13px] font-bold tracking-widest animate-pulse">结合记忆生成专属同人中...</span>
+                            <span class="text-[13px] font-bold tracking-widest animate-pulse">加载中...</span>
                         </div>
                     ` : `
                         <div class="px-2 py-2 space-y-6">
@@ -467,7 +467,7 @@ export function renderAo3App(store) {
                             </div>
                             
                             <div>
-                                <h4 class="font-bold text-[#900000] text-[14px] border-b border-[#ccc] pb-1.5 mb-3 ${isDark?'border-[#555]':''}">Additional Tags (设定/画风)</h4>
+                                <h4 class="font-bold text-[#900000] text-[14px] border-b border-[#ccc] pb-1.5 mb-3 ${isDark?'border-[#555]':''}">Additional Tags (设定)</h4>
                                 <div class="flex flex-wrap gap-2">
                                     ${tropes.map(t => {
                                         const isActive = currentTags.includes(t);
@@ -497,7 +497,7 @@ export function renderAo3App(store) {
                 ${displayFics.length === 0 ? `
                     <div class="flex flex-col items-center justify-center mt-32 opacity-50 ${textMain}">
                         <i data-lucide="${state.currentTab === 'home' ? 'book-open' : 'bookmark'}" class="w-12 h-12 mb-3 opacity-60"></i>
-                        <span class="text-[14px] tracking-widest">${state.currentTab === 'home' ? '首页空空如也，快去点击右上角搜索产粮吧' : '暂无收藏的文章'}</span>
+                        <span class="text-[14px] tracking-widest">${state.currentTab === 'home' ? '首页空空如也，快去点击右上角搜索吧' : '暂无收藏的文章'}</span>
                     </div>
                 ` : renderFicList(displayFics)}
             </div>
