@@ -172,27 +172,43 @@ function render() {
   // ================= 全局外观与图库引擎 =================
   const ap = store.appearance || {};
   let fontCss = '';
-  
+
+  // 🌟 1. 独立字体注入引擎 (独立Style标签，防打断)
   if (ap.sysFont) {
-    // 🌟 修复1：严格包裹单引号！满足手机端教导主任般的 CSS 语法要求
-    const fontName = ap.sysFont.includes('http') ? "'MC_CustomFont'" : `'${ap.sysFont}'`;
-    
-    if (ap.sysFont.includes('http') && ap.sysFont.match(/\.(ttf|otf|woff|woff2)/i)) {
-       const safeUrl = encodeURI(ap.sysFont.trim());
-       // 🌟 修复2：去掉 format 提示，让浏览器不要“按图索骥”，直接暴力解析文件内容！
-       fontCss += `@font-face { font-family: 'MC_CustomFont'; src: url('${safeUrl}'); font-display: swap; }\n`;
+    let safeUrl = ap.sysFont.trim();
+    let fontName = 'system-ui, -apple-system, sans-serif';
+
+    if (safeUrl.includes('http')) {
+      fontName = 'MC_CustomFont';
+      // 自动推断格式 (补回 format 通行证)
+      let fontFormat = '';
+      if (safeUrl.toLowerCase().includes('.ttf')) fontFormat = "format('truetype')";
+      else if (safeUrl.toLowerCase().includes('.otf')) fontFormat = "format('opentype')";
+      else if (safeUrl.toLowerCase().includes('.woff2')) fontFormat = "format('woff2')";
+      else if (safeUrl.toLowerCase().includes('.woff')) fontFormat = "format('woff')";
+
+      // 🌟 核心突破：独立创建 @font-face 标签，绝不和其他 CSS 混在一起！
+      let fontStyleTag = document.getElementById('mc-font-face-style');
+      if (!fontStyleTag) {
+        fontStyleTag = document.createElement('style');
+        fontStyleTag.id = 'mc-font-face-style';
+        document.head.appendChild(fontStyleTag);
+      }
+      // 直接把原链接塞进去，手机浏览器会自动处理中文编码
+      fontStyleTag.innerHTML = `@font-face { font-family: '${fontName}'; src: url('${safeUrl}') ${fontFormat}; font-display: swap; }`;
+    } else {
+      // 如果用户填的是 Arial 等本地自带字体
+      fontName = safeUrl; 
     }
-    
-    // 🌟 修复3：全方位火力覆盖！彻底击穿 Tailwind 自带的无衬线、衬线等强制字体集！
+
+    // 🌟 利用 CSS 变量和 !important，强行覆盖 Tailwind 的默认字体
     fontCss += `
-        body, 
-        body *, 
-        .font-sans, 
-        .font-serif, 
-        .font-mono, 
-        .font-cursive { 
-            font-family: ${fontName}, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important; 
-        }
+      :root {
+         --system-font: '${fontName}', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
+      }
+      body, body *, .font-sans, .font-serif, .font-mono, .font-cursive { 
+         font-family: var(--system-font) !important; 
+      }
     `;
   }
   // 🌟 核心破局：纯数值比例缩放引擎！严格防范 px * px 的非法数学错误
