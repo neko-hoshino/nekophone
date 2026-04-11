@@ -832,12 +832,35 @@ export function renderPhoneApp(store) {
     };
 
     const buildMasterPrompt = (charId, options = {}) => {
-        const { char, chat, boundP } = getQContext(charId);
-        if (!char) return '';
+    const { char, chat, boundP } = getQContext(charId);
+    if (!char) return '';
+    const { task = '', recentText = '', scenario = 'phone' } = options; // 移除 history 参数
 
-        const { history = '', task = '', recentText = '', scenario = 'phone' } = options;
+    // 🌟 统一获取最近30回合聊天记录（按发送者切换计算回合）
+    let historyStr = '';
+    if (chat && chat.messages) {
+        let baseHistory = chat.messages.filter(m => m.msgType === 'text');
+        let turnsCount = 0;
+        let lastSender = null;
+        let startIndex = 0;
+        const limit = 30; // 30回合
+        for (let i = baseHistory.length - 1; i >= 0; i--) {
+            if (baseHistory[i].isMe !== lastSender) {
+                if (lastSender !== null) turnsCount += 0.5;
+                lastSender = baseHistory[i].isMe;
+            }
+            if (turnsCount >= limit) {
+                startIndex = i + 1;
+                break;
+            }
+        }
+        const recentMsgs = baseHistory.slice(startIndex);
+        if (recentMsgs.length > 0) {
+            historyStr = `\n\n【近期聊天参考】\n` + recentMsgs.map(m => `[${m.sender}]: ${m.text}`).join('\n');
+        }
+    }
 
-        // 🌟 注入当前时间，增强 AI 时间感知
+    // 🌟 当前时间注入
     const now = new Date();
     const currentTimeStr = now.toLocaleString('zh-CN', {
         year: 'numeric', month: '2-digit', day: '2-digit',
@@ -846,45 +869,46 @@ export function renderPhoneApp(store) {
     });
     const timeContext = `\n\n【当前时间】\n${currentTimeStr}。请严格以此时间为基准判断事件的发生时间、状态（例如：只有时间早于或等于当前时间的行程才能标记为已完成）。\n`;
 
-        const globalP = store.globalPrompt ? `\n【通用用户人设】\n${store.globalPrompt}` : '';
-        const boundPrompt = boundP.prompt ? `\n【当前绑定身份】\n${boundP.prompt}` : '';
-        const basePrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n\n【潜入用户】\n当前化名：${boundP.name}${globalP}${boundPrompt}`;
+    // 以下为原有组装逻辑（保持不变）
+    const globalP = store.globalPrompt ? `\n【通用用户人设】\n${store.globalPrompt}` : '';
+    const boundPrompt = boundP.prompt ? `\n【当前绑定身份】\n${boundP.prompt}` : '';
+    const basePrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n\n【潜入用户】\n当前化名：${boundP.name}${globalP}${boundPrompt}`;
 
-        const coreMem = (store.memories || []).filter(m => m.charId === charId && m.type === 'core').map(m=>m.content).join('；');
-        const coreMemStr = coreMem ? `\n\n【核心记忆】\n${coreMem}` : '';
+    const coreMem = (store.memories || []).filter(m => m.charId === charId && m.type === 'core').map(m => m.content).join('；');
+    const coreMemStr = coreMem ? `\n\n【核心记忆】\n${coreMem}` : '';
 
-        let fragMemStr = '';
-        if (recentText) {
-            const frags = (store.memories || []).filter(m => m.charId === charId && m.type === 'fragment').filter(m => {
-                const kws = (m.keywords || '').split(',').map(k=>k.trim()).filter(k=>k);
-                return kws.some(k => recentText.includes(k));
-            }).map(m=>m.content).join('；');
-            if (frags) fragMemStr = `\n\n【触发的回忆片段】\n${frags}`;
+    let fragMemStr = '';
+    if (recentText) {
+        const frags = (store.memories || []).filter(m => m.charId === charId && m.type === 'fragment').filter(m => {
+            const kws = (m.keywords || '').split(',').map(k => k.trim()).filter(k => k);
+            return kws.some(k => recentText.includes(k));
+        }).map(m => m.content).join('；');
+        if (frags) fragMemStr = `\n\n【触发的回忆片段】\n${frags}`;
+    }
+
+    let frontWb = [], middleWb = [], backWb = [];
+    (store.worldbooks || []).forEach(wbItem => {
+        if (!wbItem.enabled) return;
+        let shouldInject = (wbItem.type === 'global');
+        if (wbItem.type === 'local') {
+            if (char.mountedWorldbooks && char.mountedWorldbooks.includes(wbItem.id)) shouldInject = true;
+            if (char.offlineWorldbooks && char.offlineWorldbooks.includes(wbItem.id)) shouldInject = true;
         }
+        if (shouldInject) {
+            const entryStr = `【${wbItem.title}】：${wbItem.content}`;
+            if (wbItem.position === 'front') frontWb.push(entryStr);
+            else if (wbItem.position === 'back') backWb.push(entryStr);
+            else middleWb.push(entryStr);
+        }
+    });
 
-        let frontWb = [], middleWb = [], backWb = [];
-        (store.worldbooks || []).forEach(wbItem => {
-            if (!wbItem.enabled) return;
-            let shouldInject = (wbItem.type === 'global');
-            if (wbItem.type === 'local') {
-                if (char.mountedWorldbooks && char.mountedWorldbooks.includes(wbItem.id)) shouldInject = true;
-                if (char.offlineWorldbooks && char.offlineWorldbooks.includes(wbItem.id)) shouldInject = true; 
-            }
-            if (shouldInject) {
-                const entryStr = `【${wbItem.title}】：${wbItem.content}`;
-                if (wbItem.position === 'front') frontWb.push(entryStr);
-                else if (wbItem.position === 'back') backWb.push(entryStr);
-                else middleWb.push(entryStr);
-            }
-        });
+    const frontStr = frontWb.length > 0 ? `\n\n[前置世界观设定]\n${frontWb.join('\n')}` : '';
+    const middleStr = middleWb.length > 0 ? `\n\n[当前环境设定]\n${middleWb.join('\n')}` : '';
+    const backStr = backWb.length > 0 ? `\n\n[最高优先级指令]\n${backWb.join('\n')}` : '';
 
-        const frontStr = frontWb.length > 0 ? `\n\n[前置世界观设定]\n${frontWb.join('\n')}` : '';
-        const middleStr = middleWb.length > 0 ? `\n\n[当前环境设定]\n${middleWb.join('\n')}` : '';
-        const backStr = backWb.length > 0 ? `\n\n[最高优先级指令]\n${backWb.join('\n')}` : '';
-        const historyStr = history ? `\n\n【相关聊天记录】\n${history}` : '';
-        
-        return `${basePrompt}${coreMemStr}${frontStr}\n${middleStr}${fragMemStr}${backStr}${historyStr}${timeContext}\n\n【系统任务】\n${task}`;
-    };
+    // 最终拼接：基础 + 记忆 + 世界书 + 聊天历史 + 时间 + 任务
+    return `${basePrompt}${coreMemStr}${frontStr}\n${middleStr}${fragMemStr}${backStr}${historyStr}${timeContext}\n\n【系统任务】\n${task}`;
+};
 
     // ==========================================
     // 🧠 AI 黑客引擎：提取备忘录
@@ -896,7 +920,6 @@ export function renderPhoneApp(store) {
 
         try {
             const { chat, boundP, char } = getQContext(charId);
-            const historyStr = (chat?.messages || []).slice(-15).map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`).join('\n');
 
             const task = `你现在正在被黑客协议抽取该角色的本地备忘录(Notes)。
 请基于角色的性格、核心记忆，以及最近和用户的聊天记录，生成 6 条备忘录。
@@ -916,7 +939,7 @@ export function renderPhoneApp(store) {
   }
 ]`;
 
-            const masterPrompt = buildMasterPrompt(charId, { history: historyStr, task: task, scenario: 'phone' });
+            const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
 
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
@@ -957,7 +980,6 @@ export function renderPhoneApp(store) {
 
         try {
             const { chat, boundP, char } = getQContext(charId);
-            const historyStr = (chat?.messages || []).slice(-15).map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`).join('\n');
 
             const task = `你现在正在被黑客协议抽取该角色的本地行程安排(iOS提醒事项/日历)。
 请基于角色的性格、职业背景、以及最近和用户的聊天记录，生成 5-7 条本周的行程。
@@ -978,7 +1000,7 @@ export function renderPhoneApp(store) {
   }
 ]`;
 
-            const masterPrompt = buildMasterPrompt(charId, { history: historyStr, task: task, scenario: 'phone' });
+            const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
 
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
@@ -1017,7 +1039,6 @@ export function renderPhoneApp(store) {
 
         try {
             const { chat, boundP, char } = getQContext(charId);
-            const historyStr = (chat?.messages || []).slice(-15).map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`).join('\n');
 
             const task = `你现在正在被黑客协议抽取该角色的本地抖音数据。
 请生成三个列表：私信(messages)、作品(works)、喜欢(liked)。
@@ -1034,7 +1055,7 @@ export function renderPhoneApp(store) {
   "liked": [{"desc": "..."}]
 }`;
 
-            const masterPrompt = buildMasterPrompt(charId, { history: historyStr, task: task, scenario: 'phone' });
+            const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
 
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
@@ -1073,7 +1094,6 @@ export function renderPhoneApp(store) {
 
         try {
             const { chat, boundP, char } = getQContext(charId);
-            const historyStr = (chat?.messages || []).slice(-15).map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`).join('\n');
 
             const task = `你现在正在被黑客协议抽取该角色的本地阅读软件(番茄小说)数据。
 请基于角色的性格、亲密偏好(XP)、以及最近和用户(${boundP.name})的关系，生成 4-6 本书架上的网文小说。
@@ -1091,7 +1111,7 @@ export function renderPhoneApp(store) {
   }
 ]`;
 
-            const masterPrompt = buildMasterPrompt(charId, { history: historyStr, task: task, scenario: 'phone' });
+            const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.88 })
@@ -1129,7 +1149,6 @@ export function renderPhoneApp(store) {
 
         try {
             const { chat, boundP, char } = getQContext(charId);
-            const historyStr = (chat?.messages || []).slice(-15).map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`).join('\n');
 
             const task = `你现在正在被黑客协议抽取该角色的淘宝数据。
 请基于角色的性格、隐藏的秘密(Kinks/职业秘密)、以及最近和用户(${boundP.name})的关系，生成两个列表：购物车(cart)和我的订单(orders)。
@@ -1145,7 +1164,7 @@ export function renderPhoneApp(store) {
   "orders": [{"name": "...", "params": "...", "count": 1, "price": "...", "time": "2026-04-01", "recipient": "...", "logistics": "..."}]
 }`;
 
-            const masterPrompt = buildMasterPrompt(charId, { history: historyStr, task: task, scenario: 'phone' });
+            const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 })
@@ -1183,7 +1202,6 @@ export function renderPhoneApp(store) {
 
         try {
             const { chat, boundP, char } = getQContext(charId);
-            const historyStr = (chat?.messages || []).slice(-15).map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`).join('\n');
 
             const task = `你现在正在被黑客协议抽取该角色的携程旅行数据。
 请基于角色的性格、秘密、以及最近和用户(${boundP.name})的关系，生成两个列表：未出行(upcoming)和已出行(past)。
@@ -1205,7 +1223,7 @@ export function renderPhoneApp(store) {
   "past": [{"type": "flight", "name": "...", "location": "...", "details": "...", "persons": "...", "time": "...", "review": "..."}]
 }`;
 
-            const masterPrompt = buildMasterPrompt(charId, { history: historyStr, task: task, scenario: 'phone' });
+            const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 })
@@ -1243,7 +1261,6 @@ export function renderPhoneApp(store) {
 
         try {
             const { chat, boundP, char } = getQContext(charId);
-            const historyStr = (chat?.messages || []).slice(-15).map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`).join('\n');
 
             const task = `你现在正在被黑客协议抽取该角色的【隐藏私密文件夹】(包含被上锁的照片/视频、以及私密语音备忘录)。
 请基于角色的性格、亲密偏好(XP/癖好)、以及最近和用户(${boundP.name})的关系，生成两个列表：photos(相册)和voices(语音)。
@@ -1258,7 +1275,7 @@ export function renderPhoneApp(store) {
   "voices": [{"title": "...", "duration": "...", "desc": "...", "date": "..."}]
 }`;
 
-            const masterPrompt = buildMasterPrompt(charId, { history: historyStr, task: task, scenario: 'phone' });
+            const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.88 })
@@ -1296,7 +1313,6 @@ export function renderPhoneApp(store) {
 
         try {
             const { chat, boundP, char } = getQContext(charId);
-            const historyStr = (chat?.messages || []).slice(-15).map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`).join('\n');
 
             const task = `你现在正在被黑客协议抽取该角色的【成人网站(P站)私密浏览记录】。
 请基于角色的性格、隐藏的性偏好(XP/癖好)、以及最近和用户(${boundP.name})的关系，生成浏览数据。
@@ -1311,7 +1327,7 @@ export function renderPhoneApp(store) {
   "videos": [{"title": "...", "content": "...", "duration": "...", "time": "...", "review": "..."}]
 }`;
 
-            const masterPrompt = buildMasterPrompt(charId, { history: historyStr, task: task, scenario: 'phone' });
+            const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.9 }) // 稍微调高温度，让答案更狂野
@@ -1349,7 +1365,6 @@ export function renderPhoneApp(store) {
 
         try {
             const { chat, boundP, char } = getQContext(charId);
-            const historyStr = (chat?.messages || []).slice(-15).map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`).join('\n');
 
             const task = `你现在正在被黑客协议抽取该角色的【网易云音乐私密年度歌单】。
 请基于角色的性格、最近的心情、以及和用户(${boundP.name})的关系，生成 6-8 首歌曲。
@@ -1366,7 +1381,7 @@ export function renderPhoneApp(store) {
   {"title": "...", "artist": "...", "album": "...", "comment": "..."}
 ]`;
 
-            const masterPrompt = buildMasterPrompt(charId, { history: historyStr, task: task, scenario: 'phone' });
+            const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 })
@@ -1404,7 +1419,6 @@ export function renderPhoneApp(store) {
 
         try {
             const { chat, boundP, char } = getQContext(charId);
-            const historyStr = (chat?.messages || []).slice(-15).map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`).join('\n');
 
             const task = `你现在正在被黑客协议抽取该角色的【浏览器搜索记录】。
 请基于角色的性格、记忆、以及最近和用户(${boundP.name})的聊天记录，生成 5 条搜索记录。
@@ -1433,7 +1447,7 @@ export function renderPhoneApp(store) {
   }
 ]`;
 
-            const masterPrompt = buildMasterPrompt(charId, { history: historyStr, task: task, scenario: 'phone' });
+            const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.88 })
@@ -1471,7 +1485,6 @@ export function renderPhoneApp(store) {
 
         try {
             const { chat, boundP, char } = getQContext(charId);
-            const historyStr = (chat?.messages || []).slice(-15).map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`).join('\n');
             
             // 🌟 获取TA最近发的3条真实朋友圈，喂给大模型让它造假评论！
             const realMoments = (store.moments || []).filter(m => m.senderId === charId).slice(-3);
@@ -1505,7 +1518,7 @@ ${realMomentsContext || '暂无真实朋友圈。'}
   "realMomentInteractions": [{"likes": ["..."], "comments": [{"senderName": "...", "text": "..."}]}]
 }`;
 
-            const masterPrompt = buildMasterPrompt(charId, { history: historyStr, task: task, scenario: 'phone' });
+            const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                 body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 })

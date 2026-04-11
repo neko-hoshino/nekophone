@@ -1,7 +1,7 @@
 // js/apps/home.js
 import { store } from '../store.js';
 
-// 🌟 核心升级：脱离 main.js 的全新原生内置播放器引擎！
+// 🌟 核心引擎：脱离 main.js 的原生内置播放器引擎
 if (!window.homeAudioEngine) {
     window.homeAudioEngine = new Audio();
     window.homeAudioEngine.setAttribute('playsinline', 'true');
@@ -51,7 +51,7 @@ if (!window.homeAudioEngine) {
                 window.homeAudioEngine.removeAttribute('src');
                 return;
             }
-            if (window.audioState.currentIndex >= list.length) window.audioState.currentIndex = 0; // 越界保护
+            if (window.audioState.currentIndex >= list.length) window.audioState.currentIndex = 0; 
             let src = list[window.audioState.currentIndex].src;
             if (src.startsWith('http')) src += (src.includes('?') ? '&' : '?') + 't=' + Date.now();
             window.homeAudioEngine.setAttribute('src', src);
@@ -69,13 +69,12 @@ if (!window.homeState) window.homeState = {
     isRestoringScroll: false 
 };
 
-// 🌟 终极防崩溃歌词引擎 (兼容 LRC 与 TXT 黑魔法估算，并实时对齐最新数据库)
+// 全局歌词引擎 (兼容 LRC 与 TXT 黑魔法估算)
 if (!window.lyricTimerInt) {
     window.lyricTimerInt = setInterval(() => {
         const el = document.getElementById('music-lyric-line');
         if(el && window.audioState?.isPlaying && window.audioPlayer?.audio) {
             const ct = window.audioPlayer.audio.currentTime || 0;
-            
             let rawDuration = window.audioPlayer.audio.duration;
             if (!rawDuration || isNaN(rawDuration) || rawDuration === Infinity) rawDuration = 200; 
             const duration = rawDuration;
@@ -85,19 +84,16 @@ if (!window.lyricTimerInt) {
             
             if(track && track.lyrics && Array.isArray(track.lyrics) && track.lyrics.length > 0) {
                 let active = '🎵';
-                
                 if (typeof track.lyrics[0] === 'object') {
                     for(let i=0; i<track.lyrics.length; i++) {
                         if(ct >= track.lyrics[i].time) active = track.lyrics[i].text;
                         else break;
                     }
                 } else if (typeof track.lyrics[0] === 'string') {
-                    // TXT 黑魔法等比模式
                     const progress = Math.max(0, Math.min(1, ct / duration));
                     const idx = Math.min(Math.floor(progress * track.lyrics.length), track.lyrics.length - 1);
                     active = track.lyrics[idx] || '🎵';
                 }
-
                 if(el.innerText !== active && active) {
                     el.style.opacity = '0';
                     setTimeout(() => { el.innerText = active; el.style.opacity = '1'; }, 150);
@@ -111,10 +107,23 @@ if (!window.lyricTimerInt) {
 
 if (!window.homeActions) {
   window.homeActions = {
+    // 🌟 神级滑动结界：彻底解决所有手机上的自动跳页乱象
     doRender: () => {
         const el = document.getElementById('home-swiper-scroll');
-        if (el && !window.homeState.isRestoringScroll) window.homeState.lastScrollLeft = el.scrollLeft;
+        if (el && !window.homeState.isRestoringScroll) {
+            window.homeState.lastScrollLeft = el.scrollLeft;
+        }
         window.render();
+        
+        const newEl = document.getElementById('home-swiper-scroll');
+        if (newEl && window.homeState.lastScrollLeft > 10) {
+            newEl.style.scrollSnapType = 'none'; // 强制解除系统的磁吸功能
+            newEl.scrollLeft = window.homeState.lastScrollLeft;
+            requestAnimationFrame(() => {
+                newEl.scrollLeft = window.homeState.lastScrollLeft;
+                setTimeout(() => { newEl.style.scrollSnapType = 'x mandatory'; }, 100);
+            });
+        }
     },
 
     updateAvatar: (e) => {
@@ -163,11 +172,9 @@ if (!window.homeActions) {
         window.actions?.showToast('🩸 月经记录已更新'); 
     },
     
-    // 🌟 修复后的实时同步 UI 更新
     updateMusicUI: () => {
         const list = store.customAudio || [];
-        const hasTrack = list.length > 0;
-        if (hasTrack) {
+        if (list.length > 0) {
             const trackName = window.audioPlayer.getTrackName();
             const artistName = window.audioPlayer.getArtistName();
             const nameEl = document.getElementById('mc-audio-name');
@@ -179,7 +186,6 @@ if (!window.homeActions) {
                 iconEl.setAttribute('data-lucide', window.audioState.isPlaying ? 'pause' : 'play');
                 if (window.lucide) window.lucide.createIcons();
             }
-            
             const loopIcon = window.audioState.loopMode === 'list' ? 'repeat' : 'repeat-1';
             const loopEl = document.getElementById('mc-audio-loop-icon');
             if (loopEl) {
@@ -200,7 +206,6 @@ if (!window.homeActions) {
         if (window.audioState.isPlaying) { 
             window.audioPlayer.pause(); 
         } else { 
-            // 如果引擎里还没有 src，强制装弹播放
             if (!window.homeAudioEngine.getAttribute('src')) {
                 window.audioPlayer.loadAndPlay();
             } else {
@@ -228,8 +233,7 @@ if (!window.homeActions) {
         const file = e.target.files[0]; if(!file) return;
         const reader = new FileReader();
         reader.onload = (event) => {
-            const rawText = event.target.result;
-            const lines = rawText.split('\n');
+            const lines = event.target.result.split('\n');
             const result = [];
             const regex = /\[(\d{2}):(\d{2}(?:\.\d{1,3})?)\](.*)/;
             let hasTimestamp = false;
@@ -254,7 +258,8 @@ if (!window.homeActions) {
         reader.readAsText(file); e.target.value = '';
     },
 
-    triggerLocalUpload: () => { document.getElementById('upload-bg-audio').click(); window.homeState.showAddAudioModal = false; window.homeActions.doRender(); },
+    // 🌟 核心修复：绝对不在这里关弹窗！让文件选择器活下来！
+    triggerLocalUpload: () => { document.getElementById('upload-bg-audio').click(); },
     confirmUrlAudio: () => {
         let url = document.getElementById('audio-url-input').value.trim();
         let name = document.getElementById('audio-name-input').value.trim() || '网络音频';
@@ -268,6 +273,7 @@ if (!window.homeActions) {
         if (window.actions.saveStore) window.actions.saveStore(); 
         
         window.actions.showToast('网络音频添加成功！');
+        window.audioPlaylist = store.customAudio; 
         window.audioState.currentIndex = store.customAudio.length - 1; 
         window.audioPlayer.loadAndPlay();
         window.homeState.showAddAudioModal = false; 
@@ -275,6 +281,7 @@ if (!window.homeActions) {
         window.homeActions.doRender();
     },
 
+    // 🌟 核心修复：在这里关掉弹窗，完美保护系统的文件导入机制
     uploadBgAudio: (e) => {
         const file = e.target.files[0]; if (!file) return;
         if (file.size > 15 * 1024 * 1024) return window.actions.showToast('音频过大！请选择 15MB 以内'); 
@@ -288,8 +295,10 @@ if (!window.homeActions) {
             if (window.actions.saveStore) window.actions.saveStore(); 
             
             window.actions.showToast('本地音乐导入成功！');
+            window.audioPlaylist = store.customAudio;
             window.audioState.currentIndex = store.customAudio.length - 1; 
             window.audioPlayer.loadAndPlay();
+            window.homeState.showAddAudioModal = false; // 等选完文件再关弹窗
             window.homeActions.triggerReaction(); 
             window.homeActions.doRender();
         };
@@ -308,14 +317,23 @@ if (!window.homeActions) {
         store.customAudio.splice(idx, 1);
         if (window.actions.saveStore) window.actions.saveStore(); 
         
-        const list = store.customAudio || [];
-        if (list.length === 0) { window.audioState.isPlaying = false; window.audioPlayer.loadAndPlay(); } 
-        else { if (window.audioState.currentIndex >= list.length) window.audioState.currentIndex = 0; window.audioPlayer.loadAndPlay(); }
+        window.audioPlaylist = store.customAudio;
+        if (window.audioPlaylist.length === 0) { window.audioState.isPlaying = false; window.audioPlayer.loadAndPlay(); } 
+        else { if (window.audioState.currentIndex >= window.audioPlaylist.length) window.audioState.currentIndex = 0; window.audioPlayer.loadAndPlay(); }
         window.homeActions.doRender();
     },
 
     openCompanionSelect: () => { window.homeState.showCompanionModal = true; window.homeActions.doRender(); },
     closeCompanionSelect: () => { window.homeState.showCompanionModal = false; window.homeActions.doRender(); },
+    
+    // 🌟 新增：取消陪伴，独自听歌
+    removeCompanion: () => {
+        store.musicCompanionId = null;
+        store.musicReaction = '';
+        window.homeState.showCompanionModal = false;
+        window.homeActions.doRender();
+    },
+
     selectCompanion: (id) => {
         store.musicCompanionId = id;
         store.musicReaction = '正在倾听...';
@@ -324,6 +342,7 @@ if (!window.homeActions) {
         window.homeActions.doRender();
     },
     
+    // 🌟 史诗级听歌反应引擎：防直男 OOC 专用审核！
     generateMusicReaction: async () => {
         const list = store.customAudio || [];
         if (!store.apiConfig?.apiKey || !store.musicCompanionId || list.length === 0) return;
@@ -352,8 +371,10 @@ if (!window.homeActions) {
         try {
             const task = `用户正在听歌，歌名：《${track.name}》，歌手：${track.artist}。
 你扮演【${char.name}】，就坐在旁边陪用户听。
-请结合上方的人设底色、我们的羁绊记忆，以及这首歌的歌词内容（如果有的话），对这首歌或者对我发表一句感想、吐槽或是温情陪伴。
-【要求】：绝对不能偏离角色性格！15-30字以内，精简自然，就像两人坐在一起随口说的话。严禁Emoji。输出JSON格式：{"reaction": "感想内容"}`;
+【绝对指令！！！】：请你务必先仔细阅读歌名和歌词内容，准确推断这首歌的真实情感基调（是悲伤、遗憾、痛苦、压抑，还是欢快、热烈、甜蜜）。
+如果是悲伤的歌，你的反应必须是心疼、低沉、安慰或共情；如果是热烈的歌，才可以表现出激动。绝对不能把悲伤的歌词看成热烈！
+请结合你的人设底色和我们的羁绊记忆，对我发表一句感想或温情陪伴。
+【要求】：必须符合你的人设！15-30字以内，口语化，精简自然，像随口说的话。严禁Emoji。输出JSON格式：{"reaction": "感想内容"}`;
             
             const promptStr = `${basePrompt}${coreMemStr}${lyricsStr}\n\n【任务】\n${task}`;
 
@@ -446,7 +467,6 @@ function createDockIcon(iconName, label, actionStr, mcClass, isDark) {
 }
 
 export function renderHomeApp(store) {
-  // 🌟 核心强绑定：每次刷新页面，强制检查并载入已有的第一首歌，绝不等待！
   const list = store.customAudio || [];
   if (list.length > 0 && window.homeAudioEngine && !window.homeAudioEngine.getAttribute('src')) {
       window.audioState.currentIndex = Math.min(window.audioState.currentIndex || 0, list.length - 1);
@@ -788,6 +808,13 @@ export function renderHomeApp(store) {
                     <i data-lucide="x" class="w-5 h-5 text-gray-400 cursor-pointer active:scale-90 bg-gray-50 p-1 rounded-full" onclick="window.homeActions.closeCompanionSelect()"></i>
                 </div>
                 <div class="p-5 flex flex-col space-y-3 max-h-[50vh] overflow-y-auto">
+                    <div class="flex items-center p-3 bg-red-50 rounded-xl shadow-sm border border-red-100 cursor-pointer active:scale-95 transition-transform mb-1" onclick="window.homeActions.removeCompanion()">
+                        <div class="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center mr-4 text-red-500">
+                            <i data-lucide="user-x" class="w-5 h-5"></i>
+                        </div>
+                        <span class="font-bold text-[14px] text-red-600">独自听歌 (不再调用 AI)</span>
+                    </div>
+
                     ${(store.contacts || []).map(c => `
                         <div class="flex items-center p-3 bg-white rounded-xl shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-transform" onclick="window.homeActions.selectCompanion('${c.id}')">
                             <img src="${c.avatar}" class="w-10 h-10 rounded-full object-cover mr-4">
@@ -919,17 +946,14 @@ export function renderHomeApp(store) {
         ` : ''}
 
         <img src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7" style="display:none;" onload="
-            window.homeState.isRestoringScroll = true;
             const el = document.getElementById('home-swiper-scroll');
             if (el && window.homeState && window.homeState.lastScrollLeft > 10) {
                 el.style.scrollSnapType = 'none';
                 el.scrollLeft = window.homeState.lastScrollLeft;
-                setTimeout(() => {
-                    el.style.scrollSnapType = 'x mandatory';
-                    window.homeState.isRestoringScroll = false;
-                }, 150);
-            } else {
-                window.homeState.isRestoringScroll = false;
+                requestAnimationFrame(() => {
+                    el.scrollLeft = window.homeState.lastScrollLeft;
+                    setTimeout(() => { el.style.scrollSnapType = 'x mandatory'; }, 100);
+                });
             }
             this.remove();
         " />

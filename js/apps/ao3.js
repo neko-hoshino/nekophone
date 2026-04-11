@@ -220,7 +220,6 @@ if (!window.ao3Actions) {
             } finally {
                 window.ao3State.isGeneratingChapter = false;
                 window.render();
-                setTimeout(() => { const el = document.getElementById('ao3-detail-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
             }
         },
         generateComments: async (id) => {

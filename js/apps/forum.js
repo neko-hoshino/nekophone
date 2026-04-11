@@ -106,6 +106,58 @@ export const renderForumApp = (store) => {
     // 🌟 专门用于用户发评论或AI对线时的拉到底部动作
     const scrollToDetailBottom = () => { setTimeout(() => { const el = document.getElementById('forum-detail-scroll'); if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); }, 150); };
 
+    // 获取指定角色绑定的用户人设
+const getBoundPersonaForChar = (char, store, defaultDisplayName) => {
+    if (!char) return { name: defaultDisplayName, prompt: '' };
+    const bound = store.personas?.find(p => String(p.id) === String(char.boundPersonaId));
+    if (bound) return bound;
+    return store.personas?.[0] || { name: defaultDisplayName, prompt: '' };
+};
+
+// 获取指定角色与用户的最近N回合聊天记录（按发送者切换计算回合）
+const getRecentChatHistoryForChar = (char, store, defaultDisplayName, limit = 20) => {
+    if (!char) return '';
+    const boundP = getBoundPersonaForChar(char, store, defaultDisplayName);
+    const chat = store.chats?.find(c => c.charId === char.id);
+    if (!chat?.messages) return '';
+    
+    let baseHistory = chat.messages.filter(m => m.msgType === 'text' && !m.isOffline);
+    let turnsCount = 0;
+    let lastSender = null;
+    let startIndex = 0;
+    for (let i = baseHistory.length - 1; i >= 0; i--) {
+        const isMe = baseHistory[i].isMe;
+        if (isMe !== lastSender) {
+            if (lastSender !== null) turnsCount += 0.5;
+            lastSender = isMe;
+        }
+        if (turnsCount >= limit) {
+            startIndex = i + 1;
+            break;
+        }
+    }
+    const recentMsgs = baseHistory.slice(startIndex);
+    if (recentMsgs.length === 0) return '';
+    const lines = recentMsgs.map(m => `[${m.isMe ? boundP.name : char.name}]: ${m.text}`);
+    return `\n【与用户 ${boundP.name} 的最近对话记录】\n${lines.join('\n')}`;
+};
+
+// 构建单个角色的完整上下文（人设 + 核心记忆 + 聊天记录）
+const buildCharContext = (char, store, defaultDisplayName, includeChatHistory = true, limit = 20) => {
+    if (!char) return '';
+    const boundP = getBoundPersonaForChar(char, store, defaultDisplayName);
+    const coreMemories = (store.memories || []).filter(m => m.charId === char.id && m.type === 'core').map(m => m.content).join('；');
+    let context = `角色名称：${char.name}\n角色设定：${char.prompt}`;
+    if (coreMemories) context += `\n核心记忆：${coreMemories}`;
+    if (includeChatHistory) {
+        const historyStr = getRecentChatHistoryForChar(char, store, defaultDisplayName, limit);
+        if (historyStr) context += historyStr;
+    }
+    // 额外附上绑定的用户人设信息，方便AI理解用户身份
+    context += `\n【与该角色对话的用户身份】\n名字：${boundP.name}\n用户设定：${boundP.prompt}`;
+    return context;
+};
+
     // ==========================================
     // 🧠 AI 全量刷帖引擎
     // ==========================================
@@ -129,8 +181,8 @@ export const renderForumApp = (store) => {
             const localWb = (store.worldbooks || []).filter(w => w.type === 'local' && forum.mountedWorldbookIds?.includes(w.id)).map(w => w.content).join('\n');
             
             let validContacts = store.contacts || [];
-            if (forum.includedCharIds && forum.includedCharIds.length > 0) validContacts = validContacts.filter(c => forum.includedCharIds.includes(c.id));
-            const charProfiles = validContacts.map(c => `名字：${c.name}\n设定：${c.prompt}`).join('\n\n');
+if (forum.includedCharIds && forum.includedCharIds.length > 0) validContacts = validContacts.filter(c => forum.includedCharIds.includes(c.id));
+const charProfiles = validContacts.map(c => buildCharContext(c, store, displayName, true, 20)).join('\n\n---\n\n');
 
             const prompt = `你是一个真实社交平台的模拟引擎。
 【频道主题/世界观】
@@ -212,8 +264,8 @@ ${charProfiles || '无'}
         window.render();
 
         try {
-            const charProfiles = (store.contacts || []).map(c => `名字：${c.name}\n设定：${c.prompt}`).join('\n\n');
-            const coreMemories = (store.memories || []).filter(m => m.type === 'core').map(m => m.content).join('；');
+            const charProfiles = (store.contacts || []).map(c => buildCharContext(c, store, displayName, true, 20)).join('\n\n---\n\n');
+
             const globalWb = store.worldbook || '';
             const forumWb = store.forumWorldbook || '';
 
@@ -235,7 +287,6 @@ ${charProfiles || '无'}
 【世界观基础】
 全局世界书：${globalWb}
 论坛专有世界书：${forumWb}
-核心记忆：${coreMemories}
 【已知角色列表】
 ${charProfiles}
 【当前帖子】
@@ -285,6 +336,7 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
                 throw new Error("AI没有返回标准的数组格式");
             }
         } catch (e) {
+            console.error("评论加载详细错误：", e);
             if (window.actions?.showToast) window.actions.showToast('加载评论失败，请再试一次'); // 🌟 明确报错提醒
         } finally { 
             window.forumState.isLoadingComments = false; 
@@ -354,10 +406,10 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
             
             // 🌟 核心：将所有联系人的核心记忆和专属用户设定打包压缩！
             const contactsProfiles = contacts.map(char => {
-                const coreMemories = (store.memories || []).filter(m => m.charId === char.id && m.type === 'core').map(m => m.content).join('；');
-                const boundPersona = store.personas?.find(p => p.id === char.boundPersonaId) || store.personas?.[0] || { name: displayName, prompt: '' };
-                return `【角色名称】：${char.name}\n【他的设定】：${char.prompt}\n【他的专属核心记忆】：${coreMemories}\n【与他对话的用户设定(名字:${boundPersona.name})】：${boundPersona.prompt}`;
-            }).join('\n\n---\n\n');
+    const context = buildCharContext(char, store, displayName, true, 20);
+    // 不需要再单独加用户设定，因为 buildCharContext 已经包含了
+    return context;
+}).join('\n\n---\n\n');
 
             const isMineStr = latestPost.isMine ? '发布' : '收藏';
             const postContext = `用户最近${isMineStr}了这篇帖子：\n【标题】${latestPost.title||'无'}\n【正文】${latestPost.content}`;
@@ -427,12 +479,15 @@ ${contactsProfiles}
 
         try {
             const globalWb = (store.worldbooks || []).filter(w => w.type === 'global' && w.enabled).map(w => w.content).join('\n');
-            const coreMemories = (store.memories || []).filter(m => m.charId === charId && m.type === 'core').map(m => m.content).join('；');
-            const boundPersona = store.personas?.find(p => p.id === char.boundPersonaId) || store.personas?.[0] || { name: displayName, prompt: '' };
-            
-            const historyStr = fChat.messages.slice(-10).map(m => `[${m.isMe ? boundPersona.name : char.name}]: ${m.text}`).join('\n');
+            const boundPersona = getBoundPersonaForChar(char, store, displayName);
+const wechatHistory = getRecentChatHistoryForChar(char, store, displayName, 20);
+const forumHistory = fChat.messages.slice(-10).map(m => `[${m.isMe ? boundPersona.name : char.name}]: ${m.text}`).join('\n');
+const fullHistory = forumHistory + (wechatHistory ? `\n\n${wechatHistory}` : '');
 
-            const prompt = `你是一个社交平台的模拟引擎。\n【全局世界书】${globalWb}\n【你的设定】名字：${char.name}\n设定：${char.prompt}\n核心记忆：${coreMemories}\n【当前对话用户设定】名字：${boundPersona.name}\n设定：${boundPersona.prompt}\n\n【最近聊天记录】\n${historyStr}\n\n【任务】\n给出你对用户的回复！符合身份，50字内，单行纯文本，不包含<think>！`;
+// 构建角色上下文
+const charContext = buildCharContext(char, store, displayName, false, 20);
+
+            const prompt = `你是一个社交平台的模拟引擎。\n【全局世界书】${globalWb}\n【你的设定】${charContext}\n\n【最近聊天记录】\n${fullHistory}\n\n【任务】\n给出你对用户的回复！符合身份，50字内，单行纯文本，不包含！`;
 
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
