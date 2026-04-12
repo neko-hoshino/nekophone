@@ -718,7 +718,7 @@ export function renderHomeApp(store) {
 
               <div class="flex flex-row w-full shrink-0 mt-3 sm:mt-4 mb-2">
                   <div class="w-[50%] flex flex-col justify-end space-y-2 pr-2">
-                     <input type="text" value="正在进入..." class="w-full ${inputBg} backdrop-blur-2xl px-3 py-1.5 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm shrink-0" onclick="event.stopPropagation()" />
+                     <input type="text" value="正在进入..." class="w-[85%] ${inputBg} backdrop-blur-2xl px-3 py-1.5 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm shrink-0" onclick="event.stopPropagation()" />
                      <input type="text" value="梦之旅途" class="w-[85%] ml-[15%] ${inputBg} backdrop-blur-2xl px-3 py-1.5 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm shrink-0" onclick="event.stopPropagation()" />
                   </div>
                   <div class="w-[50%] grid grid-cols-2 gap-2 items-end justify-items-center pl-2">

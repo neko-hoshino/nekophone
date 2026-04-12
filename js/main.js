@@ -140,7 +140,15 @@ window.actions = {
   },
   showToast: (msg) => {
     const toastContainer = document.getElementById('toast-container');
-    const toastMsg = document.getElementById('toast-msg');
+    if (!toastContainer) return;
+    
+    let toastMsg = document.getElementById('toast-msg');
+    // 🌟 终极自愈修复：如果找不到文字盒子，就自动手搓一个最漂亮的黑底白字胶囊！
+    if (!toastMsg) {
+        toastContainer.innerHTML = `<div class="bg-gray-800/90 backdrop-blur-md text-white px-5 py-2.5 rounded-full shadow-xl flex items-center"><span id="toast-msg" class="text-[13px] font-bold tracking-wider"></span></div>`;
+        toastMsg = document.getElementById('toast-msg');
+    }
+    
     toastMsg.innerText = msg;
     toastContainer.classList.remove('hidden');
     setTimeout(() => toastContainer.classList.remove('opacity-0'), 10);

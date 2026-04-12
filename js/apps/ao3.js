@@ -4,6 +4,7 @@ import { store } from '../store.js';
 // 初始化永久存储空间
 if (!store.ao3Fics) store.ao3Fics = [];
 if (!store.ao3Bookmarks) store.ao3Bookmarks = [];
+if (!store.ao3MountedWbs) store.ao3MountedWbs = []; // 🆕 新增：存储挂载的世界书
 
 // 初始化 AO3 临时状态
 if (!window.ao3State) {
@@ -14,7 +15,9 @@ if (!window.ao3State) {
         isSearching: false,
         isGeneratingChapter: false,
         isGeneratingComments: false,
-        chapterError: false 
+        chapterError: false,
+        showSettingsModal: false, // 🆕 新增：设置弹窗状态
+        settingsTemp: { mountedWbs: [] } // 🆕 新增：临时设置状态
     };
 }
 
@@ -72,6 +75,34 @@ if (!window.ao3Actions) {
             if (input) input.value = window.ao3State.searchQuery;
             window.render();
         },
+        
+        // 🆕 新增：设置弹窗相关动作
+        openSettings: () => {
+            store.ao3MountedWbs = store.ao3MountedWbs || [];
+            window.ao3State.settingsTemp = { mountedWbs: [...store.ao3MountedWbs] };
+            window.ao3State.showSettingsModal = true;
+            window.render();
+        },
+        closeSettings: () => {
+            window.ao3State.showSettingsModal = false;
+            window.render();
+        },
+        toggleSettingsWb: (id) => {
+            let wbs = window.ao3State.settingsTemp.mountedWbs || [];
+            if (wbs.some(x => String(x) === String(id))) {
+                window.ao3State.settingsTemp.mountedWbs = wbs.filter(x => String(x) !== String(id));
+            } else {
+                window.ao3State.settingsTemp.mountedWbs.push(id);
+            }
+            window.render();
+        },
+        saveSettings: () => {
+            store.ao3MountedWbs = [...window.ao3State.settingsTemp.mountedWbs];
+            if (window.actions?.saveStore) window.actions.saveStore();
+            window.ao3State.showSettingsModal = false;
+            window.actions?.showToast('设置已保存');
+            window.render();
+        },
 
         // 🌟 核心引擎：组装 AO3 专属的带感防 OOC Prompt
         buildAO3Prompt: (charId, task) => {
@@ -90,11 +121,16 @@ if (!window.ao3Actions) {
             const coreMemStr = coreMem ? `\n\n【核心记忆】\n${coreMem}` : '';
 
             let frontWb = [], middleWb = [], backWb = [];
+            const mountedIds = store.ao3MountedWbs || []; // 🆕 获取 AO3 专属挂载
+
             (store.worldbooks || []).forEach(wbItem => {
                 if (!wbItem.enabled) return;
                 let shouldInject = false;
                 if (wbItem.type === 'global') shouldInject = true;
-                else if (wbItem.type === 'local' && char.mountedWorldbooks && char.mountedWorldbooks.includes(wbItem.id)) {
+                else if (wbItem.type === 'local' && (
+                    (char.mountedWorldbooks && char.mountedWorldbooks.includes(wbItem.id)) ||
+                    mountedIds.some(id => String(id) === String(wbItem.id)) // 🆕 只要被 AO3 挂载了就注入
+                )) {
                     shouldInject = true;
                 }
                 if (shouldInject) {
@@ -513,8 +549,9 @@ export function renderAo3App(store) {
                 <span class="text-white font-bold text-[18px] tracking-wide font-serif -ml-1">Archive of Our Own</span>
                 <span class="text-white/80 text-[10px] align-top relative -top-2 hidden sm:inline">beta</span>
             </div>
-            <div class="flex space-x-4 text-white">
+            <div class="flex items-center space-x-4 text-white">
                 <i data-lucide="search" class="w-5 h-5 opacity-90 cursor-pointer active:scale-90 transition-transform ${state.currentTab === 'search' && !state.currentFicId ? 'text-yellow-300' : ''}" onclick="window.ao3Actions.switchTab('search')"></i>
+                <i data-lucide="menu" class="w-5 h-5 opacity-90 cursor-pointer active:scale-90 transition-transform" onclick="window.ao3Actions.openSettings()"></i>
             </div>
         </div>
 
@@ -529,6 +566,39 @@ export function renderAo3App(store) {
             <div class="flex flex-col items-center justify-center w-16 cursor-pointer opacity-100 ${state.currentTab === 'bookmarks' ? 'text-[#900000]' : (isDark?'text-gray-400':'text-gray-500')} active:scale-95 transition-transform" onclick="window.ao3Actions.switchTab('bookmarks')">
                 <i data-lucide="bookmark" class="w-[22px] h-[22px] mb-1 ${state.currentTab === 'bookmarks' ? 'fill-current' : ''}"></i>
                 <span class="text-[10px] font-bold tracking-wider">收藏</span>
+            </div>
+        </div>
+        ` : ''}
+
+        ${state.showSettingsModal ? `
+        <div class="absolute inset-0 z-[100] bg-black/40 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200" onclick="window.ao3Actions.closeSettings()">
+            <div style="background: #ffffff !important;" class="w-full max-w-[320px] bg-white rounded-lg shadow-2xl overflow-hidden flex flex-col animate-in zoom-in-95 duration-300 ${isDark ? 'bg-[#222] text-[#ccc]' : 'text-[#222]'}" onclick="event.stopPropagation()">
+                <div class="bg-[#900000] text-white px-5 py-3 flex justify-between items-center">
+                    <span class="font-bold text-[14px] tracking-wider uppercase font-serif">AO3 Settings</span>
+                    <i data-lucide="x" class="w-5 h-5 cursor-pointer active:scale-90" onclick="window.ao3Actions.closeSettings()"></i>
+                </div>
+                <div class="p-5 flex-1 overflow-y-auto max-h-[50vh] space-y-4">
+                    <div>
+                        <label class="text-[11px] font-bold text-gray-500 uppercase block mb-2 tracking-widest font-serif">挂载局部世界书</label>
+                        <div class="space-y-2 border border-gray-200 p-3 rounded ${isDark ? 'border-gray-700' : ''}">
+                            ${(store.worldbooks || []).filter(wb => wb.type === 'local').length === 0 ? 
+                                '<div class="text-[11px] text-gray-400 text-center py-2 font-serif">暂无可用局部世界书</div>' :
+                                (store.worldbooks || []).filter(wb => wb.type === 'local').map(wb => `
+                                    <div class="flex items-center cursor-pointer group py-1" onclick="window.ao3Actions.toggleSettingsWb('${wb.id}')">
+                                        <div class="w-4 h-4 border border-gray-400 mr-3 flex items-center justify-center rounded-sm transition-colors ${state.settingsTemp.mountedWbs.some(x => String(x) === String(wb.id)) ? 'bg-[#900000] border-[#900000]' : ''}">
+                                            ${state.settingsTemp.mountedWbs.some(x => String(x) === String(wb.id)) ? '<i data-lucide="check" class="w-3 h-3 text-white"></i>' : ''}
+                                        </div>
+                                        <span class="text-[12px] font-medium flex-1 truncate font-serif">${wb.title}</span>
+                                    </div>
+                                `).join('')
+                            }
+                        </div>
+                        <p class="text-[11px] text-gray-400 mt-2 leading-relaxed">勾选的世界书将作为“辅助设定”注入创作 Prompt（例如文风模板、避雷清单等）。</p>
+                    </div>
+                </div>
+                <div class="px-5 py-4 bg-gray-50 flex justify-center border-t ${isDark ? 'bg-[#1a1a1a] border-gray-800' : 'border-gray-100'}">
+                    <button class="bg-[#900000] text-white px-8 py-2 rounded shadow-md font-bold text-[12px] active:scale-95 transition-transform" onclick="window.ao3Actions.saveSettings()">保存修改</button>
+                </div>
             </div>
         </div>
         ` : ''}
