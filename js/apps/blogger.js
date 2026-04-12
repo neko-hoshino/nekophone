@@ -66,25 +66,31 @@ const bloggerUtils = {
 };
 
 async function buildBloggerPrompt(acc, char, chat, boundP, options = {}) {
-    const { recentText = '', task = '' } = options;
+    const { recentText = '', task = '', excludeHistory = false, excludePersona = false } = options;
     const now = new Date();
     const timeString = now.toLocaleString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-    const globalP = store.globalPrompt ? `\n【通用人设】\n${store.globalPrompt}` : '';
-    const boundPrompt = boundP.prompt ? `\n【当前绑定身份】\n${boundP.prompt}` : '';
-    const basePrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n\n【用户】\n化名：${boundP.name}${globalP}${boundPrompt}`;
-    const coreMem = (store.memories || []).filter(m => m.charId === char.id && m.type === 'core').map(m=>m.content).join('；');
-    const coreMemStr = coreMem ? `\n\n【核心记忆】\n${coreMem}` : '';
-    let fragMemStr = '';
-    if (recentText) {
-        const frags = (store.memories || []).filter(m => m.charId === char.id && m.type === 'fragment').filter(m => {
-            const kws = (m.keywords || '').split(',').map(k=>k.trim()).filter(k=>k);
-            return kws.some(k => recentText.includes(k));
-        }).map(m=>m.content).join('；');
-        if (frags) fragMemStr = `\n\n【触发的回忆】\n${frags}`;
+
+    let personaStr = '';
+    if (!excludePersona) {
+        const globalP = store.globalPrompt ? `\n【通用人设】\n${store.globalPrompt}` : '';
+        const boundPrompt = boundP.prompt ? `\n【当前绑定身份】\n${boundP.prompt}` : '';
+        const basePrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n\n【用户】\n化名：${boundP.name}${globalP}${boundPrompt}`;
+        const coreMem = (store.memories || []).filter(m => m.charId === char.id && m.type === 'core').map(m=>m.content).join('；');
+        const coreMemStr = coreMem ? `\n\n【核心记忆】\n${coreMem}` : '';
+        let fragMemStr = '';
+        if (recentText) {
+            const frags = (store.memories || []).filter(m => m.charId === char.id && m.type === 'fragment').filter(m => {
+                const kws = (m.keywords || '').split(',').map(k=>k.trim()).filter(k=>k);
+                return kws.some(k => recentText.includes(k));
+            }).map(m=>m.content).join('；');
+            if (frags) fragMemStr = `\n\n【触发的回忆】\n${frags}`;
+        }
+        personaStr = `${basePrompt}${coreMemStr}${fragMemStr}`;
     }
-    // ✅ 修复版：严格按照发送者切换计算 30 回合
+
     let historyStr = '';
-    if (chat && chat.messages) {
+    // 🌟 当开关打开时，强制切断私聊历史污染！
+    if (!excludeHistory && chat && chat.messages) {
         let baseHistory = chat.messages.filter(m => m.msgType === 'text');
         let turnsCount = 0; let lastSender = null; let startIndex = 0;
         const limit = 30; // 30回合
@@ -98,13 +104,15 @@ async function buildBloggerPrompt(acc, char, chat, boundP, options = {}) {
         const recentMsgs = baseHistory.slice(startIndex);
         if (recentMsgs.length > 0) historyStr = `\n\n【近期聊天参考】\n` + recentMsgs.map(m => `[${m.sender}]: ${m.text}`).join('\n');
     }
+
     const platformStyle = acc.platformStyle || '普通社交平台';
     const positioning = acc.positioning || '生活记录';
     let wbStr = '';
     const activeWbs = (store.worldbooks || []).filter(wb => wb.enabled && (wb.type === 'global' || (wb.type === 'local' && acc.mountedWbs?.some(x => String(x) === String(wb.id)))));
     if (activeWbs.length > 0) wbStr = `\n\n【世界观设定】\n` + activeWbs.map(wb => `[${wb.title}]: ${wb.content}`).join('\n');
     const styleRule = `\n【核心铁律】：行文风格需契合角色人设和性格。严禁使用任何 Emoji ！`;
-    return `${basePrompt}${coreMemStr}${wbStr}${fragMemStr}${historyStr}\n\n【时间】：${timeString}\n【平台风格】：${platformStyle}\n【账号定位】：${positioning}${styleRule}\n\n【系统任务】\n${task}`;
+
+    return `${personaStr}${historyStr}${wbStr}\n\n【时间】：${timeString}\n【平台风格】：${platformStyle}\n【账号定位】：${positioning}${styleRule}\n\n【系统任务】\n${task}`;
 }
 
 if (!window.bloggerActions) {
@@ -387,18 +395,19 @@ if (!window.bloggerActions) {
                 const boundPId = chat?.isGroup ? chat.boundPersonaId : (char?.boundPersonaId || store.personas[0].id);
                 const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
 
-                let context = "";
+                let context = `\n【当前图文内容】：${post.htmlContent || post.desc}`; // 🌟 强制聚焦当前动态！
                 if (isLoadMore) context += "\n已有评论参考：\n" + post.comments.slice(-10).map(c => `[${c.author}]: ${c.content}`).join('\n');
                 if (post.prContext) context += `\n【舆论风向控制】：这篇是澄清贴，判定结果为：${post.prContext.success ? '洗白成功' : '越抹越黑'}。请让粉丝评论严格对齐此风向。`;
 
-                const task = `根据平台风格，模拟生成10条社交平台评论。
+                const task = `根据平台风格，模拟生成10条针对【当前图文内容】的社交平台评论。
 1. 其中 7-8 条为普通粉丝/路人/黑粉的【首层评论】。
 2. 评论态度必须混合：嗑CP的狂欢、真诚的羡慕、酸言酸语(judge)、拉踩对比、无厘头玩梗或求同款等。
 【强制要求】你必须挑选其中 3 条，以博主（扮演【${char.name}】）的身份亲自回复（护妻/回怼/撒糖等）。
 严格输出JSON数组：
 [{"author": "路人甲", "content": "好漂亮！", "myReply": ""}, {"author": "黑粉乙", "content": "太假了", "myReply": "有本事你拍一个"}]`;
                 
-                const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task: task + context });
+                // 🌟 开启屏蔽开关
+                const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task: task + context, excludeHistory: true });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { 
                     method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) 
                 });
@@ -454,7 +463,8 @@ if (!window.bloggerActions) {
                         const task = `你是网友 [${comment.author}]。你之前的评论是：“${comment.content}”。
 博主（网名：${acc.name}）刚刚亲自回复了你：“${text}”。
 请基于你的网民性格，写一条简短的追评（惊叹被翻牌了/继续争论/开心互动等）。严禁Emoji。直接输出文字，不要前缀。`;
-                        const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
+                        // 🌟 同时屏蔽聊天记录和主角人设
+                        const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task, excludeHistory: true, excludePersona: true });
                         const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
                             body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
@@ -502,7 +512,8 @@ if (!window.bloggerActions) {
 3. 如果是问用户或两人的，必须把答题权留给用户（answeredByPartner 严格留空）。
 严禁Emoji。输出JSON数组：[{"question":"问题", "target": "user/partner/both", "answeredByPartner":"回答内容(若留给用户回答请留空)"}]`;
                 
-                const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
+                // 🌟 屏蔽私聊
+                const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task, excludeHistory: true });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                 const text = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 const cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
@@ -557,7 +568,8 @@ if (!window.bloggerActions) {
 3. 如果是找用户的，留空等待用户亲自回复（messages 数组里只生成对方发来的 1 条消息）。
 严禁Emoji。JSON格式：[{"author": "网名", "target": "user/partner", "messages": [{"sender": "网名", "text": "内容"}, {"sender": "博主", "text": "回复(仅找partner时生成)"}]}]`;
                 
-                const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
+                // 🌟 屏蔽私聊
+                const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task, excludeHistory: true });
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                 const text = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 const cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
@@ -778,7 +790,8 @@ ${truthContext}
                         const prevConsequence = acc.studioData.pr.lastFailure ? `\n【之前尝试失败的后果】：${acc.studioData.pr.lastFailure}` : '';
                         const task = `你扮演狗仔/黑粉 [${chatObj.author}]。网上传闻：${acc.studioData.pr.desc}${prevConsequence}。实际真相：${acc.studioData.pr.truth}。\n对话记录：${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}\n博主的回复是否解决了危机？\n严格输出JSON：{"reply": "回怼/服软", "isResolved": boolean, "isEscalated": boolean, "escalationDetail": "若升级的具体表现", "resultText": "系统结果描述"}`;
                         
-                        promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
+                        // 🌟 同时屏蔽私聊记录和主角人设（两处都这样改！）
+                        promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task, excludeHistory: true, excludePersona: true });
                         const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                         const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                         
@@ -802,7 +815,8 @@ ${truthContext}
 以下是你和博主 [${acc.name}] 的私聊记录：
 ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
 请回复博主。严禁Emoji，直接输出纯文本。`;
-                        promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
+                        // 🌟 同时屏蔽私聊记录和主角人设（两处都这样改！）
+                        promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task, excludeHistory: true, excludePersona: true });
                         const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
                         const reply = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
                         if (reply) chatObj.messages.push({ sender: chatObj.author, text: reply, isMe: false });

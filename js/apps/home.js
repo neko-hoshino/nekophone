@@ -851,7 +851,7 @@ export function renderHomeApp(store) {
       </div>
 
       <div class="w-full px-4 pb-6 sm:pb-4 z-20 shrink-0">
-         <div class="w-full h-[72px] sm:h-[85px] ${isDark?'bg-black/10 border-black/10':'bg-white/10 border-white/10'} backdrop-blur-xl rounded-[24px] sm:rounded-[28px] flex justify-around items-center shadow-sm border px-2 sm:px-3">
+         <div class="w-full h-[72px] sm:h-[80px] ${isDark?'bg-black/10 border-black/10':'bg-white/10 border-white/10'} backdrop-blur-xl rounded-[24px] sm:rounded-[28px] flex justify-around items-center shadow-sm border px-2 sm:px-3">
              ${createDockIcon('book-open', '世界书', "window.actions.setCurrentApp('worldbook')", 'mc-icon-worldbook', isDark)}
              ${createDockIcon('brain', '记忆库', "window.actions.setCurrentApp('memory')", 'mc-icon-memory', isDark)}
              ${createDockIcon('palette', '外观', "window.actions.setCurrentApp('appearance')", 'mc-icon-appearance', isDark)}

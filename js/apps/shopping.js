@@ -8,7 +8,7 @@ let currentStore = null; // 缓存当前 store 实例，供全局动作调用
 // 🌟 静态热销商品库 (0 Token 消耗！)
 // ==========================================
 const defaultProducts = {
-    '服饰': [
+    '服装': [
         // 女装/女鞋
         { name: 'Lululemon Align 高腰裸感瑜伽裤', price: '750.00', sales: '已售1万+', desc: '发货地: 上海', type: 'shop' },
         { name: '波司登 极寒系列鹅绒中长款羽绒服', price: '1899.00', sales: '已售5000+', desc: '发货地: 常熟', type: 'shop' },
@@ -34,6 +34,22 @@ const defaultProducts = {
         // 情侣款
         { name: '蕉内 301A半截袖纯棉情侣睡衣套装', price: '198.00', sales: '已售5万+', desc: '发货地: 深圳', type: 'shop' },
         { name: 'MLB 经典NY老花满印情侣款羊羔绒外套', price: '1199.00', sales: '已售8000+', desc: '发货地: 上海', type: 'shop' },
+    ],
+    '饰品': [
+        { name: 'Swarovski 施华洛世奇 经典黑天鹅项链', price: '899.00', sales: '已售5万+', desc: '发货地: 上海', type: 'shop' },
+        { name: '周大福 传承系列 古法黄金素面手镯', price: '12800.00', sales: '已售1万+', desc: '发货地: 深圳', type: 'shop' },
+        { name: 'Van Cleef & Arpels 梵克雅宝 红玉髓四叶草项链', price: '13800.00', sales: '已售2000+', desc: '发货地: 北京', type: 'shop' },
+        { name: 'DW Daniel Wellington 经典流金表盘女士腕表', price: '1290.00', sales: '已售8万+', desc: '发货地: 广州', type: 'shop' },
+        { name: 'Casio 卡西欧 G-SHOCK 黑金系列运动男表', price: '990.00', sales: '已售10万+', desc: '发货地: 杭州', type: 'shop' },
+        { name: 'Armani 阿玛尼 满天星满钻镶嵌女士石英表', price: '2190.00', sales: '已售3万+', desc: '发货地: 上海', type: 'shop' },
+        { name: 'Pandora 潘多拉 漫漫桃花系列基础手链', price: '698.00', sales: '已售6万+', desc: '发货地: 上海', type: 'shop' },
+        { name: 'APM Monaco 经典六芒星镶钻纯银项链', price: '850.00', sales: '已售4万+', desc: '发货地: 广州', type: 'shop' },
+        { name: 'Ray-Ban 雷朋 飞行员系列偏光太阳眼镜', price: '1180.00', sales: '已售2万+', desc: '发货地: 东莞', type: 'shop' },
+        { name: 'Cartier 卡地亚 LOVE系列 18K玫瑰金戒指', price: '9200.00', sales: '已售5000+', desc: '发货地: 上海', type: 'shop' },
+        { name: 'Tissot 天梭 力洛克系列 经典自动机械男表', price: '4500.00', sales: '已售1万+', desc: '发货地: 北京', type: 'shop' },
+        { name: 'Bvlgari 宝格丽 Divas Dream 扇子贝母项链', price: '16500.00', sales: '已售1000+', desc: '发货地: 杭州', type: 'shop' },
+        { name: 'Chrome Hearts 克罗心 十字架纯银泰银项链', price: '3500.00', sales: '已售3000+', desc: '发货地: 深圳', type: 'shop' },
+        { name: 'Jellycat 邦尼兔 经典毛绒碎花挂件钥匙扣', price: '199.00', sales: '已售8万+', desc: '发货地: 宁波', type: 'shop' }
     ],
     '美妆': [
         { name: 'YSL圣罗兰 细管小金条口红 #1966哑光砖红', price: '380.00', sales: '已售10万+', desc: '发货地: 上海', type: 'shop' },
@@ -162,7 +178,7 @@ const defaultFoodStores = {
             ]
         },
         {
-            storeName: '麦当劳 (24小时营业)', desc: '西式快餐 汉堡薯条', rating: '4.8', sales: '月售2万+',
+            storeName: '麦当劳', desc: '西式快餐 汉堡薯条', rating: '4.8', sales: '月售2万+',
             items: [
                 { name: '麦辣鸡腿堡套餐(含中薯+中可)', price: '32.00' }, { name: '板烧鸡腿堡', price: '22.00' },
                 { name: '巨无霸汉堡', price: '25.00' }, { name: '麦乐鸡块(5块)', price: '14.00' },
@@ -172,13 +188,43 @@ const defaultFoodStores = {
             ]
         },
         {
-            storeName: '费大厨辣椒炒肉', desc: '全国连锁 正宗湘菜', rating: '4.9', sales: '月售8000+',
+            storeName: '费大厨', desc: '全国连锁 正宗湘菜', rating: '4.9', sales: '月售8000+',
             items: [
                 { name: '招牌辣椒炒肉(送土猪肉汤)', price: '68.00' }, { name: '香煎大鲫鱼', price: '58.00' },
                 { name: '皮蛋青椒擂茄子', price: '28.00' }, { name: '小炒黄牛肉', price: '78.00' },
                 { name: '干锅肥肠', price: '68.00' }, { name: '清炒土豆丝', price: '18.00' },
                 { name: '蒜蓉粉丝蒸虾', price: '88.00' }, { name: '费大厨特色大米饭', price: '3.00' },
                 { name: '冰镇酸梅汤(扎)', price: '22.00' }, { name: '大盆花菜', price: '32.00' }
+            ]
+        },
+        {
+            storeName: '村上一屋', desc: '精致日料 鲜活刺身', rating: '4.8', sales: '月售4000+',
+            items: [
+                { name: '芒果鳗鱼加州卷(8粒)', price: '48.00' }, { name: '三文鱼刺身(厚切5片)', price: '58.00' },
+                { name: '招牌蒲烧鳗鱼饭', price: '68.00' }, { name: '地狱豚骨拉面', price: '38.00' },
+                { name: '芝士厚蛋烧', price: '22.00' }, { name: '火炙三文鱼握寿司(2贯)', price: '18.00' },
+                { name: '日式炸猪排', price: '32.00' }, { name: '芥末章鱼', price: '15.00' },
+                { name: '大福(抹茶/草莓)', price: '16.00' }, { name: '可尔必思', price: '12.00' }
+            ]
+        },
+        {
+            storeName: '蓝蛙 bluefrog', desc: '经典汉堡 臻选牛排', rating: '4.9', sales: '月售3000+',
+            items: [
+                { name: '经典美式芝士牛肉汉堡', price: '78.00' }, { name: '黑松露风味蘑菇汉堡', price: '88.00' },
+                { name: '澳洲肉眼牛排(250g)', price: '198.00' }, { name: '香烤三文鱼配奶油意面', price: '88.00' },
+                { name: '经典凯撒沙拉(配烤鸡肉)', price: '58.00' }, { name: '黑松露粗薯条', price: '38.00' },
+                { name: '碳烤BBQ猪肋排(半份)', price: '128.00' }, { name: '奶油蘑菇汤', price: '32.00' },
+                { name: '纽约芝士蛋糕', price: '42.00' }, { name: '鲜榨橙汁', price: '28.00' }
+            ]
+        },
+        {
+            storeName: '点都德', desc: '非遗点心 匠心传承', rating: '4.9', sales: '月售1万+',
+            items: [
+                { name: '金牌虾饺皇(1笼4只)', price: '32.00' }, { name: '金沙海虾红米肠', price: '38.00' },
+                { name: '百合酱蒸凤爪', price: '28.00' }, { name: '蜜汁叉烧包(3只)', price: '22.00' },
+                { name: '荔湾明火艇仔粥', price: '26.00' }, { name: '香芒夹心椰汁糕', price: '22.00' },
+                { name: '沙爹蒸金钱肚', price: '30.00' }, { name: '豉油皇炒面', price: '28.00' },
+                { name: '明虾蟹子烧卖', price: '28.00' }, { name: '传统陈皮牛肉丸', price: '26.00' }
             ]
         }
     ],
@@ -226,13 +272,23 @@ const defaultFoodStores = {
             ]
         },
         {
-            storeName: '很久以前羊肉串', desc: '呼伦贝尔草原羊', rating: '4.9', sales: '月售6000+',
+            storeName: '秋田烧鸟居酒屋 (Yakitori)', desc: '日式炭火烧鸟 宵夜微醺', rating: '4.9', sales: '月售2000+',
             items: [
-                { name: '呼伦贝尔羊肉串(半打)', price: '42.00' }, { name: '锡盟羊排串(5串)', price: '35.00' },
-                { name: '烤大油边(3串)', price: '28.00' }, { name: '烤东北实蛋(2串)', price: '12.00' },
-                { name: '炭烤牛板筋(5串)', price: '30.00' }, { name: '蒜香烤娃娃菜', price: '15.00' },
-                { name: '很久以前冷面', price: '22.00' }, { name: '疙瘩汤(大碗)', price: '18.00' },
-                { name: '烤面包片(刷蜂蜜)', price: '10.00' }, { name: '草原酸奶', price: '12.00' }
+                { name: '酱烤京葱鸡腿肉(2本)', price: '22.00' }, { name: '盐烤黑猪五花肉(2本)', price: '24.00' },
+                { name: '提灯(限量1本)', price: '18.00' }, { name: '明太子烤西葫芦(2本)', price: '16.00' },
+                { name: '炭烤鸡皮(2本)', price: '12.00' }, { name: '紫苏梅子鸡胸肉(2本)', price: '22.00' },
+                { name: '汁烧脆骨香菇鸡肉丸(1本)', price: '15.00' }, { name: '厚切牛舌串(1本)', price: '28.00' },
+                { name: '日式烤饭团', price: '18.00' }, { name: '朝日生啤(大杯)', price: '25.00' }
+            ]
+        },
+        {
+            storeName: 'Firestone 美式德州烤肉', desc: '果木慢烤 纯正德州风味', rating: '4.8', sales: '月售1500+',
+            items: [
+                { name: '德州慢烤牛胸肉 Brisket(150g)', price: '98.00' }, { name: '苹果木烟熏猪肋排(半扇)', price: '128.00' },
+                { name: '手撕猪肉汉堡 Pulled Pork', price: '58.00' }, { name: '美式秘制烤香肠(2根)', price: '48.00' },
+                { name: '德州烤肉经典拼盘(单人份)', price: '168.00' }, { name: '经典芝士通心粉 Mac&Cheese', price: '38.00' },
+                { name: '南方卷心菜沙拉 Coleslaw', price: '22.00' }, { name: '脆皮粗炸薯条', price: '25.00' },
+                { name: '黄油烤玉米棒', price: '18.00' }, { name: '精酿 IPA 啤酒(听装)', price: '35.00' }
             ]
         }
     ],
@@ -286,10 +342,10 @@ if (!window.shoppingState) {
     window.shoppingState = {
         tab: 'home',         
         homeTab: 'shop',     
-        homeCategory: '服饰', 
+        homeCategory: '服装', 
         foodCategory: '美食',      
         activeFoodStore: null,     
-        showFoodCartDetail: false, // 🌟 新增：外卖底部购物车展开状态
+        showFoodCartDetail: false, 
         searchQuery: '',
         searchResults: null,
         isSearching: false,
@@ -305,24 +361,19 @@ if (!window.shoppingState) {
 // 2. 初始化全局动作 (挂载到 window 供 onclick 调用)
 if (!window.shoppingActions) {
     window.shoppingActions = {
-        // 🌟 动作：打开手动加购弹窗
         manualAddToCart: () => {
-            // 初始化一个干净的表单状态
             window.shoppingState.customItemData = { name: '', price: '', desc: '' };
             window.shoppingState.showAddCustomItemPopup = true;
             if (window.render) window.render();
         },
-        // 关闭弹窗
         closeAddCustomItemPopup: () => {
             window.shoppingState.showAddCustomItemPopup = false;
             if (window.render) window.render();
         },
-        // 静默更新输入内容 (不触发全局刷新，防止输入法掉焦点)
         updateCustomItemField: (field, value) => {
             if (!window.shoppingState.customItemData) window.shoppingState.customItemData = {};
             window.shoppingState.customItemData[field] = value;
         },
-        // 确认提交！
         confirmAddCustomItem: () => {
             const data = window.shoppingState.customItemData || {};
             const name = (data.name || '').trim();
@@ -341,22 +392,20 @@ if (!window.shoppingActions) {
             };
             
             if (!currentStore.shoppingData) currentStore.shoppingData = { cart: [], orders: [] };
-            currentStore.shoppingData.cart.unshift(item); // 放在最前面
+            currentStore.shoppingData.cart.unshift(item); 
             
-            window.shoppingState.showAddCustomItemPopup = false; // 关闭弹窗
+            window.shoppingState.showAddCustomItemPopup = false; 
             if (window.actions?.saveStore) window.actions.saveStore();
             if (window.render) window.render();
             if (window.actions?.showToast) window.actions.showToast('✅ 已手动加入购物车');
         },
 
-        // 🌟 动作：清除搜索并返回首页
         clearSearch: () => {
             window.shoppingState.searchResults = null;
             window.shoppingState.searchQuery = '';
             window.shoppingState.isSearching = false;
             if (window.render) window.render();
         },
-        // 🌟 外卖店铺与菜单控制
         switchFoodCategory: (cat) => {
             window.shoppingState.foodCategory = cat;
             window.shoppingState.activeFoodStore = null;
@@ -370,22 +419,19 @@ if (!window.shoppingActions) {
             window.shoppingState.activeFoodStore = null;
             if (window.render) window.render();
         },
-        // ==========================================
-        // 🍔 真·美团点单购物车引擎
-        // ==========================================
+        
         updateFoodQty: (itemStr, delta) => {
             const item = JSON.parse(decodeURIComponent(itemStr));
             if (!currentStore.shoppingData) currentStore.shoppingData = { cart: [], orders: [] };
             const cart = currentStore.shoppingData.cart;
             
-            // 在全局购物车里寻找这个菜
             const existingIdx = cart.findIndex(i => i.name === item.name && i.desc === item.desc && i.type === 'food');
             if (existingIdx >= 0) {
                 cart[existingIdx].qty = (cart[existingIdx].qty || 1) + delta;
-                if (cart[existingIdx].qty <= 0) cart.splice(existingIdx, 1); // 减到0就删掉
+                if (cart[existingIdx].qty <= 0) cart.splice(existingIdx, 1); 
             } else if (delta > 0) {
                 item.qty = 1;
-                item.selected = true; // 默认选中
+                item.selected = true; 
                 cart.push(item);
             }
             if (window.actions?.saveStore) window.actions.saveStore();
@@ -404,14 +450,12 @@ if (!window.shoppingActions) {
             }
         },
         checkoutFoodStore: (storeName) => {
-            // 🌟 核心：强行选中当前店铺的所有菜品，取消其他勾选，然后无缝衔接多步结算弹窗！
             currentStore.shoppingData.cart.forEach(i => {
                 i.selected = (i.type === 'food' && i.desc === storeName);
             });
             window.shoppingState.showFoodCartDetail = false;
             window.shoppingActions.openCheckoutPopup();
         },
-        // 切换页面底栏和顶栏
         switchTab: (tab) => { 
             window.shoppingState.tab = tab; 
             if (window.render) window.render(); 
@@ -425,20 +469,18 @@ if (!window.shoppingActions) {
         updateSearch: (val) => { 
             window.shoppingState.searchQuery = val; 
         },
-        // 🌟 1. 独立暂存的手动定位系统 (绝对不污染雷达的真实IP)
         setLocation: () => {
             const loc = prompt("请输入你要定位的城市/区域（如：上海市陆家嘴）：", currentStore.shoppingData?.customLocation || window.shoppingState.customLocation || '');
             if (loc !== null) {
                 window.shoppingState.customLocation = loc.trim();
                 if (!currentStore.shoppingData) currentStore.shoppingData = { cart: [], orders: [] };
-                currentStore.shoppingData.customLocation = loc.trim(); // 永久存入数据
+                currentStore.shoppingData.customLocation = loc.trim(); 
                 if (window.actions?.saveStore) window.actions.saveStore();
                 if (window.render) window.render();
                 if (window.actions?.showToast) window.actions.showToast('✅ 定位已更新');
             }
         },
 
-        // 🌟 2. 史诗级双核搜索引擎 (外卖搜店铺，淘宝搜商品)
         searchItems: async () => {
             const state = window.shoppingState;
             if (!state.searchQuery.trim()) return;
@@ -452,7 +494,6 @@ if (!window.shoppingActions) {
                 const model = currentStore.apiConfig.model;
                 
                 if (state.homeTab === 'food') {
-                    // 🍔 外卖模式：只搜店铺！
                     const loc = currentStore.shoppingData?.customLocation || window.shoppingState.customLocation || '当前位置';
                     const promptStr = `用户在“${loc}”搜索外卖：“${state.searchQuery}”。请生成3到5家相关的本地外卖店铺。
 返回严格的JSON数组格式：[{"storeName": "店名(不要有特殊符号)", "desc": "一句话描述(如: 品牌火锅 极速送达)", "rating": "4.8", "sales": "月售1000+"}]。绝不输出其他文字！`;
@@ -464,13 +505,11 @@ if (!window.shoppingActions) {
                     const data = await res.json();
                     const reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json/gi, '').replace(/```/g, '').trim();
                     
-                    // 🌟 防弹装甲：确保解析出来的是数组
                     let parsed = JSON.parse(reply);
                     if (!Array.isArray(parsed)) parsed = [];
                     state.searchResults = parsed.map(s => ({ ...s, isDynamic: true }));
                     
                 } else {
-                    // 🛍️ 淘宝模式：正常搜商品
                     const promptStr = `用户搜索淘宝商品：“${state.searchQuery}”。请生成6个相关商品。
 返回严格的JSON数组：[{"name": "商品标题(尽量详细)", "price": "价格(纯数字)", "sales": "月售100+", "desc": "发货地"}]。绝不输出其他文字！`;
                     const res = await fetch(`${baseUrl}/chat/completions`, {
@@ -480,7 +519,6 @@ if (!window.shoppingActions) {
                     const data = await res.json();
                     const reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json/gi, '').replace(/```/g, '').trim();
                     
-                    // 🌟 防弹装甲：确保解析出来的是数组
                     let parsed = JSON.parse(reply);
                     state.searchResults = Array.isArray(parsed) ? parsed : [];
                 }
@@ -492,12 +530,10 @@ if (!window.shoppingActions) {
             }
         },
 
-        // 🌟 3. 动态生成专属菜单引擎
         openSearchedFoodStore: async (storeStr) => {
             const storeObj = JSON.parse(decodeURIComponent(storeStr));
             const state = window.shoppingState;
             
-            // 建立一个空的动态店铺，并开启 loading 状态
             state.activeFoodStore = { isDynamic: true, storeName: storeObj.storeName, desc: storeObj.desc, sales: storeObj.sales, items: [] };
             state.isFetchingMenu = true;
             if (window.render) window.render();
@@ -513,19 +549,17 @@ if (!window.shoppingActions) {
                 const data = await res.json();
                 const reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json/gi, '').replace(/```/g, '').trim();
                 
-                // 获取菜品后，塞入店铺
                 let parsed = JSON.parse(reply);
                 state.activeFoodStore.items = Array.isArray(parsed) ? parsed : [];
             } catch (e) {
                 if (window.actions?.showToast) window.actions.showToast('菜单获取失败');
-                state.activeFoodStore = null; // 失败则退回
+                state.activeFoodStore = null; 
             } finally {
                 state.isFetchingMenu = false;
                 if (window.render) window.render();
             }
         },
 
-        // 🌟 购物车勾选与删除
         toggleCartItem: (index) => {
             const cart = currentStore.shoppingData.cart;
             if (cart[index]) {
@@ -553,7 +587,6 @@ if (!window.shoppingActions) {
                 if (window.actions?.showToast) window.actions.showToast('✅ 删除成功');
             }
         },
-        // 🌟 删除单个订单
         deleteOrder: (orderNum) => {
             if (!confirm('确定要删除这条订单记录吗？删除后将不再有物流提醒哦。')) return;
             const orders = currentStore.shoppingData.orders || [];
@@ -564,7 +597,6 @@ if (!window.shoppingActions) {
             if (window.actions?.showToast) window.actions.showToast('✅ 订单已删除');
         },
 
-        // 🌟 居中弹窗分享系统 (普通转发)
         openSharePopup: () => {
             const selectedItems = currentStore.shoppingData?.cart?.filter(i => i.selected) || [];
             if (selectedItems.length === 0) return window.actions?.showToast('请先勾选要转发的心愿商品哦！');
@@ -585,7 +617,6 @@ if (!window.shoppingActions) {
             const chat = currentStore.chats.find(c => c.charId === charId);
             const char = currentStore.contacts.find(c => c.id === charId);
             
-            // 🌟 核心修复：不再死板取 [0]，而是动态获取与该角色绑定的专属马甲！
             const boundPersona = currentStore.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || currentStore.personas.find(p => p.isCurrent) || currentStore.personas[0];
             const userName = boundPersona.name;
 
@@ -616,9 +647,6 @@ if (!window.shoppingActions) {
             }
         },
 
-        // ==========================================
-        // 🌟 核心：多步结算弹窗流引擎
-        // ==========================================
         openCheckoutPopup: () => {
             const selectedItems = currentStore.shoppingData?.cart?.filter(i => i.selected) || [];
             if (selectedItems.length === 0) return window.actions?.showToast('请先勾选要结算的商品哦');
@@ -631,37 +659,33 @@ if (!window.shoppingActions) {
             window.shoppingState.showCheckoutPopup = false;
             if (window.render) window.render();
         },
-        // 第1步：为谁买
         setCheckoutBuyFor: (type) => {
             window.shoppingState.checkoutData.buyFor = type;
-            if (type === 'self') window.shoppingState.checkoutStep = 2; // 给自己买，去第2步选支付
+            if (type === 'self') window.shoppingState.checkoutStep = 2; 
             if (window.render) window.render();
         },
         setCheckoutBuyForChar: (charId) => {
-            // 🌟 核心修改：给 TA 买直接跳过代付选项，强行使用余额结账，并直接进入执行！
             window.shoppingState.checkoutData.buyForCharId = charId;
             window.shoppingState.checkoutData.payMethod = 'balance'; 
             window.shoppingActions.executeCheckout(); 
         },
-        // 第2步：结算方式
         setCheckoutPayMethod: (type) => {
             const state = window.shoppingState;
             state.checkoutData.payMethod = type;
-            if (type === 'balance') state.checkoutStep = 3; // 给自己买用余额 -> 去第3步分享
+            if (type === 'balance') state.checkoutStep = 3; 
             if (window.render) window.render();
         },
         setCheckoutPayChar: (charId) => {
             const state = window.shoppingState;
             state.checkoutData.payCharId = charId;
-            window.shoppingActions.executeCheckout(); // 找人代付不需要再选分享，直接发给代付人！
+            window.shoppingActions.executeCheckout(); 
         },
-        // 第3步：分享给谁
         setCheckoutShareChar: (charId) => {
             window.shoppingState.checkoutData.shareCharId = charId;
             window.shoppingActions.executeCheckout();
         },
 
-        // 🚀 终极斩杀：执行多步结算逻辑 (支持自定义备注 & AI 明文解析)
+        // 🚀 终极斩杀：执行多步结算逻辑 (修复 AI 幻觉脑补问题！)
         executeCheckout: () => {
             const state = window.shoppingState;
             const data = state.checkoutData;
@@ -670,18 +694,16 @@ if (!window.shoppingActions) {
             if (itemsToBuy.length === 0) return;
 
             const total = itemsToBuy.reduce((a,b)=>a+(parseFloat(b.price)||0)* (b.qty||1), 0);
-            const isUnpaid = data.payMethod === 'ta'; // 找人代付 = 未结账
+            const isUnpaid = data.payMethod === 'ta'; 
             const isFoodOrder = itemsToBuy[0].type === 'food';
 
-            // 🌟 1. 拦截输入：如果是外卖，让用户自己写备注！
             let customNote = '无';
             if (isFoodOrder) {
                 const noteInput = prompt("请输入外卖订单备注（选填，留空则默认为无）：");
-                if (noteInput === null) return; // 如果用户点了取消，直接中止结算
+                if (noteInput === null) return; 
                 customNote = noteInput.trim() !== '' ? noteInput.trim() : '无';
             }
 
-            // 2. 验证余额扣款 (仅限余额结账)
             if (!isUnpaid) {
                 if ((currentStore.wallet?.balance || 0) < total) {
                     return window.actions?.showToast('余额不足，请充值或选择代付！');
@@ -690,7 +712,6 @@ if (!window.shoppingActions) {
                 currentStore.wallet.transactions.push({ type: 'out', amount: total, title: isFoodOrder ? '外卖订单' : '淘宝购物', date: new Date().toISOString() });
             }
 
-            // 3. 确立收件人与通知对象
             let targetChar = null; 
             if (data.buyFor === 'ta') {
                 targetChar = currentStore.contacts.find(c => c.id === data.buyForCharId);
@@ -700,7 +721,6 @@ if (!window.shoppingActions) {
             
             const payChar = currentStore.contacts.find(c => c.id === data.payCharId);
 
-            // 获取发送卡片的马甲名称
             const referenceChar = targetChar || payChar || currentStore.contacts[0];
             const boundPersona = currentStore.personas.find(p => String(p.id) === String(referenceChar?.boundPersonaId)) || currentStore.personas.find(p => p.isCurrent) || currentStore.personas[0];
             const myName = boundPersona.name;
@@ -708,7 +728,6 @@ if (!window.shoppingActions) {
             let recipientName = myName; 
             if (data.buyFor === 'ta' && targetChar) recipientName = targetChar.name;
 
-            // 4. 合并生成唯一订单存入历史
             const orderNum = (isFoodOrder ? 'WM' : 'TB') + Date.now().toString().slice(-8) + Math.floor(Math.random() * 1000);
             const nowTime = Date.now();
             const deliveryMs = isFoodOrder ? (20 * 60 * 1000) : (2 * 24 * 60 * 60 * 1000); 
@@ -732,35 +751,33 @@ if (!window.shoppingActions) {
             currentStore.shoppingData.cart = cart.filter(i => !i.selected); 
             state.showCheckoutPopup = false;
 
-            // 🌟 5. 智能分流：为 AI 戴上“超级透视镜”！
             const deliveryDate = new Date(nowTime + deliveryMs);
             let orderMsg = {
                 id: Date.now(), sender: myName, isMe: true,
                 time: new Date(nowTime).toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}), timestamp: Date.now()
             };
 
-            // 核心意图判定 (代付 / 送他礼物 / 纯分享)
             let intentLabel = '';
             if (isUnpaid) intentLabel = '【请求代付】(需你付款)';
             else if (data.buyFor === 'ta') intentLabel = '【赠送给你的礼物】(用户已付款，买给你的)';
             else intentLabel = '【纯分享】(用户买给自己的，已付款，仅分享喜悦)';
 
+            // 🌟 终极防幻觉指令：明确告诉 AI 还没送到，不允许拆箱或脑补！
             if (isFoodOrder) {
                 const itemNamesText = newOrder.items.map(i => i.name).join('、');
-                // 🌟 将所有信息毫无保留地明文写给 AI 看！
-                const aiReadableText = `[系统向你展示了一张外卖卡片：\n- 意图：${intentLabel}\n- 店铺：${newOrder.storeName}\n- 收件人：${recipientName}\n- 菜品：${itemNamesText}\n- 总计：¥${total.toFixed(2)}\n- 给你的备注：${customNote}]`;
+                const aiReadableText = `[系统向你展示了一张外卖卡片：\n- 意图：${intentLabel}\n- 店铺：${newOrder.storeName}\n- 收件人：${recipientName}\n- 菜品：${itemNamesText}\n- 总计：¥${total.toFixed(2)}\n- 给你的备注：${customNote}\n\n⚠️【绝对系统指令】：外卖刚刚下单，预计需要 20 分钟送达。在收到系统明确提示“外卖已送达”之前，【绝对不可】在聊天中提前脑补外卖到了、假装去拿外卖，否则逻辑将彻底崩坏！现在请自然地和用户聊天，打发等外卖的时间。]`;
 
                 orderMsg = { ...orderMsg, msgType: 'takeaway_card', text: aiReadableText, 
                     takeawayData: {
                         storeName: newOrder.storeName, totalPriceStr: total.toFixed(2),
                         personalNote: customNote, foodItemsArr: newOrder.items, 
                         paymentState: isUnpaid ? 'unpaid' : 'paid', orderNum: orderNum,
-                        recipient: recipientName // 🌟 传给前端渲染用
+                        recipient: recipientName 
                     }
                 };
             } else {
                 const itemNamesText = newOrder.items.map(i => i.name).join('、');
-                const aiReadableText = `[系统向你展示了一张购物卡片：\n- 意图：${intentLabel}\n- 收件人：${recipientName}\n- 物品：${itemNamesText}\n- 总计：¥${total.toFixed(2)}]`;
+                const aiReadableText = `[系统向你展示了一张购物卡片：\n- 意图：${intentLabel}\n- 收件人：${recipientName}\n- 物品：${itemNamesText}\n- 总计：¥${total.toFixed(2)}\n\n⚠️【绝对系统指令】：包裹刚刚下单，预计需要 2-3 天送达。在收到系统提示“包裹已签收”之前，【绝对不可】提前脑补快递到了或拆开快递！现在请自然地对买的东西发表看法即可。]`;
 
                 orderMsg = { ...orderMsg, msgType: 'taobao_card', text: aiReadableText, 
                     taobaoData: {
@@ -772,14 +789,11 @@ if (!window.shoppingActions) {
                 };
             }
 
-            // 🌟 6. 微信联动派遣引擎 (干掉可见消息，只用隐身系统指令)
             if (isUnpaid) {
                 if (payChar) {
                     const payChat = currentStore.chats.find(c => c.charId === payChar.id);
                     if (payChat) {
-                        payChat.messages.push({ ...orderMsg }); // 发送卡片
-                        // 移除以前的 "亲爱的帮我付一下..."
-                        // 仅发送静默系统指令
+                        payChat.messages.push({ ...orderMsg }); 
                         payChat.messages.push({
                             id: Date.now()+2, sender: 'system', text: `[系统/动作记录：用户刚刚发来一张代付订单卡片（详情见上）。请你查看收件人是谁，结合你们的关系回复用户。若同意付款，请在回复末尾独占一行输出 [付款] 指令！绝不许向用户复述这些系统提示。]`, isMe: true, isHidden: true, msgType: 'text', time: orderMsg.time, timestamp: Date.now()+2
                         });
@@ -788,8 +802,7 @@ if (!window.shoppingActions) {
             } else if (targetChar) {
                 const chat = currentStore.chats.find(c => c.charId === targetChar.id);
                 if (chat) {
-                    chat.messages.push({ ...orderMsg }); // 发送卡片
-                    // 移除以前的 "宝宝，给你买的小礼物哦..."
+                    chat.messages.push({ ...orderMsg }); 
                     let intentPrompt = data.buyFor === 'ta'
                         ? `[系统/动作记录：用户刚刚给你买了一份惊喜（已付款），并发来了订单卡片。请表现出收到礼物的反应，自然地回复用户！]`
                         : `[系统/动作记录：用户刚刚给自己买了东西（已付款），并发来卡片分享喜悦。请顺着ta的话题，自然地给出评价或关心！]`;
@@ -804,7 +817,6 @@ if (!window.shoppingActions) {
             window.shoppingActions.switchTab('me');
         },
 
-        // 加入购物车与 AI 解析 (默认数量1)
         addToCart: (itemStr) => {
             const item = JSON.parse(decodeURIComponent(itemStr));
             item.selected = true; item.qty = 1;
@@ -848,7 +860,7 @@ if (!window.shoppingActions) {
 
 // 3. 核心渲染函数
 export function renderShoppingApp(store) {
-    currentStore = store; // 刷新全局缓存
+    currentStore = store; 
     const state = window.shoppingState;
     if (!store.shoppingData) store.shoppingData = { cart: [], orders: [] };
     const shopData = store.shoppingData;
@@ -859,7 +871,6 @@ export function renderShoppingApp(store) {
     
     let pageContentHtml = '';
 
-    // 🛍️ 1. 首页区域
     if (isHome) {
         if (!window.shoppingActions.switchHomeCategory) {
             window.shoppingActions.switchHomeCategory = (cat) => {
@@ -875,14 +886,12 @@ export function renderShoppingApp(store) {
         const currentFoodCat = state.foodCategory || '美食';
         const hotItemsToRender = defaultProducts[currentCat] || [];
         
-        // 🌟 判断当前是否处于“搜索模式”（如果进了具体的店铺，就覆盖搜索视图）
         const isSearchingView = (state.isSearching || (state.searchResults !== null && state.searchQuery !== '')) && !state.activeFoodStore;
 
         let topBarCenterHtml = '';
         let handleBack = `window.actions.setCurrentApp(null)`;
         let topBarRightHtml = '';
 
-        // 🌟 读取专属暂存定位 (与IP无关)
         const customLoc = currentStore.shoppingData?.customLocation || state.customLocation || '手动定位';
 
         if (isSearchingView) {
@@ -899,7 +908,6 @@ export function renderShoppingApp(store) {
                 <div class="cursor-pointer pb-1 px-1 transition-all ${!isFood ? 'text-[#ff5000] border-b-[3px] border-[#ff5000]' : 'text-gray-500 hover:text-gray-800'}" onclick="window.shoppingActions.switchHomeTab('shop')">淘宝购物</div>
                 <div class="cursor-pointer pb-1 px-1 transition-all ${isFood ? 'text-[#ff5000] border-b-[3px] border-[#ff5000]' : 'text-gray-500 hover:text-gray-800'}" onclick="window.shoppingActions.switchHomeTab('food')">同城外卖</div>
             `;
-            // 🌟 在定位图标左侧加入文本显示
             topBarRightHtml = isFood ? `
                 <div class="flex items-center text-gray-600 cursor-pointer active:scale-95" onclick="window.shoppingActions.setLocation()">
                     <span class="text-[12px] font-bold mr-1 truncate max-w-[60px]">${customLoc}</span>
@@ -932,11 +940,9 @@ export function renderShoppingApp(store) {
             return `
             <div class="grid grid-cols-2 gap-3">
                 ${items.map(item => {
-                    // 🌟 防弹衣：兼容大模型胡乱起名字 (name / title)，兜底为 '神秘惊喜'
                     const itemName = item.name || item.title || '神秘惊喜';
                     const itemPrice = item.price || '99.00';
                     
-                    // 保证加购时传过去的是安全数据
                     const safeItem = { ...item, name: itemName, price: itemPrice };
                     const encodedItem = encodeURIComponent(JSON.stringify(safeItem));
                     
@@ -958,12 +964,10 @@ export function renderShoppingApp(store) {
             </div>`;
         };
 
-        // 🌟 外卖渲染逻辑
         let foodContentHtml = '';
         let bottomFoodCartHtml = ''; 
 
         if (state.activeFoodStore) {
-            // 🌟 动态等待菜单生成
             if (state.isFetchingMenu) {
                 foodContentHtml = `
                     <div class="flex flex-col items-center justify-center pt-32 text-gray-400">
@@ -972,7 +976,6 @@ export function renderShoppingApp(store) {
                     </div>
                 `;
             } else {
-                // 提取统一的数据源 (动态或静态)
                 const sData = state.activeFoodStore.isDynamic ? state.activeFoodStore : defaultFoodStores[state.activeFoodStore.cat][state.activeFoodStore.storeIndex];
                 const storeCart = (currentStore.shoppingData?.cart || []).filter(i => i.type === 'food' && i.desc === sData.storeName);
                 const storeTotalQty = storeCart.reduce((acc, item) => acc + (item.qty || 1), 0);
@@ -1074,20 +1077,17 @@ export function renderShoppingApp(store) {
                 `;
             }
         } else {
-            // 🌟 外卖店铺列表（复用给首页静态和搜索结果动态店铺）
             const storesToRender = isSearchingView ? (state.searchResults || []) : (defaultFoodStores[currentFoodCat] || []);
             
             foodContentHtml = `
                 <div class="flex flex-col space-y-3">
                     ${storesToRender.map((store, idx) => {
-                        // 🌟 防弹衣：兼容大模型把店名写成了 name 甚至 title
                         const sName = store.storeName || store.name || store.title || '未知店铺';
                         const safeStore = { ...store, storeName: sName };
                         
                         const storeStr = encodeURIComponent(JSON.stringify(safeStore));
                         const onclickAction = isSearchingView ? `window.shoppingActions.openSearchedFoodStore('${storeStr}')` : `window.shoppingActions.openFoodStore('${currentFoodCat}', ${idx})`;
 
-                        // 安全地使用 sName.includes
                         const iconName = sName.includes('药') ? 'pill' : 'store';
 
                         return `
@@ -1217,96 +1217,10 @@ export function renderShoppingApp(store) {
                     </div>
                 </div>
             ` : ''}
-
-            ${state.showSharePopup ? `
-                <div class="absolute inset-0 z-[99999] bg-black/50 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200" onclick="window.shoppingActions.closeSharePopup()">
-                    <div class="w-[85%] max-w-[320px] bg-[#fff] rounded-[24px] overflow-hidden flex flex-col shadow-2xl animate-in zoom-in-95 duration-300" onclick="event.stopPropagation()">
-                        <div class="p-4 font-black text-center text-[16px] text-gray-900 border-b border-gray-100 relative bg-[#fff]">
-                            选择分享对象
-                            <i data-lucide="x" class="absolute right-4 top-4 w-5 h-5 text-gray-400 cursor-pointer active:scale-90" onclick="window.shoppingActions.closeSharePopup()"></i>
-                        </div>
-                        <div class="flex-1 overflow-y-auto p-4 space-y-3 max-h-[50vh] bg-[#f9fafb]">
-                            ${store.contacts.map(c => `
-                                <div class="flex items-center p-3 bg-[#fff] rounded-[14px] shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-transform" onclick="window.shoppingActions.executeShareCart('${c.id}')">
-                                    <img src="${c.avatar}" class="w-10 h-10 rounded-[10px] object-cover border border-gray-100 mr-3 shrink-0" />
-                                    <span class="flex-1 font-bold text-gray-800 text-[15px] truncate">${c.name}</span>
-                                </div>
-                            `).join('')}
-                        </div>
-                    </div>
-                </div>
-            ` : ''}
-
-            ${state.showCheckoutPopup ? `
-                <div class="absolute inset-0 z-[99999] bg-black/50 backdrop-blur-sm flex items-end justify-center animate-in fade-in duration-200" onclick="window.shoppingActions.closeCheckoutPopup()">
-                    <div class="w-full bg-[#fff] rounded-t-[24px] overflow-hidden flex flex-col shadow-2xl animate-in slide-in-from-bottom-full duration-300 pb-safe" onclick="event.stopPropagation()">
-                        <div class="p-4 font-black text-center text-[16px] text-gray-900 border-b border-gray-100 relative bg-[#fff]">
-                            ${state.checkoutStep === 1 ? '1. 为谁购买？' : state.checkoutStep === 2 ? '2. 结算方式' : '3. 将订单分享给'}
-                            <i data-lucide="x" class="absolute right-4 top-4 w-5 h-5 text-gray-400 cursor-pointer active:scale-90" onclick="window.shoppingActions.closeCheckoutPopup()"></i>
-                        </div>
-                        <div class="p-5 max-h-[60vh] overflow-y-auto bg-[#f9fafb]">
-                            ${state.checkoutStep === 1 ? `
-                                ${!state.checkoutData.buyFor ? `
-                                    <div class="flex space-x-4 mb-4">
-                                        <div class="flex-1 bg-orange-50 border border-orange-200 text-orange-600 rounded-[16px] p-5 text-center font-bold text-[16px] active:scale-95 transition-transform cursor-pointer shadow-sm" onclick="window.shoppingActions.setCheckoutBuyFor('self')">给自己买</div>
-                                        <div class="flex-1 bg-rose-50 border border-rose-200 text-rose-600 rounded-[16px] p-5 text-center font-bold text-[16px] active:scale-95 transition-transform cursor-pointer shadow-sm" onclick="window.shoppingActions.setCheckoutBuyFor('ta')">给 TA 买</div>
-                                    </div>
-                                ` : `
-                                    <div class="text-[13px] font-bold text-gray-500 mb-3">请选择要送给谁：</div>
-                                    <div class="space-y-3">
-                                        ${store.contacts.map(c => `
-                                            <div class="flex items-center p-3 bg-[#fff] rounded-[14px] shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-transform" onclick="window.shoppingActions.setCheckoutBuyForChar('${c.id}')">
-                                                <img src="${c.avatar}" class="w-10 h-10 rounded-[10px] object-cover border border-gray-100 mr-3 shrink-0" />
-                                                <span class="flex-1 font-bold text-gray-800 text-[15px] truncate">${c.name}</span>
-                                            </div>
-                                        `).join('')}
-                                    </div>
-                                `}
-                            ` : ''}
-                            ${state.checkoutStep === 2 ? `
-                                ${!state.checkoutData.payMethod ? `
-                                    <div class="space-y-4 mb-4">
-                                        <div class="bg-[#fff] border border-gray-200 rounded-[16px] p-4 flex justify-between items-center active:scale-95 transition-transform cursor-pointer shadow-sm" onclick="window.shoppingActions.setCheckoutPayMethod('balance')">
-                                            <div class="flex items-center"><i data-lucide="wallet" class="w-5 h-5 text-orange-500 mr-3"></i><span class="font-bold text-gray-800">余额结账</span></div>
-                                            <span class="text-gray-500 font-medium text-[13px]">可用: ¥${store.wallet?.balance?.toFixed(2) || '0.00'}</span>
-                                        </div>
-                                        <div class="bg-[#fff] border border-gray-200 rounded-[16px] p-4 flex justify-between items-center active:scale-95 transition-transform cursor-pointer shadow-sm" onclick="window.shoppingActions.setCheckoutPayMethod('ta')">
-                                            <div class="flex items-center"><i data-lucide="credit-card" class="w-5 h-5 text-rose-500 mr-3"></i><span class="font-bold text-gray-800">请 TA 代付</span></div>
-                                            <i data-lucide="chevron-right" class="w-4 h-4 text-gray-400"></i>
-                                        </div>
-                                    </div>
-                                ` : `
-                                    <div class="text-[13px] font-bold text-gray-500 mb-3">请选择谁来代付：</div>
-                                    <div class="space-y-3">
-                                        ${store.contacts.map(c => `
-                                            <div class="flex items-center p-3 bg-[#fff] rounded-[14px] shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-transform" onclick="window.shoppingActions.setCheckoutPayChar('${c.id}')">
-                                                <img src="${c.avatar}" class="w-10 h-10 rounded-[10px] object-cover border border-gray-100 mr-3 shrink-0" />
-                                                <span class="flex-1 font-bold text-gray-800 text-[15px] truncate">${c.name}</span>
-                                            </div>
-                                        `).join('')}
-                                    </div>
-                                `}
-                            ` : ''}
-                            ${state.checkoutStep === 3 ? `
-                                <div class="text-[13px] font-bold text-gray-500 mb-3">将自己买的宝贝分享给：</div>
-                                <div class="space-y-3">
-                                    ${store.contacts.map(c => `
-                                        <div class="flex items-center p-3 bg-[#fff] rounded-[14px] shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-transform" onclick="window.shoppingActions.setCheckoutShareChar('${c.id}')">
-                                            <img src="${c.avatar}" class="w-10 h-10 rounded-[10px] object-cover border border-gray-100 mr-3 shrink-0" />
-                                            <span class="flex-1 font-bold text-gray-800 text-[15px] truncate">${c.name}</span>
-                                        </div>
-                                    `).join('')}
-                                </div>
-                            ` : ''}
-                        </div>
-                    </div>
-                </div>
-            ` : ''}
         `;
     } 
     // 👤 3. 我的(订单)区域
     else if (isMe) {
-        // 🌟 获取全局当前正在使用的马甲
         const activePersona = store.personas.find(p => p.isCurrent) || store.personas[0];
 
         pageContentHtml = `
@@ -1360,12 +1274,8 @@ export function renderShoppingApp(store) {
         `;
     }
 
-    // 🌟 如果当前处于外卖点单页，则隐藏全局底部导航，给美团悬浮底栏让路！
     const shouldHideBottomTab = (state.tab === 'home' && state.homeTab === 'food' && state.activeFoodStore);
 
-    // ==========================================
-    // 🚀 全局防穿透弹窗引擎 (挂载在最外层，无视任何页面层级)
-    // ==========================================
     const globalPopupsHtml = `
         ${state.showSharePopup ? `
             <div class="absolute inset-0 z-[99999] bg-black/50 backdrop-blur-sm flex items-center justify-center animate-in fade-in duration-200" onclick="window.shoppingActions.closeSharePopup()">
@@ -1484,7 +1394,6 @@ export function renderShoppingApp(store) {
         ` : ''}
     `;
 
-    // 🌟 终极渲染组合！将所有独立组件放入 Flex 布局
     return `
         <div class="w-full h-full relative overflow-hidden animate-in fade-in duration-300 select-none bg-[#fff] flex flex-col">
             
@@ -1524,7 +1433,6 @@ setTimeout(async () => {
         return;
     }
     
-    // 🌟 核心拦截器：如果没开启定位开关，直接把这个雷达杀死！
     if (!store.enableLocation) {
         console.log("📡 [外卖雷达] 用户已关闭定位权限，AI 将使用幻觉点餐。");
         return; 
@@ -1535,7 +1443,6 @@ setTimeout(async () => {
 
         let realLoc = '';
         
-        // 🌟 1. 尝试调用浏览器原生 GPS 接口获取精确经纬度
         const getGPS = () => new Promise((resolve, reject) => {
             if (!navigator.geolocation) return reject('No GPS');
             navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 5000 });
@@ -1543,19 +1450,16 @@ setTimeout(async () => {
 
         try {
             const pos = await getGPS();
-            // 调用免费无跨域限制的逆地理编码，将经纬度转为中文市区
             const geoRes = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${pos.coords.latitude}&longitude=${pos.coords.longitude}&localityLanguage=zh`);
             const geoData = await geoRes.json();
             
             const city = geoData.city || geoData.principalSubdivision || '';
-            const district = geoData.locality || ''; // locality 在国内通常对应的就是“xx区”
+            const district = geoData.locality || ''; 
             
-            // 组合成高精度定位：例如 "武汉市武昌区" 或 "黄石市黄石港区"
             realLoc = `${city}${district !== city ? district : ''}` || '未知区域';
             console.log(`📍 [GPS成功] 探测到用户真实物理位置：${realLoc}`);
         } catch (gpsErr) {
             console.warn("📍 [GPS失败/拒绝] 降级使用 IP 定位...");
-            // 🌟 2. 兜底方案：使用免跨域的 GeoJS IP 接口 (解决了 CORS 报错)
             try {
                 const ipRes = await fetch('https://get.geojs.io/v1/ip/geo.json');
                 const ipData = await ipRes.json();
@@ -1565,18 +1469,15 @@ setTimeout(async () => {
             }
         }
 
-        // 把高精度的物理定位存入 store，方便角色（大模型）直接读取你的真实位置
         if (!store.shoppingData) store.shoppingData = { cart: [], orders: [] };
         store.shoppingData.userRealLocation = realLoc;
 
         const cachedInfo = store.foodPoolInfo;
         
-        // 🌟 核心判断：如果没库存，或者用户的真实位置变了，立刻重新搜刮周边！
         if (!cachedInfo || cachedInfo.city !== realLoc) {
             console.log(`📡 [外卖雷达] 锁定用户所在区域 (${cachedInfo?.city || '无'} -> ${realLoc})，开始搜刮周边外卖...`);
             
             const categories = ['美食', '奶茶', '烧烤', '甜点'];
-            // 并发请求你的后端，填满外卖库
             const fetchPromises = categories.map(kw => 
                 fetch('https://neko-hoshino.duckdns.org/search-food', {
                     method: 'POST',
@@ -1585,7 +1486,7 @@ setTimeout(async () => {
                 })
                 .then(res => res.json())
                 .then(data => ({ kw, items: (data.items || []).slice(0, 10) })) 
-                .catch(err => ({ kw, items: [] })) // 加上防撞垫，防止网络波动报错
+                .catch(err => ({ kw, items: [] })) 
             );
 
             const results = await Promise.all(fetchPromises);
@@ -1605,73 +1506,81 @@ setTimeout(async () => {
         console.warn("📡 [外卖雷达] 探测受阻，将使用兜底数据", e);
     }
 }, 3000);
+
 // ==========================================
-// 🚚 全局异步物流巡逻员 & 内存回收机制
+// 🚚 全局异步物流巡逻员 & 内存回收机制 (🌟 终极修复版！)
 // ==========================================
 setInterval(() => {
-    const globalStore = window.store || (typeof currentStore !== 'undefined' ? currentStore : null);
-    if (!globalStore || !globalStore.shoppingData || !globalStore.shoppingData.orders) return;
+    // 🌟 直接使用文件顶部引入的全局 store 对象，不再依赖必须打开过 App 才能获取的 currentStore！
+    if (!store || !store.shoppingData || !store.shoppingData.orders) return;
     
     const now = Date.now();
     let needsSave = false;
     
     // 1. 到货状态流转与微信暗语通知
-    globalStore.shoppingData.orders.forEach(order => {
+    store.shoppingData.orders.forEach(order => {
         // 如果是未结账、已经送达或者已经完成的，直接跳过
         if (order.status === '未结账' || order.status.includes('已送达') || order.status.includes('已完成')) return;
         
         // 如果当前时间已经超过了预计送达时间
         if (now >= order.deliveryTime) {
-    order.status = order.type === 'food' ? '已送达' : '已完成';
-    needsSave = true;
+            order.status = order.type === 'food' ? '已送达' : '已完成';
+            needsSave = true; // 🌟 必须写盘保存！
 
-    if (order.targetCharId) {
-        const chat = globalStore.chats.find(c => c.charId === order.targetCharId);
-        if (chat) {
-            // 🌟 提取商品名称，让 AI 知道具体买了什么
-            const itemNames = (order.items || [])
-                .slice(0, 3)
-                .map(item => item.name)
-                .join('、');
-            const moreHint = (order.items && order.items.length > 3) ? '等' : '';
-            const goodsDetail = itemNames ? `（${itemNames}${moreHint}）` : '';
+            if (order.targetCharId) {
+                const chat = store.chats.find(c => c.charId === order.targetCharId);
+                if (chat) {
+                    // 🌟 提取商品名称，让 AI 知道具体买了什么
+                    const itemNames = (order.items || []).slice(0, 3).map(item => item.name).join('、');
+                    const moreHint = (order.items && order.items.length > 3) ? '等' : '';
+                    const goodsDetail = itemNames ? `（${itemNames}${moreHint}）` : '';
 
-            let noticeMsg = '';
-            if (order.buyFor === 'ta') {
-                noticeMsg = `用户给你买的【${order.storeName}${goodsDetail}】刚刚已经送达/签收了！请你马上主动发消息告诉ta，并表达你的喜悦、感动和感谢！`;
-            } else if (order.buyFor === 'self') {
-                noticeMsg = `用户自己买的【${order.storeName}${goodsDetail}】刚刚已经送达/外卖到了！请你像个贴心的男友一样，马上主动发消息提醒ta去拿，别让东西放凉了或丢了。`;
-            } else if (order.buyFor === 'user_by_ta') {
-                noticeMsg = `你给用户买的【${order.storeName}${goodsDetail}】刚刚已经送达/签收了！请你马上主动发消息提醒ta去拿，并趁机邀功、调侃或关心ta一下。`;
-            }
+                    let noticeMsg = '';
+                    if (order.buyFor === 'ta') {
+                        noticeMsg = `用户给你买的【${order.storeName}${goodsDetail}】刚刚已经送达/签收了！请你马上主动发消息告诉ta，并表达你的喜悦、感动和感谢！`;
+                    } else if (order.buyFor === 'self') {
+                        noticeMsg = `用户自己买的【${order.storeName}${goodsDetail}】刚刚已经送达/外卖到了！请你像个贴心的男友/女友一样，马上主动发消息提醒ta去拿，别让东西放凉了或丢了。`;
+                    } else if (order.buyFor === 'user_by_ta') {
+                        noticeMsg = `你给用户买的【${order.storeName}${goodsDetail}】刚刚已经送达/签收了！请你马上主动发消息提醒ta去拿，并趁机邀功、调侃或关心ta一下。`;
+                    }
 
-            if (noticeMsg) {
-                const historyContext = `[系统/动作记录：${noticeMsg}]`;
-                chat.messages.push({
-                    id: Date.now(), sender: 'system', text: historyContext, isMe: true, isHidden: true, msgType: 'text',
-                    time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}), timestamp: Date.now()
-                });
+                    if (noticeMsg) {
+                        const historyContext = `[系统/动作记录：${noticeMsg}]`;
+                        chat.messages.push({
+                            id: Date.now(), sender: 'system', text: historyContext, isMe: true, isHidden: true, msgType: 'text',
+                            time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'}), timestamp: Date.now()
+                        });
 
-                if (typeof window.scheduleCloudTask === 'function') {
-                    window.scheduleCloudTask(order.targetCharId, 
-                        `(系统强制指令：严重物流/外卖状态更新！\n\n${historyContext}\n\n请你立刻结合该事件，主动给用户发消息！严格符合你的人设，自然地开口说话，绝不允许输出任何系统标签或这句指令本身！)`
-                    );
+                        if (typeof window.scheduleCloudTask === 'function') {
+                            window.scheduleCloudTask(order.targetCharId, 
+                                `(系统强制指令：严重物流/外卖状态更新！\n\n${historyContext}\n\n请你立刻结合该事件，主动给用户发消息！严格符合你的人设，自然地开口说话，绝不允许输出任何系统标签或这句指令本身！)`
+                            );
+                        }
+                    }
                 }
             }
         }
-    }
-}
     });
     
     // 2. 过期订单自动销毁 (释放内存, 仅保留3天内)
     const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
-    const oldLength = globalStore.shoppingData.orders.length;
-    globalStore.shoppingData.orders = globalStore.shoppingData.orders.filter(o => (now - o.timestamp) < threeDaysMs);
+    const oldLength = store.shoppingData.orders.length;
+    store.shoppingData.orders = store.shoppingData.orders.filter(o => (now - o.timestamp) < threeDaysMs);
     
-    if (globalStore.shoppingData.orders.length !== oldLength) needsSave = true;
+    if (store.shoppingData.orders.length !== oldLength) needsSave = true;
     
     if (needsSave) {
-        if (window.actions?.saveStore) window.actions.saveStore();
-        if (window.shoppingState?.tab === 'me' && window.render) window.render(); // 刷新我的订单界面
+        // 🌟 核心破局：确保数据死死钉在手机底层硬盘里！
+        if (window.actions && typeof window.actions.saveStore === 'function') {
+            window.actions.saveStore();
+        } else if (window.DB) {
+            // 如果 actions 不存在（比如应用刚启动还没完成渲染绑定），直接调用 DB 最底层强行刷入！
+            window.DB.set(JSON.parse(JSON.stringify(store))).catch(e => console.log('巡逻员底层硬盘写入失败', e));
+        }
+        
+        // 只有当你正好在看着订单页面时，才帮你无缝刷新 UI
+        if (window.shoppingState && window.shoppingState.tab === 'me' && typeof window.render === 'function') {
+            window.render(); 
+        }
     }
 }, 15000); // 每 15 秒巡逻一次
