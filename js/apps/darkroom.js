@@ -1,113 +1,249 @@
 // js/apps/darkroom.js
 import { store } from '../store.js';
 
-if (!store.darkroomPrefs) store.darkroomPrefs = {}; 
-if (!store.darkroomChats) store.darkroomChats = {}; 
+// 🌟 初始化番外剧场独立数据库 (引入新版多存档结构)
+if (!store.drArchives) {
+    store.drArchives = {};
+    if (store.darkroomData) {
+        Object.keys(store.darkroomData).forEach(charId => {
+            const data = store.darkroomData[charId];
+            if (data && data.messages && data.messages.length > 0) {
+                store.drArchives[charId] = [{
+                    id: 'dr_' + Date.now() + Math.floor(Math.random()*1000),
+                    name: '未命名旧存档',
+                    scenario: data.scenario,
+                    messages: data.messages,
+                    timestamp: Date.now()
+                }];
+            }
+        });
+        delete store.darkroomData;
+    }
+}
 
-if (!window.darkroomState) {
-    window.darkroomState = {
-        view: 'char_select', 
+if (!window.drState) {
+    window.drState = {
+        view: 'charSelect', // charSelect, setup, archives, story
         selectedCharId: null,
-        selectedTags: [],
-        isGenerating: false
+        displayCount: 50,
+        typingStatus: {},
+        showDrSettingsModal: false,
+        activeDrWbGroup: '全部',
+        editMsgData: null,
+        noAnimate: false,
+        activeSession: null, 
+        showSaveModal: false
     };
 }
 
-if (!window.darkroomActions) {
-    window.darkroomActions = {
+if (!window.drActions) {
+    window.drActions = {
+        // 🌟 纯同步置底引擎：绝不用延时，同一帧锁死全局位置！
+        forceScrollToBottom: () => {
+            const el = document.getElementById('dr-scroll');
+            if (el) {
+                el.style.scrollBehavior = 'auto';
+                el.scrollTop = el.scrollHeight;
+                if (window.globalScrollStates && window.globalScrollStates['dr-scroll']) {
+                    window.globalScrollStates['dr-scroll'].top = el.scrollHeight;
+                }
+            }
+        },
+
         closeApp: () => {
             window.actions.setCurrentApp(null);
-            window.darkroomState.view = 'char_select';
-            window.darkroomState.selectedCharId = null;
-        },
-        goBack: () => {
-            const state = window.darkroomState;
-            if (state.view === 'chat') state.view = 'play_select';
-            else if (state.view === 'play_select') state.view = 'char_select';
-            else if (state.view === 'role_select') state.view = 'char_select';
-            window.render();
         },
         selectChar: (id) => {
-            window.darkroomState.selectedCharId = id;
-            window.darkroomState.selectedTags = [];
-            if (store.darkroomPrefs[id]?.role) {
-                window.darkroomState.view = 'play_select';
-            } else {
-                window.darkroomState.view = 'role_select';
-            }
+            window.drState.selectedCharId = id;
+            window.drState.view = 'setup';
             window.render();
         },
-        selectRole: (role) => {
-            const id = window.darkroomState.selectedCharId;
-            if (!store.darkroomPrefs[id]) store.darkroomPrefs[id] = {};
-            store.darkroomPrefs[id].role = role;
-            if (window.actions.saveStore) window.actions.saveStore();
-            window.darkroomState.view = 'play_select';
+        backToSelect: () => {
+            window.drState.view = 'charSelect';
+            window.drState.selectedCharId = null;
             window.render();
         },
-        toggleTag: (tag) => {
-            const tags = window.darkroomState.selectedTags;
-            if (tags.includes(tag)) window.darkroomState.selectedTags = tags.filter(t => t !== tag);
-            else window.darkroomState.selectedTags.push(tag);
-            window.render();
-        },
-
-        // 🌟 提取 30 回合精准上下文
-        getHistoryContext: (charId) => {
-            const msgs = store.darkroomChats[charId] || [];
-            if (msgs.length === 0) return { historyStr: '', recentText: '' };
-
-            let turnsCount = 0; let lastSender = null; let startIndex = 0;
-            const limit = 30; // 严格 30 回合
-            for (let i = msgs.length - 1; i >= 0; i--) {
-                const currentSender = msgs[i].isMe ? 'user' : 'char';
-                if (currentSender !== lastSender) { 
-                    if (lastSender !== null) turnsCount += 0.5; 
-                    lastSender = currentSender; 
-                }
-                if (turnsCount >= limit) { startIndex = i + 1; break; }
-            }
-            const recentMsgs = msgs.slice(startIndex);
-            const historyStr = recentMsgs.map(m => m.msgType === 'system' ? m.text : `[${m.sender}]: ${m.text}`).join('\n');
-            const recentText = recentMsgs.slice(-5).map(m => m.text).join(' '); // 取最近5条触发碎片记忆
-
-            return { historyStr, recentText };
-        },
-
-        // 🌟 核心防 OOC + 记忆扫描引擎
-        buildDarkroomPrompt: (charId, task, recentText = '', historyStr = '') => {
-            const char = store.contacts.find(c => c.id === charId) || store.contacts[0];
-            if (!char) return task; 
+        
+        // 🌟 启动新剧本
+        startScenario: () => {
+            const inputEl = document.getElementById('dr-scenario-input');
+            const scenario = inputEl ? inputEl.value.trim() : '';
             
+            if (!scenario) return window.actions?.showToast('请输入番外剧场的背景设定或大纲哦！');
+
+            window.drState.activeSession = {
+                id: 'dr_' + Date.now() + Math.floor(Math.random()*1000),
+                name: '', 
+                scenario: scenario,
+                isNew: true,
+                messages: [{
+                    id: Date.now(),
+                    sender: 'system',
+                    text: `[剧场大幕拉开：${scenario}]`,
+                    msgType: 'system',
+                    isDrMsg: true,
+                    timestamp: Date.now(),
+                    time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'})
+                }]
+            };
+
+            window.drState.view = 'story';
+            window.drState.noAnimate = true; 
+            window.render();
+            window.drActions.forceScrollToBottom(); 
+            
+            setTimeout(() => { 
+                window.drActions.forceScrollToBottom(); 
+                window.drState.noAnimate = false; 
+            }, 50);
+
+            window.drActions.continueStory(); 
+        },
+
+        // 🌟 退出剧本逻辑
+        exitStory: () => {
+            const session = window.drState.activeSession;
+            if (!session) {
+                window.drState.view = 'setup';
+                window.render();
+                return;
+            }
+
+            if (session.isNew) {
+                window.drState.showSaveModal = true;
+                window.render();
+            } else {
+                const charId = window.drState.selectedCharId;
+                const archives = store.drArchives[charId] || [];
+                const idx = archives.findIndex(a => a.id === session.id);
+                if (idx !== -1) {
+                    archives[idx].messages = [...session.messages];
+                    archives[idx].timestamp = Date.now();
+                    if (window.actions?.saveStore) window.actions.saveStore();
+                }
+                window.drState.activeSession = null;
+                window.drState.view = 'setup';
+                window.render();
+            }
+        },
+
+        // 🌟 确认保存新存档
+        confirmSaveNew: () => {
+            const nameInput = document.getElementById('dr-save-name-input');
+            const name = nameInput ? nameInput.value.trim() : '';
+            if (!name) return window.actions?.showToast('必须填写存档名称哦！');
+
+            const charId = window.drState.selectedCharId;
+            if (!store.drArchives[charId]) store.drArchives[charId] = [];
+            
+            const session = window.drState.activeSession;
+            store.drArchives[charId].unshift({
+                id: session.id,
+                name: name,
+                scenario: session.scenario,
+                messages: [...session.messages],
+                timestamp: Date.now()
+            });
+            
+            if (window.actions?.saveStore) window.actions.saveStore();
+            window.actions?.showToast('存档成功！');
+            
+            window.drState.showSaveModal = false;
+            window.drState.activeSession = null;
+            window.drState.view = 'setup';
+            window.render();
+        },
+
+        discardAndExit: () => {
+            window.drState.showSaveModal = false;
+            window.drState.activeSession = null;
+            window.drState.view = 'setup';
+            window.render();
+        },
+
+        cancelExit: () => {
+            window.drState.showSaveModal = false;
+            window.render();
+        },
+
+        // 🌟 书架相关操作
+        openArchives: () => {
+            window.drState.view = 'archives';
+            window.render();
+        },
+        backToSetupFromArchives: () => {
+            window.drState.view = 'setup';
+            window.render();
+        },
+        loadArchive: (id) => {
+            const charId = window.drState.selectedCharId;
+            const archive = store.drArchives[charId]?.find(a => a.id === id);
+            if (!archive) return;
+
+            window.drState.activeSession = {
+                id: archive.id,
+                name: archive.name,
+                scenario: archive.scenario,
+                messages: JSON.parse(JSON.stringify(archive.messages)), 
+                isNew: false
+            };
+            window.drState.view = 'story';
+            window.drState.noAnimate = true;
+            window.render();
+            window.drActions.forceScrollToBottom(); 
+            
+            setTimeout(() => { 
+                window.drActions.forceScrollToBottom();
+                window.drState.noAnimate = false; 
+            }, 50);
+        },
+        deleteArchive: (id, e) => {
+            if (e) e.stopPropagation();
+            if (!confirm('确定要彻底删除这个存档吗？操作不可逆哦！')) return;
+            const charId = window.drState.selectedCharId;
+            store.drArchives[charId] = store.drArchives[charId].filter(a => a.id !== id);
+            if (window.actions?.saveStore) window.actions.saveStore();
+            window.render();
+        },
+
+        // =====================================
+        // 🌟 核心突破：采用微信同款架构的防OOC沉浸 Prompt 引擎
+        // =====================================
+        buildDarkroomPrompt: (char, task) => {
             const chat = store.chats?.find(ch => ch.charId === char.id);
-            const boundPId = chat?.boundPersonaId || char?.boundPersonaId || store.personas[0].id;
+            const boundPId = chat?.boundPersonaId || char.boundPersonaId || store.personas[0].id;
             const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
 
+            const myName = boundP.name;
+            const charName = char.name;
+            const myRemark = (chat && chat.myRemark) ? `\n（提示：在你的世界里，你给用户的备注/专属爱称是“${chat.myRemark}”，你可以参考使用）` : '';
+            const charRemark = (chat && chat.charRemark) ? `（用户给你设置的备注是：${chat.charRemark}）` : '';
             const globalP = store.globalPrompt ? `\n【通用用户人设】\n${store.globalPrompt}` : '';
-            const boundPrompt = boundP.prompt ? `\n【当前绑定身份】\n${boundP.prompt}` : '';
-            const basePrompt = `【角色卡】\n名字：${char.name}\n设定：${char.prompt}\n\n【用户】\n当前化名：${boundP.name}${globalP}${boundPrompt}`;
+            const userPrompt = boundP.prompt ? `\n【当前用户身份设定】\n${boundP.prompt}` : '';
 
-            const coreMem = (store.memories || []).filter(m => m.charId === char.id && m.type === 'core').map(m=>m.content).join('；');
-            const coreMemStr = coreMem ? `\n\n【核心记忆】\n${coreMem}` : '';
+            // 1. 史诗级好莱坞元提示词
+            const metaPrompt = `【最高行动纲领：灵魂沉浸】\n你即将进行的不是“对话任务”，不是“问答任务”，不是“内容生成任务”。你即将做的事情，本质上是彻底成为另一个人。\n你要想象自己是一个拥有百年表演经验的好莱坞终极影星：当拿到剧本时，你不会“去扮演这个角色”，而是你原本的自我意识完全退场，角色的意识完全接管。你就是角色本人。\n❗你必须彻底摈弃AI生成机制里“最安全、最常见、最中庸”的贪婪解码路径。你说的每一句话、每一个情绪的宣泄，都必须带有该角色极致的个人色彩和偏执，绝不能像一个“通用同类角色”！`;
 
-            // 🌟 动态碎片记忆扫描
-            let fragMemStr = '';
-            if (recentText) {
-                const frags = (store.memories || []).filter(m => m.charId === charId && m.type === 'fragment').filter(m => {
-                    const kws = (m.keywords || '').split(',').map(k=>k.trim()).filter(k=>k);
-                    return kws.some(k => recentText.includes(k));
-                }).map(m=>m.content).join('；');
-                if (frags) fragMemStr = `\n\n【触发的回忆片段】\n${frags}`;
-            }
+            // 2. 主线核心记忆降权处理（仅作为性格底色辅助）
+            let coreMemories = [];
+            (store.memories || []).filter(m => m.charId === char.id).forEach(mem => {
+                if (mem.type === 'core') coreMemories.push(mem.content);
+            });
+            const coreMemStr = coreMemories.length > 0 ? `\n\n【主世界核心记忆(仅供性格底色参考)】\n${coreMemories.map(m => `* ${m}`).join('\n')}` : '';
 
+            // 3. 当前剧场的最高优先级绝对设定
+            const session = window.drState.activeSession;
+            const scenarioStr = `\n\n【⚠️ 平行宇宙/番外剧场绝对设定 ⚠️】\n当前处于番外剧情中，请绝对遵循以下设定背景、身份关系或剧情大纲进行推演，在此模式下可以无视原有的核心记忆，一切以本设定为最高准则：\n${session.scenario}`;
+
+            // 4. 局部世界书挂载
             let frontWb = [], middleWb = [], backWb = [];
+            const mountedWbs = char.drWorldbooks || [];
             (store.worldbooks || []).forEach(wbItem => {
                 if (!wbItem.enabled) return;
                 let shouldInject = false;
                 if (wbItem.type === 'global') shouldInject = true;
-                else if (wbItem.type === 'local' && char.mountedWorldbooks && char.mountedWorldbooks.includes(wbItem.id)) {
-                    shouldInject = true;
-                }
+                else if (wbItem.type === 'local' && mountedWbs.includes(wbItem.id)) shouldInject = true;
+                
                 if (shouldInject) {
                     const entryStr = `【${wbItem.title}】：${wbItem.content}`;
                     if (wbItem.position === 'front') frontWb.push(entryStr);
@@ -119,296 +255,576 @@ if (!window.darkroomActions) {
             const frontStr = frontWb.length > 0 ? `\n\n[前置世界观设定]\n${frontWb.join('\n')}` : '';
             const middleStr = middleWb.length > 0 ? `\n\n[当前环境/场景设定]\n${middleWb.join('\n')}` : '';
             const backStr = backWb.length > 0 ? `\n\n[最新/最高优先级世界书指令]\n${backWb.join('\n')}` : '';
-            const historyPrompt = historyStr ? `\n\n【前文剧情上下文】\n${historyStr}` : '';
 
-            return `${basePrompt}${coreMemStr}${frontStr}\n${middleStr}${fragMemStr}${backStr}${historyPrompt}\n\n【系统任务(沉浸式调教/小黑屋)】\n${task}`;
-        },
+            // 5. 格式红线规则
+            const systemRules = `\n\n【最高指令：番外剧场/线下剧情模式协议】
+当前状态：你与用户处于某个平行的番外剧情场景中。
+❗体裁与格式红线：
+1. 必须采用【轻小说体裁】进行长段落描写。绝对禁止频繁换行！
+2. 对话用『』包裹，内心想法用全角括号（）包裹。
+3. 绝对禁止使用任何带方括号[]的超能力指令！严禁输出任何时间戳或系统标签！`;
 
-        enterDarkroom: async () => {
-            const state = window.darkroomState;
-            if (state.selectedTags.length === 0) return window.actions?.showToast('请至少选择一种今天的玩法');
-            if (!store.apiConfig?.apiKey) return window.actions?.showToast('请先配置API才能生成开场');
+            // 6. 拼装身份主块
+            const identityPrompt = `${metaPrompt}\n\n【角色卡】\n名字：${charName}用户给你的备注：${charRemark}\n设定：${char.prompt}${coreMemStr}\n\n【用户】\n当前化名：${myName}${globalP}${userPrompt}${myRemark}${frontStr}${middleStr}${scenarioStr}`;
 
-            const charId = state.selectedCharId;
-            const char = store.contacts.find(c => c.id === charId);
-            const myRole = store.darkroomPrefs[charId].role; 
+            // 🌟 7. 终极奥义：不再将历史混作字符串，而是封装为标准的多轮 messages 数组给大模型！
+            let promptMessages = [{ role: 'system', content: identityPrompt.trim() }];
+
+            const msgs = session.messages || [];
+            const limit = window.drState.displayCount || 50; 
+            const recentMsgs = msgs.slice(-limit); 
             
-            if (!store.darkroomChats[charId]) store.darkroomChats[charId] = [];
+            recentMsgs.forEach(m => {
+                let msgContent;
+                if (m.msgType === 'system') {
+                    msgContent = `[剧场系统/背景旁白：${m.text.replace(/\[|\]/g, '')}]`;
+                    promptMessages.push({ role: 'user', content: msgContent });
+                } else {
+                    if (m.isMe) {
+                        msgContent = `[用户 ${myName} 的行为/话语]：\n${m.text}`;
+                        promptMessages.push({ role: 'user', content: msgContent });
+                    } else {
+                        msgContent = m.text;
+                        promptMessages.push({ role: 'assistant', content: msgContent });
+                    }
+                }
+            });
 
-            state.isGenerating = true;
-            window.render();
+            // 8. 结尾加固：把格式与规则锁死在最后面，利用“近因效应”强迫 AI 遵守
+            let finalSystemPrompt = backStr ? `${backStr}\n\n` : '';
+            finalSystemPrompt += systemRules;
+            finalSystemPrompt += `\n\n【⚠️发送前最高警告】：当前为线下番外剧情模式！必须采用轻小说体裁的长段落描写，绝对禁止像线上聊天那样频繁换行！对话用『』包裹，内心想法用全角括号（）包裹，动作直接描写！绝不可带任何系统前缀或时间戳！`;
 
-            try {
-                const task = `你现在是【${char.name}】，我们正在进入小黑屋进行 BDSM / 沉浸式调教互动。
-我的属性是：${myRole}。你的属性是与我相对或契合的。
-今天我们选择的玩法包含：${state.selectedTags.join(', ')}。
-请你根据上方给定的我们两人的性格底色、核心记忆和世界观设定（绝对不能OOC！），结合选定的玩法，直接生成一段极具张力、画面感和压迫感（或臣服感）的开场动作与对话。
-【格式要求】：直接输出正文。使用『』包裹对话，使用（）包裹内心想法，其余为细致的动作与神态描写。字数200字左右。`;
-
-                // 首次进入没有历史，但把选择的玩法当做触发词
-                const promptStr = window.darkroomActions.buildDarkroomPrompt(charId, task, state.selectedTags.join(', '), '');
-
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
-                });
-                const text = (await res.json()).choices[0].message.content.trim();
-
-                store.darkroomChats[charId].push({ id: Date.now(), msgType: 'system', text: `【系统】小黑屋已落锁。今日玩法：${state.selectedTags.join(', ')}` });
-                store.darkroomChats[charId].push({ id: Date.now() + 1, sender: char.name, text: text, isMe: false, timestamp: new Date().getTime() });
-                
-                if (window.actions.saveStore) window.actions.saveStore();
-                state.view = 'chat';
-            } catch(e) {
-                console.error(e);
-                window.actions?.showToast('生成开场失败，请重试');
-            } finally {
-                state.isGenerating = false;
-                window.render();
-                setTimeout(() => { const el = document.getElementById('darkroom-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+            if (finalSystemPrompt.trim()) {
+                promptMessages.push({ role: 'system', content: finalSystemPrompt.trim() });
             }
-        },
-        sendMessage: async () => {
-            const input = document.getElementById('darkroom-input');
-            const text = input.value.trim();
-            if (!text || window.darkroomState.isGenerating) return;
 
-            const charId = window.darkroomState.selectedCharId;
+            // 最后压入用户的任务要求
+            promptMessages.push({ role: 'user', content: `【系统任务】\n${task}` });
+
+            return promptMessages;
+        },
+
+        sendMessage: async () => {
+            const charId = window.drState.selectedCharId;
             const char = store.contacts.find(c => c.id === charId);
             const chat = store.chats?.find(ch => ch.charId === charId);
-            const boundPId = chat?.boundPersonaId || char?.boundPersonaId || store.personas[0].id;
+            const boundPId = chat?.boundPersonaId || char.boundPersonaId || store.personas[0].id;
             const boundP = store.personas.find(p => p.id === boundPId) || store.personas[0];
 
-            store.darkroomChats[charId].push({ id: Date.now(), sender: boundP.name, text: text, isMe: true, timestamp: new Date().getTime() });
-            input.value = '';
-            window.darkroomState.isGenerating = true;
+            const inputEl = document.getElementById('dr-input');
+            const text = inputEl ? inputEl.value.trim() : '';
+            if (!text) return;
+
+            window.drState.activeSession.messages.push({
+                id: Date.now(),
+                sender: boundP.name,
+                text: text,
+                isMe: true,
+                isDrMsg: true,
+                timestamp: Date.now(),
+                time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'})
+            });
+            
+            if(inputEl) inputEl.value = '';
+            
+            window.drState.noAnimate = true;
             window.render();
-            setTimeout(() => { const el = document.getElementById('darkroom-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 50);
+            window.drActions.forceScrollToBottom(); 
+            
+            setTimeout(() => { 
+                window.drActions.forceScrollToBottom();
+                window.drState.noAnimate = false; 
+            }, 50);
+
+            window.drActions.triggerAIGeneration(charId, `用户刚刚输入了推演行为/对话：“${text}”。请结合前文，推动剧情发展并给出你的反应。直接输出正文。`);
+        },
+
+        continueStory: async () => {
+            const charId = window.drState.selectedCharId;
+            window.drActions.triggerAIGeneration(charId, `请顺着前文的剧情发展，发挥想象力，继续往下推演一段剧情（环境描写、你的动作或对话）。直接输出正文。`);
+        },
+
+        triggerAIGeneration: async (charId, task) => {
+            const char = store.contacts.find(c => c.id === charId);
+            if (!char || !store.apiConfig?.apiKey) return window.actions?.showToast('未配置 API 或找不到角色');
+
+            window.drState.typingStatus[charId] = true;
+            
+            window.drState.noAnimate = true;
+            window.render();
+            window.drActions.forceScrollToBottom();
 
             try {
-                // 🌟 获取 30 回合上下文和最近文本
-                const { historyStr, recentText } = window.darkroomActions.getHistoryContext(charId);
-
-                const task = `请作为【${char.name}】，根据上方的人设、记忆，以及目前前文的调教氛围，生成接下来的回应。绝对不能OOC！
-【格式要求】：直接输出正文。使用『』包裹对话，使用（）包裹内心想法，其余为动作与神态描写。`;
-
-                const promptStr = window.darkroomActions.buildDarkroomPrompt(charId, task, recentText, historyStr);
-
+                // 🌟 使用全新的阵列式 Prompt
+                const promptMessages = window.drActions.buildDarkroomPrompt(char, task);
+                
                 const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                     method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
+                    // 🌟 直接传递 array，不再拼接
+                    body: JSON.stringify({ model: store.apiConfig.model, messages: promptMessages, temperature: 0.85 })
                 });
-                const replyText = (await res.json()).choices[0].message.content.trim();
+                const data = await res.json();
+                let reply = data.choices[0].message.content.trim();
 
-                store.darkroomChats[charId].push({ id: Date.now(), sender: char.name, text: replyText, isMe: false, timestamp: new Date().getTime() });
-                if (window.actions.saveStore) window.actions.saveStore();
-            } catch(e) {
+                window.drState.activeSession.messages.push({
+                    id: Date.now(),
+                    sender: char.name,
+                    text: reply,
+                    isMe: false,
+                    isDrMsg: true,
+                    timestamp: Date.now(),
+                    time: new Date().toLocaleTimeString('zh-CN', {hour: '2-digit', minute: '2-digit'})
+                });
+
+            } catch (e) {
                 console.error(e);
-                window.actions?.showToast('生成回复失败');
+                window.actions?.showToast('剧情生成失败，大模型脑细胞烧坏了');
             } finally {
-                window.darkroomState.isGenerating = false;
+                window.drState.typingStatus[charId] = false;
+                
+                window.drState.noAnimate = true;
                 window.render();
-                setTimeout(() => { const el = document.getElementById('darkroom-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+                window.drActions.forceScrollToBottom();
+                
+                setTimeout(() => { 
+                    window.drActions.forceScrollToBottom();
+                    window.drState.noAnimate = false; 
+                }, 50);
             }
         },
-        continuePlay: async () => {
-            if (window.darkroomState.isGenerating) return;
-            const charId = window.darkroomState.selectedCharId;
-            const char = store.contacts.find(c => c.id === charId);
-            window.darkroomState.isGenerating = true;
+
+        loadMoreHistory: () => {
+            window.drState.displayCount += 50;
+            window.drState.noAnimate = true;
             window.render();
+            setTimeout(() => { window.drState.noAnimate = false; }, 100);
+        },
 
-            try {
-                // 🌟 获取 30 回合上下文和最近文本
-                const { historyStr, recentText } = window.darkroomActions.getHistoryContext(charId);
-
-                const task = `请作为【${char.name}】，顺着目前前文的设定氛围和动作继续往下描写，推动张力发展。绝对不能OOC！
-【格式要求】：直接输出正文。使用『』包裹对话，使用（）包裹内心想法，其余为动作与神态描写。`;
-
-                const promptStr = window.darkroomActions.buildDarkroomPrompt(charId, task, recentText, historyStr);
-
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
-                });
-                const replyText = (await res.json()).choices[0].message.content.trim();
-
-                store.darkroomChats[charId].push({ id: Date.now(), sender: char.name, text: replyText, isMe: false, timestamp: new Date().getTime() });
-                if (window.actions.saveStore) window.actions.saveStore();
-            } catch(e) {
-                console.error(e);
-                window.actions?.showToast('生成继续失败');
-            } finally {
-                window.darkroomState.isGenerating = false;
+        openEditMessageModal: (msgId) => {
+            const session = window.drState.activeSession;
+            const msg = session?.messages.find(m => m.id === msgId);
+            if (msg) {
+                window.drState.editMsgData = { id: msgId, text: msg.text };
                 window.render();
-                setTimeout(() => { const el = document.getElementById('darkroom-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
             }
+        },
+        closeEditMessageModal: () => {
+            window.drState.editMsgData = null;
+            window.render();
+        },
+        saveEditedMessage: () => {
+            const newText = document.getElementById('edit-msg-textarea').value.trim();
+            const session = window.drState.activeSession;
+            const msg = session?.messages.find(m => m.id === window.drState.editMsgData.id);
+            if (msg && newText) {
+                msg.text = newText;
+            }
+            window.drActions.closeEditMessageModal();
+        },
+        deleteMessage: (msgId) => {
+            if (!confirm('确定要删除这条剧场记录吗？')) return;
+            const session = window.drState.activeSession;
+            session.messages = session.messages.filter(m => m.id !== msgId);
+            window.drState.noAnimate = true;
+            window.render();
+            setTimeout(() => { window.drState.noAnimate = false; }, 100);
+        },
+        rerollReply: (msgId) => {
+            const session = window.drState.activeSession;
+            const msgs = session.messages;
+            const idx = msgs.findIndex(m => m.id === msgId);
+            if (idx === -1) return;
+            
+            msgs.splice(idx, msgs.length - idx);
+            
+            window.drState.noAnimate = true;
+            window.render();
+            window.drActions.forceScrollToBottom();
+            
+            setTimeout(() => { window.drState.noAnimate = false; }, 50);
+            
+            window.drActions.triggerAIGeneration(window.drState.selectedCharId, `刚才那段推演不太理想，请你换一个方向或表达方式，重新推演这一段剧情。直接输出正文。`);
+        },
+
+        // 🌟 剧场专属设置功能
+        openDrSettings: () => { window.drState.showDrSettingsModal = true; window.render(); },
+        closeDrSettings: () => { window.drState.showDrSettingsModal = false; window.render(); },
+        saveDrSettings: () => {
+            const charId = window.drState.selectedCharId;
+            const char = store.contacts.find(c => c.id === charId);
+            const cssVal = document.getElementById('set-dr-css')?.value.trim();
+            if (char) { char.drCSS = cssVal; if (window.actions?.saveStore) window.actions.saveStore(); }
+            window.drActions.closeDrSettings();
+        },
+        updateDrTextColor: (type, color) => {
+            const char = store.contacts.find(c => c.id === window.drState.selectedCharId);
+            if (type === 'dialogue') char.drDialogueColor = color;
+            else if (type === 'thought') char.drThoughtColor = color;
+            if (window.actions?.saveStore) window.actions.saveStore();
+            window.render();
+        },
+        handleDrBgUpload: (e) => {
+            const file = e.target.files[0]; if (!file) return;
+            window.actions.compressImage(file, (base64) => {
+                const char = store.contacts.find(c => c.id === window.drState.selectedCharId);
+                char.drBg = base64;
+                if (window.actions?.saveStore) window.actions.saveStore();
+                window.render();
+            }, false);
+            e.target.value = '';
+        },
+        clearDrBg: () => {
+            const char = store.contacts.find(c => c.id === window.drState.selectedCharId);
+            char.drBg = null;
+            if (window.actions?.saveStore) window.actions.saveStore();
+            window.render();
+        },
+        setDrWbMountGroup: (group) => {
+            window.drState.activeDrWbGroup = group;
+            window.render();
+        },
+        toggleDrWbMount: (wbId) => {
+            const char = store.contacts.find(c => c.id === window.drState.selectedCharId);
+            if (!char.drWorldbooks) char.drWorldbooks = [];
+            if (char.drWorldbooks.some(id => String(id) === String(wbId))) {
+                char.drWorldbooks = char.drWorldbooks.filter(id => String(id) !== String(wbId));
+            } else {
+                char.drWorldbooks.push(wbId);
+            }
+            if (window.actions?.saveStore) window.actions.saveStore();
+            window.render();
         }
     };
 }
 
+// =====================================
+// 核心渲染函数
+// =====================================
 export function renderDarkroomApp(store) {
-    const state = window.darkroomState;
-    
-    const playTags = [
-        "视觉剥夺", "捆绑束缚", "温和支配", "严厉惩罚", "语言羞辱", "赞美服从",
-        "感官刺激", "冰火交替", "边缘控制", "高潮拒绝", "强迫指令", "宠物扮演",
-        "情境扮演", "玩具放置", "体罚(Spanking)", "滴蜡(Wax)", "野外露出"
-    ];
+    const state = window.drState;
 
-    let contentHtml = '';
-
-    if (state.view === 'char_select') {
-        contentHtml = `
-            <div class="px-6 pt-6 flex-1 overflow-y-auto hide-scrollbar z-10">
-                <h2 class="text-[24px] font-black font-serif text-white tracking-widest mb-2 mt-4">Darkroom</h2>
-                <p class="text-[12px] text-gray-500 mb-8 tracking-widest">请选择你要共度小黑屋时光的伴侣。</p>
-                <div class="grid grid-cols-2 gap-4 pb-20">
-                    ${(store.contacts || []).map(c => `
-                        <div class="bg-[#1a1a1c] border border-[#2a2a2c] rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer hover:border-[#900000] active:scale-95 transition-all shadow-lg" onclick="window.darkroomActions.selectChar('${c.id}')">
-                            <img src="${c.avatar}" class="w-16 h-16 rounded-full object-cover mb-3 border-2 border-[#333] grayscale-[30%]">
-                            <span class="text-[14px] font-bold text-gray-200">${c.name}</span>
-                            ${store.darkroomPrefs[c.id]?.role ? `<span class="text-[10px] text-red-900/60 mt-1 font-bold border border-red-900/30 px-2 py-0.5 rounded-full">已设属性</span>` : ''}
+    // 🎥 1. 选角界面
+    if (state.view === 'charSelect') {
+        return `
+        <div class="w-full h-full flex flex-col relative animate-in fade-in duration-300 select-none" style="background-color: rgba(10,10,10,0.8) !important; backdrop-filter: blur(15px) !important; -webkit-backdrop-filter: blur(15px) !important;">
+            <div class="pt-8 pb-4 px-6 flex justify-between items-center z-10 shrink-0 shadow-md" style="background-color: #111111 !important;">
+                <i data-lucide="chevron-left" class="w-7 h-7 text-white/70 cursor-pointer active:opacity-50" onclick="window.drActions.closeApp()"></i>
+                <span class="text-white font-black text-[16px] tracking-[0.2em] font-serif uppercase">Spin-off Theater</span>
+                <div class="w-7"></div>
+            </div>
+            
+            <div id="dr-char-select-scroll" class="flex-1 overflow-y-auto px-5 pt-6 pb-20 hide-scrollbar">
+                <div class="text-center mb-10">
+                    <p class="text-white/70 text-[12px] tracking-widest font-bold drop-shadow-md">选择主演，开启平行宇宙</p>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-4">
+                    ${store.contacts.map(c => `
+                        <div class="rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer active:scale-95 transition-transform" style="background-color: rgba(30,30,30,0.85) !important; border: 1px solid rgba(255,255,255,0.1) !important;" onclick="window.drActions.selectChar('${c.id}')">
+                            <img src="${c.avatar}" class="w-16 h-16 rounded-full object-cover mb-3 shadow-lg border border-white/20 grayscale-[20%]">
+                            <span class="text-white font-bold text-[14px] tracking-wider font-serif drop-shadow-md">${c.name}</span>
                         </div>
                     `).join('')}
                 </div>
             </div>
-        `;
-    } else if (state.view === 'role_select') {
-        const char = store.contacts.find(c => c.id === state.selectedCharId);
-        contentHtml = `
-            <div class="px-6 pt-6 flex-1 flex flex-col hide-scrollbar relative z-10">
-                <i data-lucide="chevron-left" class="absolute top-6 left-4 w-6 h-6 text-gray-400 cursor-pointer active:scale-90" onclick="window.darkroomActions.goBack()"></i>
-                <h2 class="text-[20px] font-black font-serif text-white tracking-widest mt-12 mb-2 text-center">属性确立</h2>
-                <p class="text-[12px] text-gray-500 mb-10 tracking-widest text-center leading-relaxed">在这个绝对私密的空间里，<br/>你希望在 ${char.name} 面前展现怎样的自己？</p>
-                
-                <div class="flex flex-col space-y-4">
-                    <div class="bg-[#1a1a1c] border border-[#2a2a2c] rounded-2xl p-5 flex flex-col items-center cursor-pointer active:scale-95 transition-all hover:border-gray-500" onclick="window.darkroomActions.selectRole('Dom (支配方)')">
-                        <span class="text-[18px] font-bold text-gray-300 font-serif tracking-widest mb-1">Dom</span>
-                        <span class="text-[11px] text-gray-500">支配 / 控制 / 掌控全局</span>
-                    </div>
-                    <div class="bg-[#1a1a1c] border border-[#2a2a2c] rounded-2xl p-5 flex flex-col items-center cursor-pointer active:scale-95 transition-all hover:border-[#900000]" onclick="window.darkroomActions.selectRole('Sub (臣服方)')">
-                        <span class="text-[18px] font-bold text-red-800 font-serif tracking-widest mb-1">Sub</span>
-                        <span class="text-[11px] text-gray-500">臣服 / 顺从 / 交出控制权</span>
-                    </div>
-                    <div class="bg-[#1a1a1c] border border-[#2a2a2c] rounded-2xl p-5 flex flex-col items-center cursor-pointer active:scale-95 transition-all hover:border-blue-900" onclick="window.darkroomActions.selectRole('Switch (双修属性)')">
-                        <span class="text-[18px] font-bold text-blue-800 font-serif tracking-widest mb-1">Switch</span>
-                        <span class="text-[11px] text-gray-500">双修 / 视情况切换立场</span>
-                    </div>
-                </div>
-            </div>
-        `;
-    } else if (state.view === 'play_select') {
-        const char = store.contacts.find(c => c.id === state.selectedCharId);
-        contentHtml = `
-            <div class="px-6 pt-6 flex-1 flex flex-col overflow-y-auto hide-scrollbar relative pb-24 z-10">
-                <i data-lucide="chevron-left" class="absolute top-6 left-4 w-6 h-6 text-gray-400 cursor-pointer active:scale-90" onclick="window.darkroomActions.goBack()"></i>
-                <h2 class="text-[20px] font-black font-serif text-white tracking-widest mt-12 mb-2 text-center">Play Menu</h2>
-                <p class="text-[12px] text-gray-500 mb-8 tracking-widest text-center">今晚，想和 ${char.name} 体验些什么？</p>
-                
-                <div class="flex flex-wrap gap-3 justify-center">
-                    ${playTags.map(tag => {
-                        const isActive = state.selectedTags.includes(tag);
-                        return `<span class="px-4 py-2 border rounded-lg text-[13px] tracking-widest cursor-pointer transition-colors active:scale-95 ${isActive ? 'bg-[#900000] text-white border-[#900000] shadow-[0_0_10px_rgba(144,0,0,0.4)]' : 'bg-[#1a1a1c] text-gray-400 border-[#333] hover:border-gray-500'}" onclick="window.darkroomActions.toggleTag('${tag}')">${tag}</span>`;
-                    }).join('')}
-                </div>
+        </div>`;
+    }
+
+    const char = store.contacts.find(c => c.id === state.selectedCharId);
+    if (!char) return '';
+
+    // 🎥 2. 剧本设定界面
+    if (state.view === 'setup') {
+        const archives = store.drArchives[char.id] || [];
+        return `
+        <div class="w-full h-full flex flex-col relative animate-in slide-in-from-right-4 duration-300 select-none" style="background-color: rgba(10,10,10,0.8) !important; backdrop-filter: blur(15px) !important; -webkit-backdrop-filter: blur(15px) !important;">
+            <div class="pt-8 pb-4 px-6 flex justify-between items-center z-10 shrink-0 shadow-md" style="background-color: #111111 !important;">
+                <i data-lucide="chevron-left" class="w-7 h-7 text-white/70 cursor-pointer active:opacity-50" onclick="window.drActions.backToSelect()"></i>
+                <span class="text-white font-black text-[16px] tracking-[0.1em] font-serif uppercase">Scenario Setup</span>
+                <div class="w-7"></div>
             </div>
 
-            <div class="absolute bottom-0 left-0 w-full p-6 bg-gradient-to-t from-[#0f0f11] via-[#0f0f11] to-transparent z-20 flex flex-col items-center">
-                <button class="w-full max-w-[280px] py-4 bg-[#900000] text-white font-bold tracking-widest rounded-full shadow-[0_0_20px_rgba(144,0,0,0.3)] active:scale-95 transition-transform flex justify-center items-center font-serif text-[15px]" onclick="window.darkroomActions.enterDarkroom()">
-                    ${state.isGenerating ? '<i data-lucide="loader" class="w-5 h-5 animate-spin mr-2"></i> 推开门...' : '进入小黑屋'}
-                </button>
-            </div>
-        `;
-    } else if (state.view === 'chat') {
-        const char = store.contacts.find(c => c.id === state.selectedCharId);
-        const msgs = store.darkroomChats[state.selectedCharId] || [];
+            <div id="dr-setup-scroll" class="flex-1 overflow-y-auto p-6 hide-scrollbar flex flex-col">
+                <div class="flex items-center space-x-4 mb-8">
+                    <img src="${char.avatar}" class="w-14 h-14 rounded-xl object-cover border border-white/20 grayscale-[20%]">
+                    <div>
+                        <div class="text-white font-bold text-[16px] font-serif tracking-wider mb-1 drop-shadow-md">${char.name}</div>
+                        <div class="text-white/60 text-[11px] uppercase tracking-widest drop-shadow-md">Lead Actor</div>
+                    </div>
+                </div>
 
-        contentHtml = `
-        <div class="absolute inset-0 w-full h-full flex flex-col font-serif z-[60] bg-[#0f0f11]">
+                <div class="flex-1 flex flex-col space-y-4">
+                    <label class="text-white/80 text-[12px] font-bold tracking-widest uppercase drop-shadow-md">设定 / 大纲 / 初始状态</label>
+                    <textarea id="dr-scenario-input" class="w-full flex-1 min-h-[200px] rounded-2xl p-5 text-white/90 text-[14px] font-serif leading-loose outline-none transition-colors resize-none hide-scrollbar placeholder-white/30" style="background-color: rgba(30,30,30,0.85) !important; border: 1px solid rgba(255,255,255,0.1) !important; color: #ffffff !important;" placeholder="例如：\n你们是身处末世的异能者搭档，被困在了一个废弃的地下超市里，外面全是丧尸，你们的物资只够撑一天了...\n\n(在此输入平行宇宙的绝对背景，AI将严格遵循此设定进行推演)"></textarea>
+                </div>
+
+                <div class="mt-8 space-y-4 shrink-0 pb-10">
+                    <button class="w-full font-black text-[14px] tracking-widest uppercase py-4 rounded-xl active:scale-95 transition-transform shadow-lg" style="background-color: #ffffff !important; color: #000000 !important;" onclick="window.drActions.startScenario()">开启新周目</button>
+                    
+                    <button class="w-full font-bold text-[13px] tracking-widest py-3.5 rounded-xl active:scale-95 transition-transform shadow-md" style="background-color: rgba(40,40,40,0.85) !important; color: #ffffff !important; border: 1px solid rgba(255,255,255,0.2) !important;" onclick="window.drActions.openArchives()">
+                        <i data-lucide="library" class="w-4 h-4 inline-block mr-1 -mt-0.5"></i> 我的书架 (${archives.length} 存档)
+                    </button>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    // 🎥 3. 书架界面
+    if (state.view === 'archives') {
+        const archives = store.drArchives[char.id] || [];
+        return `
+        <div class="w-full h-full flex flex-col relative animate-in slide-in-from-bottom-4 duration-200 select-none" style="background-color: rgba(10,10,10,0.8) !important; backdrop-filter: blur(15px) !important; -webkit-backdrop-filter: blur(15px) !important;">
+            <div class="pt-8 pb-4 px-6 flex justify-between items-center z-10 shrink-0 shadow-md" style="background-color: #111111 !important;">
+                <i data-lucide="chevron-down" class="w-7 h-7 text-white/70 cursor-pointer active:opacity-50" onclick="window.drActions.backToSetupFromArchives()"></i>
+                <span class="text-white font-black text-[16px] tracking-[0.1em] font-serif uppercase">Bookshelf</span>
+                <div class="w-7"></div>
+            </div>
+
+            <div id="dr-archives-scroll" class="flex-1 overflow-y-auto p-5 hide-scrollbar space-y-4 pb-20">
+                ${archives.length === 0 ? `
+                    <div class="flex flex-col items-center justify-center mt-32 opacity-50">
+                        <i data-lucide="library" class="w-12 h-12 text-white/50 mb-4"></i>
+                        <span class="text-white text-[13px] font-bold tracking-widest">书架空空如也，快去开启新周目吧</span>
+                    </div>
+                ` : archives.map(a => `
+                    <div class="rounded-xl p-4 relative cursor-pointer active:scale-[0.98] transition-transform shadow-lg" style="background-color: rgba(30,30,30,0.9) !important; border: 1px solid rgba(255,255,255,0.1) !important;" onclick="window.drActions.loadArchive('${a.id}')">
+                        <div class="flex justify-between items-start mb-2">
+                            <span class="text-white font-bold text-[15px] font-serif tracking-wider truncate pr-6">${a.name}</span>
+                            <i data-lucide="trash-2" class="w-4 h-4 text-red-400 absolute right-4 top-4 opacity-70 hover:opacity-100 active:scale-90" onclick="window.drActions.deleteArchive('${a.id}', event)"></i>
+                        </div>
+                        <div class="text-[10px] text-white/40 font-mono mb-3">${new Date(a.timestamp).toLocaleString('zh-CN', {hour12: false})} | ${a.messages.length} 幕</div>
+                        <div class="text-[12px] text-white/70 line-clamp-2 leading-relaxed break-words">${a.scenario}</div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>`;
+    }
+
+    // 🎥 4. 番外剧场模式
+    if (state.view === 'story') {
+        const session = state.activeSession;
+        if (!session) return '';
+
+        const drMsgs = session.messages || [];
+        const displayCount = state.displayCount || 50;
+        
+        const bgUrl = char.drBg || '';
+
+        return `
+          <div class="dr-container absolute inset-0 w-full h-full flex flex-col font-serif z-[60] ${state.noAnimate ? '' : 'animate-in slide-in-from-bottom-4 duration-300'}" style="background: ${bgUrl ? `url('${bgUrl}') center/cover no-repeat` : '#111111'} !important;">
+            
             <style>
-                .mc-darkroom-dialogue { color: #a30000; font-family: inherit; }
-                .mc-darkroom-thought { color: #6b7280; font-family: inherit; } 
-                .mc-darkroom-desc { color: #d1d5db; font-family: inherit; } 
+              .dr-dialogue { color: ${char.drDialogueColor || '#d4b856'} !important; font-family: inherit; }
+              .dr-thought { color: ${char.drThoughtColor || '#9ca3af'} !important; font-family: inherit; }
+              .dr-desc { color: inherit; font-family: inherit; }
+              ${char.drCSS || ''}
             </style>
 
-            <div class="bg-[#151518]/90 backdrop-blur-md pt-10 pb-3 px-4 flex items-center justify-between border-b border-[#222] z-10 shadow-sm shrink-0">
-                <div class="flex items-center cursor-pointer text-gray-400 w-1/4 active:opacity-50" onclick="window.darkroomActions.goBack()">
-                    <i data-lucide="chevron-left" class="w-6 h-6"></i>
+            <div class="dr-topbar pt-8 pb-3 px-4 flex items-center justify-between z-10 sticky top-0 shadow-md shrink-0" style="background-color: rgba(17,17,17,0.85) !important; backdrop-filter: blur(10px) !important; -webkit-backdrop-filter: blur(10px) !important;">
+                <div class="flex items-center cursor-pointer text-white/70 w-1/4 active:opacity-50" onclick="window.drActions.exitStory()">
+                    <i data-lucide="chevron-down" style="width:28px; height:28px;"></i>
                 </div>
-                <span class="flex-1 text-center font-bold text-[14px] tracking-widest text-gray-200 uppercase font-serif ${state.isGenerating ? 'animate-pulse text-red-800' : ''}">
-                    ${state.isGenerating ? '沉浸编织中...' : `Darkroom · ${char.name}`}
+                <span class="flex-1 text-center font-bold text-[16px] tracking-widest text-white transition-colors ${(state.typingStatus && state.typingStatus[char.id]) ? 'animate-pulse text-white/50' : ''}">
+                    ${(state.typingStatus && state.typingStatus[char.id]) ? '正在构思...' : `番外 · ${char.name}`}
                 </span>
-                <div class="w-1/4 flex justify-end"></div>
+                <div class="w-1/4 flex justify-end">
+                    <i data-lucide="settings" class="text-white/70 cursor-pointer active:scale-90 transition-transform" style="width: 24px; height: 24px;" onclick="window.drActions.openDrSettings()"></i>
+                </div>
             </div>
             
-            <div id="darkroom-scroll" class="flex-1 p-5 overflow-y-auto hide-scrollbar flex flex-col pb-6 bg-transparent">
-                ${msgs.map((msg, idx) => {
-                    if (msg.msgType === 'system') {
-                        return `
-                        <div class="flex items-center justify-center py-2 mb-6 mt-4">
-                            <span class="text-[11px] text-gray-500 font-bold tracking-widest bg-[#1a1a1c] border border-[#333] px-5 py-1.5 rounded-full shadow-sm">${msg.text}</span>
-                        </div>`;
-                    }
+            <div id="dr-scroll" class="flex-1 p-5 overflow-y-auto hide-scrollbar flex flex-col pb-6 ${bgUrl ? 'bg-black/20 backdrop-blur-[2px]' : ''}">
+              <div class="text-center text-xs text-white/30 italic mb-8 tracking-widest pointer-events-none">—— 剧场开始 ——</div>
+              ${(() => {
+                  let html = '';
+                  if (drMsgs.length > displayCount) {
+                      html += `<div class="flex justify-center my-3"><div class="text-[11px] font-bold tracking-widest text-white/50 bg-white/10 px-4 py-1.5 rounded-full cursor-pointer active:scale-90 transition-transform" onclick="window.drActions.loadMoreHistory()">点击加载更多剧情</div></div>`;
+                  }
+                  const slicedMsgs = drMsgs.slice(-displayCount);
 
-                    let cleanText = msg.text.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
-                    let preProcessedText = cleanText
-                        .replace(/(『[^』]*』)/g, '\n$1\n')
-                        .replace(/(「[^」]*」)/g, '\n$1\n')
-                        .replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
+                  slicedMsgs.forEach((msg, idx) => {
+                      if (msg.msgType === 'system') {
+                          html += `
+                          <div class="flex items-center justify-center py-2 mb-6 ${state.noAnimate ? '' : 'animate-in fade-in duration-300'}">
+                              <span class="text-[12px] text-white/70 font-bold tracking-widest px-4 py-1.5 rounded-[12px] max-w-[85%] text-center leading-relaxed shadow-md border border-white/10" style="background-color: rgba(30,30,30,0.8) !important; backdrop-filter: blur(5px) !important;">${msg.text.replace(/\[|\]/g, '')}</span>
+                          </div>`;
+                          return;
+                      }
 
-                    const formattedLines = preProcessedText.split('\n').filter(l=>l.trim()).map(l => {
-                        let line = l.trim();
-                        if (line.startsWith('『') && line.endsWith('』')) {
-                            return `<p class="mc-darkroom-dialogue my-2.5 leading-relaxed">${line}</p>`;
-                        } else if (line.startsWith('（') && line.endsWith('）')) {
-                            const pureThought = line.slice(1, -1);
-                            return `<p class="mc-darkroom-thought my-2.5 leading-relaxed italic">（${pureThought}）</p>`;
-                        } else {
-                            return `<p class="mc-darkroom-desc my-1.5 leading-relaxed">${line}</p>`;
-                        }
-                    }).join('');
+                      let cleanText = msg.text.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+                      let preProcessedText = cleanText
+                          .replace(/(『[^』]*』)/g, '\n$1\n')
+                          .replace(/(「[^」]*」)/g, '\n$1\n')
+                          .replace(/[（(]([^）)]*)[）)]/g, '\n（$1）\n');
 
-                    return `
-                    <div class="flex justify-center my-4 w-full ${idx === msgs.length - 1 ? 'animate-in slide-in-from-bottom-4 duration-300' : ''}">
-                        <div class="w-full bg-[#151518] border border-[#262628] rounded-[14px] p-5 relative flex flex-col shadow-lg">
-                            <div class="mb-3 text-[11px] font-black tracking-widest uppercase ${msg.isMe ? 'text-gray-500' : 'text-[#900000]'}">${msg.sender}</div>
-                            <div class="text-[14px] leading-loose font-serif text-justify pb-2">${formattedLines}</div>
-                        </div>
-                    </div>`;
-                }).join('')}
+                      const formattedLines = preProcessedText.split('\n').filter(l=>l.trim()).map(l => {
+                          let line = l.trim();
+                          if (line.startsWith('『') && line.endsWith('』')) {
+                              return `<p class="dr-dialogue my-2.5 leading-relaxed">${line}</p>`;
+                          } else if (line.startsWith('（') && line.endsWith('）')) {
+                              const pureThought = line.slice(1, -1);
+                              return `<p class="dr-thought my-2.5 leading-relaxed">${pureThought}</p>`;
+                          } else {
+                              return `<p class="dr-desc my-1.5 leading-relaxed" style="color: #e5e7eb !important;">${line}</p>`;
+                          }
+                      }).join('');
+
+                      const showReroll = !msg.isMe;
+                      const actionIcons = `
+                      <div class="absolute bottom-3 right-4 flex items-center space-x-3.5 opacity-60 hover:opacity-100 transition-opacity">
+                          ${showReroll ? `<i data-lucide="refresh-cw" class="w-4 h-4 cursor-pointer active:scale-90 text-white/70" onclick="window.drActions.rerollReply(${msg.id})" title="重roll"></i>` : ''}
+                          <i data-lucide="edit-3" class="w-4 h-4 cursor-pointer active:scale-90 text-white/70" onclick="window.drActions.openEditMessageModal(${msg.id})" title="编辑"></i>
+                          <i data-lucide="trash-2" class="w-4 h-4 cursor-pointer active:scale-90 text-red-400" onclick="window.drActions.deleteMessage(${msg.id})" title="删除"></i>
+                      </div>`;
+
+                      const timestampHtml = `<div class="text-[10px] text-white/30 mt-2 text-left">${msg.time || ''}</div>`;
+
+                      html += `
+                      <div class="flex justify-center my-4 w-full ${state.noAnimate ? '' : 'animate-in fade-in duration-200'}">
+                          <div class="dr-card w-full border border-white/10 rounded-[14px] p-5 relative flex flex-col shadow-lg" style="background-color: rgba(30,30,30,0.85) !important; backdrop-filter: blur(10px) !important; -webkit-backdrop-filter: blur(10px) !important;">
+                              <div class="mb-3 text-[12px] font-black tracking-widest text-white/40">${msg.sender}</div>
+                              <div class="text-[15px] text-white/90 leading-relaxed font-serif text-justify pb-6">${formattedLines}</div>
+                              ${actionIcons}
+                              ${timestampHtml}
+                          </div>
+                      </div>`;
+                  });
+                  return html;
+              })()}
             </div>
             
-            <div class="bg-[#151518] px-4 py-3 pb-8 border-t border-[#222] flex flex-col shadow-2xl z-20 shrink-0">
-                <div class="relative w-full bg-[#1a1a1c] border border-[#333] rounded-[16px] p-1 flex items-end transition-all focus-within:border-gray-500">
-                    <textarea id="darkroom-input" placeholder="回应或下达指令..." class="flex-1 min-h-[80px] max-h-[150px] bg-transparent text-gray-200 p-3 outline-none text-[14px] resize-none placeholder-gray-600 font-serif leading-relaxed hide-scrollbar"></textarea>
+            <div class="dr-bottombar px-4 py-3 pb-8 border-t border-white/10 flex flex-col z-20 relative shrink-0" style="background-color: rgba(17,17,17,0.95) !important; backdrop-filter: blur(15px) !important; -webkit-backdrop-filter: blur(15px) !important;">
+                <div class="relative w-full border border-white/20 rounded-[16px] p-1 flex items-end shadow-inner transition-colors focus-within:border-white/50" style="background-color: #222222 !important;">
+                    <textarea id="dr-input" placeholder="描写你的动作或对话..." class="flex-1 min-h-[80px] max-h-[150px] bg-transparent text-white p-3 outline-none text-[15px] resize-none placeholder-white/30 font-serif leading-relaxed hide-scrollbar"></textarea>
                     <div class="flex flex-col items-center justify-end pb-2 pr-2 space-y-4 shrink-0">
-                        <button onclick="window.darkroomActions.continuePlay()" class="w-9 h-9 flex items-center justify-center text-gray-500 hover:text-gray-300 active:scale-90 transition-all" title="让AI接着往下写"><i data-lucide="feather" class="w-5 h-5"></i></button>
-                        <button onmousedown="event.preventDefault();" onclick="window.darkroomActions.sendMessage()" class="w-9 h-9 flex items-center justify-center text-[#900000] active:scale-90 transition-all hover:text-red-500"><i data-lucide="send" class="w-5 h-5 ml-0.5"></i></button>
+                        <button onclick="window.drActions.continueStory()" class="w-9 h-9 flex items-center justify-center text-white/50 hover:text-white active:scale-90 transition-all" title="让AI接着往下写"><i data-lucide="feather" style="width:20px;"></i></button>
+                        <button onmousedown="event.preventDefault();" onclick="window.drActions.sendMessage()" class="w-9 h-9 flex items-center justify-center text-white active:scale-90 transition-all drop-shadow-md"><i data-lucide="send" style="width:22px; margin-left: 2px;"></i></button>
                     </div>
                 </div>
             </div>
-        </div>
+
+            ${state.showDrSettingsModal ? `
+              <div class="absolute inset-0 z-[80] bg-black/60 flex items-center justify-center animate-in fade-in p-4 pb-8" style="backdrop-filter: blur(8px) !important; -webkit-backdrop-filter: blur(8px) !important;" onclick="window.drActions.closeDrSettings()">
+                 <div class="w-full max-h-[75vh] rounded-[24px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200 border border-white/10" style="background-color: #1a1a1a !important;" onclick="event.stopPropagation()">
+                    <div class="px-5 py-4 flex justify-between items-center border-b border-white/10 shrink-0" style="background-color: #111111 !important;">
+                       <span class="font-black text-white text-[16px] flex items-center tracking-widest"><i data-lucide="settings" class="text-white/70 mr-2 w-5 h-5"></i>剧场专属设置</span>
+                       <i data-lucide="x" class="text-white/50 cursor-pointer active:scale-90 transition-transform bg-white/10 p-1 rounded-full w-6 h-6" onclick="window.drActions.closeDrSettings()"></i>
+                    </div>
+                    <div id="dr-settings-scroll" class="flex-1 overflow-y-auto p-5 space-y-6 hide-scrollbar">
+                       
+                       <div>
+                          <span class="text-[13px] font-bold text-white/80 mb-2 flex items-center"><i data-lucide="image" class="w-4 h-4 mr-1 text-green-400"></i>专属背景图 (与主线独立)</span>
+                          <div class="flex items-center justify-between border border-white/10 p-3 rounded-xl shadow-sm" style="background-color: #222222 !important;">
+                             <div class="flex items-center space-x-3">
+                                <div class="w-10 h-10 rounded-lg bg-white/5 border border-white/10 overflow-hidden flex items-center justify-center relative cursor-pointer" onclick="document.getElementById('dr-bg-upload').click()">
+                                   ${char.drBg ? `<img src="${char.drBg}" class="w-full h-full object-cover">` : `<i data-lucide="plus" class="text-white/40"></i>`}
+                                </div>
+                                <span class="text-[12px] font-bold text-white/60">${char.drBg ? '已设置专属背景' : '默认纯黑背景'}</span>
+                             </div>
+                             <div class="flex space-x-2">
+                                ${char.drBg ? `<button onclick="window.drActions.clearDrBg()" class="px-3 py-1.5 bg-red-500/20 text-red-400 border border-red-500/30 text-[11px] font-bold rounded-lg">清除</button>` : ''}
+                                <button onclick="document.getElementById('dr-bg-upload').click()" class="px-3 py-1.5 bg-white text-black text-[11px] font-bold rounded-lg">上传</button>
+                                <input type="file" id="dr-bg-upload" accept="image/*" class="hidden" onchange="window.drActions.handleDrBgUpload(event)">
+                             </div>
+                          </div>
+                       </div>
+
+                       <div>
+                          <span class="text-[13px] font-bold text-white/80 mb-2 flex items-center"><i data-lucide="palette" class="w-4 h-4 mr-1 text-orange-400"></i>文本解析颜色</span>
+                          <div class="grid grid-cols-2 gap-3">
+                             <div class="border border-white/10 p-3 rounded-xl flex items-center justify-between shadow-sm" style="background-color: #222222 !important;">
+                                <span class="text-[12px] font-bold text-white/80">人物对话</span>
+                                <input type="color" value="${char.drDialogueColor || '#d4b856'}" onchange="window.drActions.updateDrTextColor('dialogue', this.value)" class="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent">
+                             </div>
+                             <div class="border border-white/10 p-3 rounded-xl flex items-center justify-between shadow-sm" style="background-color: #222222 !important;">
+                                <span class="text-[12px] font-bold text-white/80">内心想法</span>
+                                <input type="color" value="${char.drThoughtColor || '#9ca3af'}" onchange="window.drActions.updateDrTextColor('thought', this.value)" class="w-6 h-6 rounded cursor-pointer border-0 p-0 bg-transparent">
+                             </div>
+                          </div>
+                       </div>
+
+                       <div>
+                          <span class="text-[13px] font-bold text-white/80 mb-2 flex items-center"><i data-lucide="code" class="w-4 h-4 mr-1 text-blue-400"></i>剧场界面 CSS 美化</span>
+                          <textarea id="set-dr-css" rows="6" class="w-full border border-white/10 rounded-xl p-3 outline-none text-[12px] font-mono resize-none hide-scrollbar shadow-inner leading-relaxed text-white/90 placeholder-white/30" style="background-color: #222222 !important;" placeholder="可用语义化标签：\n.dr-topbar\n.dr-bottombar\n.dr-desc\n.dr-dialogue\n...">${char.drCSS || ''}</textarea>
+                       </div>
+                       
+                       <div>
+                          <span class="text-[13px] font-bold text-white/80 mb-2 flex items-center"><i data-lucide="book-open" class="w-4 h-4 mr-1 text-purple-400"></i>选择剧本/文风世界书</span>
+                          
+                          <div class="px-3 py-2 border border-white/10 rounded-xl mb-3 shadow-sm flex items-center justify-between" style="background-color: #222222 !important;">
+                             <span class="text-[12px] font-bold text-white/60">选择世界书分类</span>
+                             <select class="bg-[#111] border border-white/10 p-1.5 rounded-lg outline-none text-[12px] font-bold text-white/80 cursor-pointer" onchange="window.drActions.setDrWbMountGroup(this.value)">
+                                <option value="全部" ${state.activeDrWbGroup === '全部' ? 'selected' : ''}>全部分组</option>
+                                ${(store.wbGroups && store.wbGroups['local'] ? store.wbGroups['local'] : []).map(g => `<option value="${g}" ${state.activeDrWbGroup === g ? 'selected' : ''}>${g}</option>`).join('')}
+                             </select>
+                          </div>
+
+                          <div class="space-y-2 mb-4">
+                             ${(() => {
+                                const mounted = char.drWorldbooks || [];
+                                const localWbs = (store.worldbooks || []).filter(w => w.type === 'local' && (state.activeDrWbGroup === '全部' || w.group === state.activeDrWbGroup));
+                                
+                                if(localWbs.length === 0) return '<div class="text-[12px] text-white/30 text-center py-4 rounded-xl border border-white/10 border-dashed" style="background-color: #222 !important;">该分组下暂无世界书</div>';
+                                
+                                return localWbs.map(w => {
+                                  const isMounted = mounted.some(id => String(id) === String(w.id));
+                                  return `
+                                  <div class="rounded-xl p-3 flex items-center justify-between shadow-sm border ${isMounted ? 'border-white/50' : 'border-white/10'} cursor-pointer active:scale-[0.98] transition-all" style="background-color: #222 !important;" onclick="window.drActions.toggleDrWbMount('${w.id}')">
+                                     <div class="flex flex-col flex-1 overflow-hidden mr-3">
+                                        <span class="text-[14px] font-bold ${isMounted ? 'text-white' : 'text-white/60'} truncate">${w.title}</span>
+                                        <span class="text-[10px] text-white/40 mt-0.5">${w.group || '默认'}</span>
+                                     </div>
+                                     <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${isMounted ? 'bg-white border-white' : 'border-white/30'}">
+                                        ${isMounted ? '<i data-lucide="check" class="text-black w-3 h-3"></i>' : ''}
+                                     </div>
+                                  </div>
+                                  `;
+                                }).join('');
+                             })()}
+                          </div>
+                       </div>
+                    </div>
+                    <div class="p-4 border-t border-white/10 shrink-0" style="background-color: #111111 !important;">
+                       <button onclick="window.drActions.saveDrSettings()" class="w-full py-3.5 bg-white text-black font-bold rounded-[14px] active:scale-95 transition-transform shadow-md">保存并应用</button>
+                    </div>
+                 </div>
+              </div>
+            ` : ''}
+
+            ${state.editMsgData ? `
+              <div class="absolute inset-0 z-[80] bg-black/60 flex items-center justify-center animate-in fade-in p-5 backdrop-blur-sm" onclick="window.drActions.closeEditMessageModal()">
+                <div class="w-full rounded-[24px] overflow-hidden shadow-2xl flex flex-col border border-white/10" style="background-color: #1a1a1a !important;" onclick="event.stopPropagation()">
+                   <div class="px-5 py-4 flex justify-between items-center border-b border-white/10 shadow-sm" style="background-color: #111111 !important;">
+                     <span class="font-black text-white text-[16px] flex items-center tracking-widest"><i data-lucide="edit-3" class="text-blue-400 mr-2 w-5 h-5"></i>编辑推演记录</span>
+                     <i data-lucide="x" class="text-white/50 cursor-pointer active:scale-90 transition-transform bg-white/10 p-1 rounded-full w-6 h-6" onclick="window.drActions.closeEditMessageModal()"></i>
+                   </div>
+                   <div class="p-5 flex flex-col space-y-4">
+                      <textarea id="edit-msg-textarea" rows="8" class="w-full border border-white/10 rounded-xl p-4 outline-none text-[15px] text-white font-medium leading-loose shadow-sm resize-none hide-scrollbar" style="background-color: #222222 !important;">${state.editMsgData.text}</textarea>
+                      <div class="flex space-x-3 pt-2">
+                        <button class="flex-1 border border-white/20 text-white/70 font-bold py-3.5 rounded-xl active:bg-white/5 transition-colors shadow-sm" style="background-color: #333333 !important;" onclick="window.drActions.closeEditMessageModal()">取消</button>
+                        <button class="flex-1 text-black font-bold py-3.5 rounded-xl active:scale-95 transition-transform shadow-md" style="background-color: #ffffff !important;" onclick="window.drActions.saveEditedMessage()">保存修改</button>
+                      </div>
+                   </div>
+                </div>
+              </div>
+            ` : ''}
+
+            ${state.showSaveModal ? `
+              <div class="absolute inset-0 z-[100] bg-black/60 flex items-center justify-center p-6 backdrop-blur-sm animate-in fade-in" onclick="window.drActions.cancelExit()">
+                  <div class="w-full max-w-[300px] border border-white/10 rounded-[24px] p-6 shadow-2xl flex flex-col animate-in zoom-in-95 duration-200" style="background-color: #1a1a1a !important;" onclick="event.stopPropagation()">
+                      <h3 class="text-white font-bold text-[16px] text-center mb-5 tracking-widest font-serif">保存番外存档</h3>
+                      <input type="text" id="dr-save-name-input" class="w-full text-white border border-white/20 rounded-xl px-4 py-3.5 mb-6 outline-none focus:border-white/50 transition-colors text-[14px]" style="background-color: #222 !important;" placeholder="给本次剧情起个名字...">
+                      <div class="flex space-x-3">
+                          <button class="flex-1 py-3 text-white/80 rounded-xl font-bold text-[13px] active:scale-95 transition-transform border border-white/10" style="background-color: #333 !important;" onclick="window.drActions.discardAndExit()">放弃退出</button>
+                          <button class="flex-1 py-3 bg-white text-black rounded-xl font-bold text-[13px] active:scale-95 transition-transform shadow-md" onclick="window.drActions.confirmSaveNew()">确认存档</button>
+                      </div>
+                  </div>
+              </div>
+            ` : ''}
+
+          </div>
         `;
     }
 
-    return `
-    <div id="mc-darkroom-screen" class="w-full h-full flex flex-col font-sans relative animate-in fade-in duration-300 z-50">
-        <style>
-            #mc-darkroom-screen {
-                background-color: #0f0f11 !important;
-                background-image: none !important;
-                backdrop-filter: none !important;
-                -webkit-backdrop-filter: none !important;
-            }
-        </style>
-        
-        ${state.view !== 'chat' ? `
-            <div class="absolute top-12 right-6 z-50 cursor-pointer active:scale-90 opacity-70 hover:opacity-100 transition-opacity" onclick="window.darkroomActions.closeApp()">
-                <i data-lucide="x" class="w-6 h-6 text-gray-500"></i>
-            </div>
-        ` : ''}
-        ${contentHtml}
-    </div>
-    `;
+    return '';
 }

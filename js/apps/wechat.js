@@ -2115,7 +2115,9 @@ ${relation}
 
     targetObj.contextLimit = parseInt(document.getElementById('set-context-limit').value) || 25;
     targetObj.autoMsgEnabled = document.getElementById('set-auto-msg').checked;
-    
+    targetObj.timeAware = document.getElementById('set-time-aware').checked;
+    targetObj.locationAware = document.getElementById('set-location-aware').checked;
+
     const autoMomentEl = document.getElementById('chat-auto-moment-select');
     if (autoMomentEl) targetObj.autoMomentFreq = parseInt(autoMomentEl.value) || 0;
     
@@ -2712,7 +2714,7 @@ if (!chat.isGroup) {
           if (hiddenMsgId) chat.messages = chat.messages.filter(m => m.id !== hiddenMsgId);
           
           // ⚠️ 极其核心的 await 拦截：绝不允许它偷偷溜走！如果它敢报错，直接会被最下面的 catch 抓去弹红字！
-          await planCloudBrain(0, char, llmMessages, chat.charId + '|' + char.id + '|' + (isOffline ? '1' : '0'));
+          await planCloudBrain(0.05, char, llmMessages, chat.charId + '|' + char.id + '|' + (isOffline ? '1' : '0'));
           
           // 只有服务器明确返回了 200 OK 接单成功，才允许打上“已托管”标记！
           delegatedToCloud = true; 
@@ -2996,6 +2998,23 @@ export function renderWeChatApp(store) {
                </div>
              </div>
           </div>
+
+            <div class="bg-white rounded-[16px] p-4 space-y-4 shadow-sm border border-gray-100 mb-4">
+               <div class="flex justify-between items-center">
+                 <div class="flex flex-col">
+                   <span class="text-[15px] font-medium text-gray-800">时间感知</span>
+                   <span class="text-[10px] text-gray-400 mt-0.5">开启后，ta将感知真实时间与聊天记录中的时间戳</span>
+                 </div>
+                 <input type="checkbox" id="set-time-aware" ${targetObj.timeAware !== false ? 'checked' : ''} class="ios-switch" />
+               </div>
+               <div class="flex justify-between items-center border-t border-gray-100 pt-4">
+                 <div class="flex flex-col">
+                   <span class="text-[15px] font-medium text-gray-800">位置感知</span>
+                   <span class="text-[10px] text-gray-400 mt-0.5">需在设置中开启高精定位，否则ta将发送虚拟外卖</span>
+                 </div>
+                 <input type="checkbox" id="set-location-aware" ${targetObj.locationAware !== false ? 'checked' : ''} class="ios-switch" />
+               </div>
+            </div>
 
             <div class="bg-white rounded-[16px] p-4 space-y-4 shadow-sm border border-gray-100 mb-4">
                <div class="flex justify-between items-center">
@@ -6002,7 +6021,7 @@ if (chat.isGroup) {
         const llmMessages = await buildLLMPayload(char.id, tempHistory, isOffline, false, groupInfo, null);
         
         // 发送给云端代跑
-        await planCloudBrain(0, char, llmMessages, chat.charId + '|' + char.id + '|' + (isOffline ? '1' : '0'));
+        await planCloudBrain(0.05, char, llmMessages, chat.charId + '|' + char.id + '|' + (isOffline ? '1' : '0'));
         
         // 🌟 重 roll 之后，强制踹一脚巡逻员，重新校准云端闹钟！
         if (typeof window.scheduleCloudTask === 'function') {

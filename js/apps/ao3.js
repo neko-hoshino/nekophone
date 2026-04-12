@@ -320,7 +320,7 @@ export function renderAo3App(store) {
     }
     const uniqueCps = [...new Set(cps)];
 
-    const tropes = ["ABO", "哨向", "末世", "古代架空", "现代都市", "娱乐圈", "破镜重圆", "追妻火葬场", "先婚后爱", "双向暗恋", "日常甜饼", "强强", "无限流", "星际科幻", "西方幻言", "吸血鬼", "人鱼", "BDSM", "校园AU", "职场", "宿敌变情人", "灵魂伴侣", "带球跑"];
+    const tropes = ["ABO", "哨向", "末世", "古代架空", "现代都市", "娱乐圈", "破镜重圆", "追妻火葬场", "先婚后爱", "双向暗恋", "日常甜饼", "强强", "无限流", "重生", "穿越", "仙侠", "星际科幻", "西幻", "吸血鬼", "人鱼", "人外", "触手", "BDSM", "女尊", "校园AU", "职场", "宿敌变情人", "带球跑"];
     const ratings = ["Explicit", "Mature", "Teen And Up Audiences", "General Audiences", "Not Rated"];
 
     const currentTags = state.searchQuery.split(/[,，]+/).map(t => t.trim()).filter(t => t !== '');

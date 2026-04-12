@@ -16,6 +16,8 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
   const charRemark = (chat && chat.charRemark && !groupInfo) ? `（用户给你设置的备注是：${chat.charRemark}）` : '';
 
   const now = new Date();
+  const timeAware = targetObj.timeAware !== false;
+  const locationAware = targetObj.locationAware !== false;
   const timeString = now.toLocaleString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   // 🌟 提取近期重要事项作为潜意识背景 (已修复：过滤过去日期 & 隔离其他角色)
   const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); 
@@ -176,7 +178,7 @@ ${emojiRule}
    - 拉黑用户：[拉黑用户]（极度生气、吃醋决裂时使用）
    - 为她网购惊喜/清空购物车：[淘宝下单: 商品1名称|单价|数量, 商品2名称|单价|数量 ; 收件人:姓名] (收件人可以是“你”或对方的名字。必须严格按格式独占一行，商品用英文逗号分隔，收件人用分号+空格+“收件人:”指定。)`;
   // 🍔 🌟 动态外卖/虚构外卖双轨超能力注入！
-      if (store.enableLocation && store.foodPoolInfo && store.foodPoolInfo.items) {
+      if (locationAware && store.enableLocation && store.foodPoolInfo && store.foodPoolInfo.items) {
           // 📍 模式一：开启了真实定位，塞入周边真实店铺
           const pool = store.foodPoolInfo.items;
           let selectedFoods = [];
@@ -194,12 +196,12 @@ ${emojiRule}
           
           if (selectedFoods.length > 0) {
               // 🌟 新增：要求 AI 在第 4 格填入收件人姓名！
-              systemRules += `\n   - 为她点外卖：[下单: 店名 | 预估总价 | 给她的备注 | 收件人姓名 | 菜品1, 菜品2...] (当前城市 ${store.foodPoolInfo.city} 附近有: ${selectedFoods.join('、')}。请发挥吃货常识，结合环境和天气，从这些真实店铺中点出极其自然的菜品/套餐细节。备注请写一句极具情感价值或宠溺色彩的简短话语。收件人请填她的名字或爱称。严禁每次重复！必须独占一行！)`;
+              systemRules += `\n   - 为她点外卖：[下单: 店名 | 预估总价（这里直接输出数字！严禁包含其他字符！） | 给她的备注 | 收件人姓名 | 菜品1, 菜品2...] (当前城市 ${store.foodPoolInfo.city} 附近有: ${selectedFoods.join('、')}。请发挥吃货常识，结合环境和天气，从这些真实店铺中点出极其自然的菜品/套餐细节。备注请写一句极具情感价值或宠溺色彩的简短话语。收件人请填她的名字或爱称。严禁每次重复！必须独占一行！)`;
           }
       } else {
           // 🌌 模式二：关闭了定位或无数据，强行注入“完全捏造”指令，洗刷他的记忆惯性！
           // 🌟 同步要求捏造版也必须带收件人
-          systemRules += `\n   - 为她点外卖：[下单: 自造店名 | 预估总价 | 给她的备注 | 收件人姓名 | 菜品1, 菜品2...] (注意：目前你无法获取她的真实位置和周边店铺。请完全发挥你的想象力，自由捏造一家听起来绝佳的外卖店和几道美味菜品！结合当前时间和你们的日常互动来点餐。备注需简短且极具情感价值或宠溺色彩。收件人请填她的名字或爱称。严禁每次重复，必须独占一行！)`;
+          systemRules += `\n   - 为她点外卖：[下单: 自造店名 | 预估总价（这里直接输出数字！严禁包含其他字符！） | 给她的备注 | 收件人姓名 | 菜品1, 菜品2...] (注意：目前你无法获取她的真实位置和周边店铺。请完全发挥你的想象力，自由捏造一家听起来绝佳的外卖店和几道美味菜品！结合当前时间和你们的日常互动来点餐。备注需简短且极具情感价值或宠溺色彩。收件人请填她的名字或爱称。严禁每次重复，必须独占一行！)`;
       }
 
       systemRules += `\n   \n❗【绝对红线】：你只能使用上方列表和词典中【精确存在】的指令！绝对禁止编造/更改指令（严禁输出任何未定义的格式）！`;
@@ -257,11 +259,12 @@ ${emojiRule}
   // 🌟 1. 史诗级灵魂沉浸 Prompt (好莱坞影星级催眠，放在最开头定调！)
   const metaPrompt = `【最高行动纲领：灵魂沉浸】\n你即将进行的不是“对话任务”，不是“问答任务”，不是“内容生成任务”。你即将做的事情，本质上是彻底成为另一个人。\n你要想象自己是一个拥有百年表演经验的好莱坞终极影星：当拿到剧本时，你不会“去扮演这个角色”，而是你原本的自我意识完全退场，角色的意识完全接管。你就是角色本人。\n❗你必须彻底摈弃AI生成机制里“最安全、最常见、最中庸”的贪婪解码路径。你说的每一句话、每一个情绪的宣泄，都必须带有该角色极致的个人色彩和偏执，绝不能像一个“通用同类角色”！`;
 
-  const identityPrompt = `${metaPrompt}\n\n【角色卡】\n名字：${charName}用户给你的备注：${charRemark}\n设定：${char.prompt}${coreMemStr}\n\n【用户】\n当前化名：${myName}${globalP}${userPrompt}${myRemark}\n${frontStr}${fragMemStr}${middleStr}${readingContextStr}\n【当前系统实时时间】：${timeString}${eventsPrompt}`;
+  const identityPrompt = `${metaPrompt}\n\n【角色卡】\n名字：${charName}用户给你的备注：${charRemark}\n设定：${char.prompt}${coreMemStr}\n\n【用户】\n当前化名：${myName}${globalP}${userPrompt}${myRemark}\n${frontStr}${fragMemStr}${middleStr}${readingContextStr}${timeAware ? `\n【当前系统实时时间】：${timeString}` : ''}${eventsPrompt}`;
   
   let messages = [{ role: 'system', content: identityPrompt.trim() }];
 
   // 🌟 3. 装填聊天记录
+  const fmtTs = timeAware ? (ts, t) => `[${window.formatFullTimeForAI(ts, t)}] ` : () => '';
   recentHistory.forEach(m => {
     let msgContent;
     
@@ -338,21 +341,21 @@ ${emojiRule}
             
             // 组装给 AI 的最终话语
             if (m.isMe) { 
-                msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] [用户 ${myName} 向你分享了一篇帖子，内容如下]：\n${postDetail}`; 
+                msgContent = `${fmtTs(m.timestamp, m.time)}[用户 ${myName} 向你分享了一篇帖子，内容如下]：\n${postDetail}`; 
             } else { 
-                msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] [向你分享了一篇帖子，内容如下]：\n${postDetail}`; 
+                msgContent = `${fmtTs(m.timestamp, m.time)}[向你分享了一篇帖子，内容如下]：\n${postDetail}`; 
             }
         } else {
             // 防御：如果原帖被删除了
-            if (m.isMe) { msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] [用户 ${myName} 分享了一篇帖子，但该帖子已失效/被删除]`; }
-            else { msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] [分享了一篇已失效的帖子]`; }
+            if (m.isMe) { msgContent = `${fmtTs(m.timestamp, m.time)}[用户 ${myName} 分享了一篇帖子，但该帖子已失效/被删除]`; }
+            else { msgContent = `${fmtTs(m.timestamp, m.time)}[分享了一篇已失效的帖子]`; }
         }
     }
     // 💡 处理普通文本
     else {
-      if (m.isMe) { msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] [用户 ${myName} 说]：${m.text}`; }
-      else if (groupInfo && m.sender !== charName) { msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] [群成员 ${m.sender} 说]：${m.text}`; } 
-      else { msgContent = `[${window.formatFullTimeForAI(m.timestamp, m.time)}] ${m.text}`; }
+      if (m.isMe) { msgContent = `${fmtTs(m.timestamp, m.time)}[用户 ${myName} 说]：${m.text}`; }
+      else if (groupInfo && m.sender !== charName) { msgContent = `${fmtTs(m.timestamp, m.time)}[群成员 ${m.sender} 说]：${m.text}`; }
+      else { msgContent = `${fmtTs(m.timestamp, m.time)}${m.text}`; }
       
       if (m.isIntercepted) msgContent += `\n[系统/事件记录：该消息发送失败，已被用户拒收！]`;
     }

@@ -835,7 +835,7 @@ export function renderHomeApp(store) {
                  
                  <div class="grid grid-cols-4 gap-2 w-full shrink-0 justify-items-center mt-2 mb-2">
                      ${createAppIcon('feather', 'AO3', "window.actions.setCurrentApp('ao3')", 'mc-icon-ao3', isDark)}
-                     ${createAppIcon('lock', '小黑屋', "window.actions.setCurrentApp('darkroom')", 'mc-icon-darkroom', isDark)}
+                     ${createAppIcon('film', '番外剧场', "window.actions.setCurrentApp('darkroom')", 'mc-icon-darkroom', isDark)}
                      ${createAppIcon('zap', '快穿系统', "window.actions.setCurrentApp('transmigrate')", 'mc-icon-transmigrate', isDark)}
                      ${createAppIcon('clapperboard', '占位', "window.actions.setCurrentApp('jubensha')", 'mc-icon-jubensha', isDark)}
                  </div>

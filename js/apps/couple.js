@@ -865,8 +865,19 @@ if (!window.cpActions) {
       if (target.status === 0) { target.status = 1; if(window.actions?.saveStore) window.actions.saveStore(); }
       window.render();
       
-      if (target.messages.length === 0) await window.cpActions.fetchHundredStoryReply(charId, thingId, true);
-      setTimeout(() => { const el = document.getElementById('cp-story-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+      if (target.messages.length === 0) {
+          await window.cpActions.fetchHundredStoryReply(charId, thingId, true);
+      } else {
+          // 同步置底防闪烁
+          const el = document.getElementById('cp-story-scroll');
+          if (el) {
+              el.style.scrollBehavior = 'auto';
+              el.scrollTop = el.scrollHeight;
+              if (window.globalScrollStates && window.globalScrollStates['cp-story-scroll']) {
+                  window.globalScrollStates['cp-story-scroll'].top = el.scrollHeight;
+              }
+          }
+      }
   },
 
   // 🌟 退出时的状态拦截引擎
@@ -961,7 +972,18 @@ if (!window.cpActions) {
       if (msgIdx === -1) return;
       target.messages = target.messages.slice(0, msgIdx); // 截断到这条之前
       if(window.actions?.saveStore) window.actions.saveStore();
+      
       window.render();
+      // 同步置底防闪烁
+      const el = document.getElementById('cp-story-scroll');
+      if (el) {
+          el.style.scrollBehavior = 'auto';
+          el.scrollTop = el.scrollHeight;
+          if (window.globalScrollStates && window.globalScrollStates['cp-story-scroll']) {
+              window.globalScrollStates['cp-story-scroll'].top = el.scrollHeight;
+          }
+      }
+      
       await window.cpActions.fetchHundredStoryReply(charId, target.id, target.messages.length === 0);
   },
 
@@ -972,8 +994,19 @@ if (!window.cpActions) {
       const target = store.coupleSpacesData[charId].hundredThings.find(t => t.id === cpState.activeThingId);
       target.messages.push({ id: Date.now(), sender: 'me', isMe: true, text: text });
       input.value = '';
-      if(window.actions?.saveStore) window.actions.saveStore(); window.render();
-      setTimeout(() => { const el = document.getElementById('cp-story-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+      if(window.actions?.saveStore) window.actions.saveStore(); 
+      
+      window.render();
+      // 同步置底防闪烁
+      const el = document.getElementById('cp-story-scroll');
+      if (el) {
+          el.style.scrollBehavior = 'auto';
+          el.scrollTop = el.scrollHeight;
+          if (window.globalScrollStates && window.globalScrollStates['cp-story-scroll']) {
+              window.globalScrollStates['cp-story-scroll'].top = el.scrollHeight;
+          }
+      }
+      
       await window.cpActions.fetchHundredStoryReply(charId, target.id, false);
   },
   continueHundredStory: async (charId) => {
@@ -982,7 +1015,18 @@ if (!window.cpActions) {
 
   fetchHundredStoryReply: async (charId, thingId, isOpening) => {
       const target = store.coupleSpacesData[charId].hundredThings.find(t => t.id === thingId);
-      target.isTyping = true; window.render();
+      target.isTyping = true; 
+      window.render();
+      
+      // AI开始打字同步置底防闪烁
+      let el = document.getElementById('cp-story-scroll');
+      if (el) {
+          el.style.scrollBehavior = 'auto';
+          el.scrollTop = el.scrollHeight;
+          if (window.globalScrollStates && window.globalScrollStates['cp-story-scroll']) {
+              window.globalScrollStates['cp-story-scroll'].top = el.scrollHeight;
+          }
+      }
 
       try {
         // 替换掉原来的 prompt 组装
@@ -1012,8 +1056,18 @@ if (!window.cpActions) {
           if (window.actions?.showToast) window.actions.showToast('TA 走神了，没写出来');
       } finally {
           target.isTyping = false;
-          if(window.actions?.saveStore) window.actions.saveStore(); window.render();
-          setTimeout(() => { const el = document.getElementById('cp-story-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+          if(window.actions?.saveStore) window.actions.saveStore(); 
+          
+          window.render();
+          // AI写完同步置底防闪烁
+          el = document.getElementById('cp-story-scroll');
+          if (el) {
+              el.style.scrollBehavior = 'auto';
+              el.scrollTop = el.scrollHeight;
+              if (window.globalScrollStates && window.globalScrollStates['cp-story-scroll']) {
+                  window.globalScrollStates['cp-story-scroll'].top = el.scrollHeight;
+              }
+          }
       }
   },
 
@@ -1201,15 +1255,36 @@ if (!window.cpActions) {
       // 如果第一次进入，呼唤 AI 写沉浸式开场白！
       if (tod.messages.length === 0) {
           await window.cpActions.fetchDareStoryReply(charId, tod.id, true);
+      } else {
+          // 同步置底防闪烁
+          const el = document.getElementById('cp-dare-scroll');
+          if (el) {
+              el.style.scrollBehavior = 'auto';
+              el.scrollTop = el.scrollHeight;
+              if (window.globalScrollStates && window.globalScrollStates['cp-dare-scroll']) {
+                  window.globalScrollStates['cp-dare-scroll'].top = el.scrollHeight;
+              }
+          }
       }
-      setTimeout(() => { const el = document.getElementById('cp-dare-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
   },
 
   // 🧠 副本写作大脑 (视觉小说级 Prompt - 抹除"书写"气泡，增加常驻按钮)
   fetchDareStoryReply: async (charId, todId, isOpening) => {
       const spaceData = store.coupleSpacesData[charId];
       const tod = spaceData.currentToD; // 因为一次只存在一个当前 ToD
-      tod.isTyping = true; window.render();
+      tod.isTyping = true; 
+      
+      window.render();
+      // AI开始打字同步置底防闪烁
+      let el = document.getElementById('cp-dare-scroll');
+      if (el) {
+          el.style.scrollBehavior = 'auto';
+          el.scrollTop = el.scrollHeight;
+          if (window.globalScrollStates && window.globalScrollStates['cp-dare-scroll']) {
+              window.globalScrollStates['cp-dare-scroll'].top = el.scrollHeight;
+          }
+      }
+
       try {
           // 替换掉原来的 prompt 组装
           const ctx = window.cpActions.getQContext(charId);
@@ -1236,8 +1311,18 @@ if (!window.cpActions) {
           tod.messages.push({ id: Date.now(), sender: 'ai', text: window.cpActions.cleanAI(data.choices[0].message.content) });
       } catch(e) { } finally {
           tod.isTyping = false;
-          if(window.actions?.saveStore) window.actions.saveStore(); window.render();
-          setTimeout(() => { const el = document.getElementById('cp-dare-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+          if(window.actions?.saveStore) window.actions.saveStore(); 
+          
+          window.render();
+          // AI写完同步置底防闪烁
+          el = document.getElementById('cp-dare-scroll');
+          if (el) {
+              el.style.scrollBehavior = 'auto';
+              el.scrollTop = el.scrollHeight;
+              if (window.globalScrollStates && window.globalScrollStates['cp-dare-scroll']) {
+                  window.globalScrollStates['cp-dare-scroll'].top = el.scrollHeight;
+              }
+          }
       }
   },
   
@@ -1247,8 +1332,19 @@ if (!window.cpActions) {
       const text = input.value.trim(); if (!text) return;
       const tod = store.coupleSpacesData[charId].currentToD;
       tod.messages.push({ id: Date.now(), sender: 'me', isMe: true, text: text });
-      input.value = ''; window.render();
-      setTimeout(() => { const el = document.getElementById('cp-dare-scroll'); if(el) el.scrollTop = el.scrollHeight; }, 100);
+      input.value = ''; 
+      
+      window.render();
+      // 同步置底防闪烁
+      const el = document.getElementById('cp-dare-scroll');
+      if (el) {
+          el.style.scrollBehavior = 'auto';
+          el.scrollTop = el.scrollHeight;
+          if (window.globalScrollStates && window.globalScrollStates['cp-dare-scroll']) {
+              window.globalScrollStates['cp-dare-scroll'].top = el.scrollHeight;
+          }
+      }
+
       await window.cpActions.fetchDareStoryReply(charId, tod.id, false);
   },
   continueDareStory: async (charId) => {
