@@ -597,7 +597,7 @@ export function renderHomeApp(store) {
       <input type="file" id="home-avatar-upload" accept="image/*" class="hidden" onchange="window.homeActions.updateAvatar(event)" />
       <input type="file" id="home-polaroid-upload" accept="image/*" class="hidden" onchange="window.homeActions.uploadPolaroid(event)" />
 
-      <div class="w-full h-full min-h-[660px] grid grid-cols-1 overflow-hidden" style="grid-template-rows: repeat(8, minmax(0, 1fr));">
+      <div class="w-full h-full min-h-[600px] grid grid-cols-1 overflow-hidden" style="grid-template-rows: repeat(8, minmax(0, 1fr));">
       
           <div id="home-swiper-scroll" class="row-span-6 w-full h-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar relative z-10" onscroll="if(!window.homeState.isRestoringScroll) window.homeActions.updateDots(event)">
             
