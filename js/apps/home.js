@@ -438,7 +438,7 @@ if (!window.homeActions) {
   };
 }
 
-// 🌟 核心原版图标生成器 (已去重！)
+// 🌟 核心原版图标生成器
 function createAppIcon(iconName, label, actionStr, mcClass, isDark) {
   const bgClass = isDark ? 'bg-black/50 border-black/20' : 'bg-white/50 border-white/20';
   const iconClass = isDark ? 'text-white opacity-90' : 'text-gray-900 opacity-60';
@@ -469,7 +469,7 @@ function createDockIcon(iconName, label, actionStr, mcClass, isDark) {
   `;
 }
 
-// 🆕 注入开屏动画 CSS
+// 🆕 开屏动画 CSS
 const bootStyle = document.createElement('style');
 bootStyle.innerHTML = `
 @keyframes catRun { to { stroke-dashoffset: 0; } }
@@ -559,7 +559,7 @@ export function renderHomeApp(store) {
 
   const polaroidImg = store.homePolaroidImg || '';
   const polaroidHtml = `
-      <div class="w-full flex justify-end transform scale-[0.85] sm:scale-90 origin-right">
+      <div class="w-full flex justify-end transform scale-[0.85] sm:scale-90 origin-right shrink-0">
           <div class="relative w-32 h-40 cursor-pointer group active:scale-95 transition-transform" onclick="document.getElementById('home-polaroid-upload').click()">
               <div class="absolute top-1 -left-2 w-full h-full bg-white/70 rounded-sm shadow-md border border-white/40 transform -rotate-6 flex flex-col p-1.5 z-0 transition-transform group-hover:-rotate-12 duration-300">
                   <div class="w-full flex-1 bg-gray-300/30 rounded-sm"></div>
@@ -592,13 +592,12 @@ export function renderHomeApp(store) {
       <input type="file" id="home-avatar-upload" accept="image/*" class="hidden" onchange="window.homeActions.updateAvatar(event)" />
       <input type="file" id="home-polaroid-upload" accept="image/*" class="hidden" onchange="window.homeActions.uploadPolaroid(event)" />
 
-      <div id="home-swiper-scroll" class="flex-1 w-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar relative z-10 min-h-0" onscroll="if(!window.homeState.isRestoringScroll) window.homeActions.updateDots(event)">
+      <div id="home-swiper-scroll" class="flex-1 w-full flex overflow-x-auto overflow-y-hidden snap-x snap-mandatory hide-scrollbar relative z-10 min-h-0" onscroll="if(!window.homeState.isRestoringScroll) window.homeActions.updateDots(event)">
         
-        <div class="w-full h-full flex-shrink-0 snap-center overflow-y-auto hide-scrollbar">
-           <div class="w-full flex flex-col pt-10 sm:pt-12 px-4 sm:px-5 pb-4 min-h-full">
+        <div class="w-full h-full flex-shrink-0 snap-center overflow-hidden flex flex-col pt-12 sm:pt-14 px-4 sm:px-5 pb-0 relative">
               
               <div class="flex flex-col w-full shrink-0">
-                  <div class="flex justify-between items-end pb-2 shrink-0 ${txtMain}">
+                  <div class="flex justify-between items-end pb-1 shrink-0 ${txtMain}">
                       ${(() => {
                           if (!store.calendarData) store.calendarData = { todos: [], lastPeriod: '' };
                           const now = new Date();
@@ -643,12 +642,12 @@ export function renderHomeApp(store) {
                           window.tempEventsList = eventsList;
 
                           return `
-                             <div class="flex justify-between items-end mb-2 w-full">
+                             <div class="flex justify-between items-end mb-1 w-full">
                                 <div class="flex items-baseline space-x-2">
                                     <span class="font-monospace text-4xl tracking-wider opacity-90 uppercase leading-none">${currentMonthEng}</span>
                                     <span class="text-sm font-bold opacity-50 uppercase tracking-widest">${now.getFullYear()}</span>
                                 </div>
-                                <div class="flex space-x-3 mb-1">
+                                <div class="flex space-x-3 mb-0.5">
                                     <i data-lucide="calendar-plus" class="w-[20px] h-[20px] sm:w-[22px] sm:h-[22px] cursor-pointer active:scale-90 transition-transform opacity-70 hover:opacity-100 ${isDark ? 'text-white' : 'text-gray-800'}" onclick="window.homeActions.openTodoModal()"></i>
                                     <i data-lucide="droplet" class="w-[20px] h-[20px] sm:w-[22px] sm:h-[22px] cursor-pointer active:scale-90 transition-transform opacity-70 hover:opacity-100 text-rose-400" onclick="window.homeActions.openPeriodModal()"></i>
                                 </div>
@@ -657,7 +656,7 @@ export function renderHomeApp(store) {
                       })()}
                   </div>
                   
-                  <div class="grid grid-cols-7 gap-0 w-full mb-3 shrink-0 ${txtMain}">
+                  <div class="grid grid-cols-7 gap-0 w-full mb-2 shrink-0 ${txtMain}">
                       ${(() => {
                           const now = new Date();
                           const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); 
@@ -690,7 +689,7 @@ export function renderHomeApp(store) {
                       })()}
                   </div>
 
-                  <div class="flex flex-row w-full shrink-0 pt-1 mb-4">
+                  <div class="flex flex-row w-full shrink-0 pt-1 mb-2">
                       <div class="w-[55%] flex flex-col justify-start space-y-1.5 overflow-hidden cursor-pointer active:opacity-70 transition-opacity ${isDark ? 'text-white/90 drop-shadow-md' : 'text-gray-800/90 drop-shadow-sm'}" onclick="window.homeActions.openTodoModal()">
                           ${(window.tempEventsList || []).slice(0, 3).map(e => `
                               <div class="flex items-start space-x-2 w-full"><div class="w-1.5 h-1.5 rounded-full ${e.dotColor} shrink-0 mt-1"></div><span class="text-[11px] font-bold tracking-wide leading-snug truncate w-full pr-2">${e.text}</span></div>
@@ -705,7 +704,7 @@ export function renderHomeApp(store) {
                   </div>
               </div>
 
-              <div class="flex flex-row w-full shrink-0 mb-6 mt-4">
+              <div class="flex flex-row w-full shrink-0 mt-4 sm:mt-5 mb-2">
                   <div class="w-[50%] grid grid-cols-2 grid-rows-2 gap-2 items-start justify-items-center">
                      ${createAppIcon('message-circle', '微信', "window.actions.setCurrentApp('wechat')", 'mc-icon-wechat', isDark)}
                      ${createAppIcon('messages-square', '论坛', "window.actions.setCurrentApp('forum')", 'mc-icon-forum', isDark)}
@@ -717,8 +716,8 @@ export function renderHomeApp(store) {
                   </div>
               </div>
 
-              <div class="flex flex-row w-full shrink-0 mt-2 mb-2">
-                  <div class="w-[50%] flex flex-col justify-end space-y-3 pr-2">
+              <div class="flex flex-row w-full shrink-0 mt-3 sm:mt-4 mb-2">
+                  <div class="w-[50%] flex flex-col justify-end space-y-2 pr-2">
                      <input type="text" value="正在进入..." class="w-full ${inputBg} backdrop-blur-2xl px-3 py-1.5 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm shrink-0" onclick="event.stopPropagation()" />
                      <input type="text" value="梦之旅途" class="w-[85%] ml-[15%] ${inputBg} backdrop-blur-2xl px-3 py-1.5 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm shrink-0" onclick="event.stopPropagation()" />
                   </div>
@@ -727,13 +726,13 @@ export function renderHomeApp(store) {
                      ${createAppIcon('smartphone', '查手机', "window.actions.setCurrentApp('phone')", 'mc-icon-phone', isDark)}
                   </div>
               </div>
-           </div>
+              
+              <div class="flex-1 min-h-0 w-full pointer-events-none"></div>
         </div>
 
-        <div class="w-full h-full flex-shrink-0 snap-center overflow-y-auto hide-scrollbar">
-            <div class="w-full flex flex-col pt-10 sm:pt-12 px-4 sm:px-5 pb-4 min-h-full">
+        <div class="w-full h-full flex-shrink-0 snap-center overflow-hidden flex flex-col pt-12 sm:pt-14 px-4 sm:px-5 pb-0 relative">
                  
-                 <div id="keep-alive-status" class="w-full shrink-0 flex flex-col rounded-[32px] ${isDark?'bg-black/30':'bg-white/30'} relative z-10 p-5 backdrop-blur-md shadow-sm border ${isDark?'border-white/10':'border-white/40'} mb-6">
+                 <div id="keep-alive-status" class="w-full shrink-0 flex flex-col rounded-[28px] ${isDark?'bg-black/30':'bg-white/30'} relative z-10 p-4 backdrop-blur-md shadow-sm border ${isDark?'border-white/10':'border-white/40'} mb-4">
                       
                       ${(() => {
                           const hasTrack = list && list.length > 0;
@@ -750,33 +749,33 @@ export function renderHomeApp(store) {
                           const lyricPlaceholder = isRawText ? '🎵 已挂载纯文本歌词' : (hasLyrics ? '🎵' : '暂无歌词数据');
 
                           return `
-                          <div class="flex flex-col justify-center shrink-0 mb-4">
-                              <div class="flex justify-between items-center w-full ${isDark?'text-white':'text-gray-800'} mb-2">
-                                  <div class="w-10 flex items-center justify-start"><i data-lucide="plus" class="w-[18px] h-[18px] cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onclick="window.homeActions.openAddAudioModal()" title="添加音乐"></i></div>
+                          <div class="flex flex-col justify-center shrink-0 mb-3">
+                              <div class="flex justify-between items-center w-full ${isDark?'text-white':'text-gray-800'} mb-1.5">
+                                  <div class="w-10 flex items-center justify-start"><i data-lucide="plus" class="w-4 h-4 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onclick="window.homeActions.openAddAudioModal()" title="添加音乐"></i></div>
                                   <div class="flex items-center space-x-5">
-                                      <i data-lucide="skip-back" class="w-4 h-4 cursor-pointer active:scale-90 transition-transform" onclick="window.homeActions.prevMusic()"></i>
+                                      <i data-lucide="skip-back" class="w-3.5 h-3.5 cursor-pointer active:scale-90 transition-transform" onclick="window.homeActions.prevMusic()"></i>
                                       <div onclick="window.homeActions.togglePlay()" class="cursor-pointer active:scale-90 transition-transform">
                                           <i id="mc-audio-play-icon" data-lucide="${isPlaying ? 'pause' : 'play'}" class="w-5 h-5 fill-current"></i>
                                       </div>
-                                      <i data-lucide="skip-forward" class="w-4 h-4 cursor-pointer active:scale-90 transition-transform" onclick="window.homeActions.nextMusic()"></i>
+                                      <i data-lucide="skip-forward" class="w-3.5 h-3.5 cursor-pointer active:scale-90 transition-transform" onclick="window.homeActions.nextMusic()"></i>
                                   </div>
                                   <div class="w-10 flex items-center justify-end space-x-3">
-                                      <i id="mc-audio-loop-icon" data-lucide="${loopIcon}" class="w-[18px] h-[18px] cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onclick="window.homeActions.toggleLoop()" title="切换循环模式"></i>
-                                      <i data-lucide="list-music" class="w-[18px] h-[18px] cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onclick="window.homeActions.openPlaylist()" title="播放列表"></i>
+                                      <i id="mc-audio-loop-icon" data-lucide="${loopIcon}" class="w-4 h-4 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onclick="window.homeActions.toggleLoop()" title="切换循环模式"></i>
+                                      <i data-lucide="list-music" class="w-4 h-4 cursor-pointer opacity-60 hover:opacity-100 transition-opacity" onclick="window.homeActions.openPlaylist()" title="播放列表"></i>
                                   </div>
                               </div>
                               <div class="flex flex-col items-start w-full px-1 ${isDark?'text-white':'text-gray-900'}">
-                                  <span id="mc-audio-name" class="text-[14px] sm:text-[15px] font-black tracking-wide truncate w-full font-serif">${trackName}</span>
-                                  <span id="mc-audio-artist" class="text-[9px] sm:text-[10px] opacity-60 truncate tracking-widest mt-0.5">${artistName}</span>
+                                  <span id="mc-audio-name" class="text-[13px] sm:text-[14px] font-black tracking-wide truncate w-full font-serif">${trackName}</span>
+                                  <span id="mc-audio-artist" class="text-[9px] opacity-60 truncate tracking-widest mt-0.5">${artistName}</span>
                               </div>
                           </div>
 
-                          <div class="flex flex-col justify-center shrink-0 mb-4">
-                              <div class="flex flex-col items-center justify-center w-full min-h-[16px] overflow-hidden px-1 mb-2">
-                                  <span id="music-lyric-line" class="text-[11px] font-bold text-center w-full truncate transition-all duration-300 ${isDark?'text-white/80 drop-shadow-sm':'text-gray-600'}">${lyricPlaceholder}</span>
+                          <div class="flex flex-col justify-center shrink-0 mb-3">
+                              <div class="flex flex-col items-center justify-center w-full min-h-[14px] overflow-hidden px-1 mb-1.5">
+                                  <span id="music-lyric-line" class="text-[10px] font-bold text-center w-full truncate transition-all duration-300 ${isDark?'text-white/80 drop-shadow-sm':'text-gray-600'}">${lyricPlaceholder}</span>
                               </div>
                               <div class="flex items-center w-full space-x-2 px-1">
-                                  <div class="w-8 h-8 sm:w-9 sm:h-9 rounded-full overflow-hidden border ${isDark?'border-white/20 bg-black/40':'border-gray-200 bg-white'} flex items-center justify-center cursor-pointer shadow-sm shrink-0 active:scale-95 transition-transform" onclick="window.homeActions.openCompanionSelect()">
+                                  <div class="w-8 h-8 rounded-full overflow-hidden border ${isDark?'border-white/20 bg-black/40':'border-gray-200 bg-white'} flex items-center justify-center cursor-pointer shadow-sm shrink-0 active:scale-95 transition-transform" onclick="window.homeActions.openCompanionSelect()">
                                       ${compChar ? `<img src="${compChar.avatar}" class="w-full h-full object-cover grayscale-[20%]">` : `<i data-lucide="plus" class="w-4 h-4 ${isDark?'text-white/40':'text-gray-400'}"></i>`}
                                   </div>
                                   <div class="flex-1 ${isDark?'bg-[#262628] text-white':'bg-[#E9E9EB] text-gray-800'} rounded-2xl rounded-tl-[4px] px-3 py-1.5 relative shadow-sm flex items-center justify-start min-w-0">
@@ -785,17 +784,17 @@ export function renderHomeApp(store) {
                               </div>
                           </div>
                           
-                          <div class="border-t ${isDark?'border-white/10':'border-gray-300/40'} pt-3 flex flex-col relative px-1 justify-center shrink-0">
-                              <div class="text-[9px] font-bold opacity-40 tracking-widest uppercase mb-2 font-serif flex items-center justify-between ${isDark?'text-white':'text-gray-600'} shrink-0">
+                          <div class="border-t ${isDark?'border-white/10':'border-gray-300/40'} pt-2 flex flex-col relative px-1 justify-center shrink-0">
+                              <div class="text-[9px] font-bold opacity-40 tracking-widest uppercase mb-1.5 font-serif flex items-center justify-between ${isDark?'text-white':'text-gray-600'} shrink-0">
                                   <div class="flex items-center space-x-2">
                                       <span>Daily Fortune</span>
                                       ${store.birthday ? `<i data-lucide="edit-2" class="w-3 h-3 cursor-pointer hover:opacity-100" onclick="window.homeActions.editBirthday()" title="修改出生日期"></i>` : ''}
                                   </div>
-                                  ${(store.dailyFortune && store.dailyFortune.date === new Date().toISOString().split('T')[0]) ? `<i data-lucide="refresh-cw" class="w-3.5 h-3.5 cursor-pointer hover:opacity-100 ${window.homeState.isGeneratingFortune ? 'animate-spin' : ''}" onclick="window.homeActions.generateDailyFortune()"></i>` : ''}
+                                  ${(store.dailyFortune && store.dailyFortune.date === new Date().toISOString().split('T')[0]) ? `<i data-lucide="refresh-cw" class="w-3 h-3 cursor-pointer hover:opacity-100 ${window.homeState.isGeneratingFortune ? 'animate-spin' : ''}" onclick="window.homeActions.generateDailyFortune()"></i>` : ''}
                               </div>
                               
                               ${!store.birthday ? `
-                                  <div class="flex flex-col items-center justify-center opacity-80 z-20 py-3">
+                                  <div class="flex flex-col items-center justify-center opacity-80 z-20 py-2">
                                       <span class="text-[10px] tracking-widest font-bold mb-2 ${isDark?'text-white/60':'text-gray-500'}">设定生辰，开启星盘</span>
                                       <div class="flex items-center space-x-2">
                                           <input id="fortune-bday-input" type="date" class="bg-transparent border ${isDark?'border-white/20 text-white':'border-gray-300 text-gray-700'} rounded-lg px-2 py-1 text-[11px] outline-none shadow-sm cursor-pointer">
@@ -803,7 +802,7 @@ export function renderHomeApp(store) {
                                       </div>
                                   </div>
                               ` : (store.dailyFortune && store.dailyFortune.date === new Date().toISOString().split('T')[0]) ? `
-                                  <div class="flex flex-col w-full pt-1">
+                                  <div class="flex flex-col w-full pt-0.5">
                                       <div class="text-[11px] sm:text-[12px] font-black tracking-widest text-center w-full mb-1 shrink-0 ${isDark?'text-white':'text-gray-800'}">✨ ${store.dailyFortune.sign || '专属'}运势 ✨</div>
                                       <div class="flex justify-between items-center px-2 sm:px-4 w-full shrink-0 mb-1">
                                           <div class="flex flex-col items-center space-y-0.5">
@@ -824,7 +823,7 @@ export function renderHomeApp(store) {
                                       <p class="text-[9px] sm:text-[10px] leading-snug ${isDark?'text-white/80':'text-gray-700'} font-serif line-clamp-3 mt-1">${store.dailyFortune.text}</p>
                                   </div>
                               ` : `
-                                  <div class="flex flex-col items-center justify-center opacity-60 z-20 py-4">
+                                  <div class="flex flex-col items-center justify-center opacity-60 z-20 py-3">
                                       <i data-lucide="loader" class="w-5 h-5 sm:w-6 sm:h-6 mb-1.5 animate-spin ${isDark?'text-white/60':'text-gray-400'}"></i>
                                       <span class="text-[10px] tracking-widest font-bold ${isDark?'text-white/60':'text-gray-500'}">正在为您观测今日星象...</span>
                                   </div>
@@ -840,18 +839,19 @@ export function renderHomeApp(store) {
                      ${createAppIcon('zap', '快穿系统', "window.actions.setCurrentApp('transmigrate')", 'mc-icon-transmigrate', isDark)}
                      ${createAppIcon('clapperboard', '占位', "window.actions.setCurrentApp('jubensha')", 'mc-icon-jubensha', isDark)}
                  </div>
-            </div>
+
+                 <div class="flex-1 min-h-0 w-full pointer-events-none"></div>
         </div>
 
       </div> 
       
-      <div class="h-5 w-full flex justify-center items-center space-x-2 shrink-0 z-20 pointer-events-none mt-1 mb-2 ${isDark ? 'text-white' : 'text-gray-800'}">
+      <div class="h-4 w-full flex justify-center items-center space-x-2 shrink-0 z-20 pointer-events-none mb-1.5 ${isDark ? 'text-white' : 'text-gray-800'}">
          <div id="home-dot-0" class="w-1.5 h-1.5 rounded-full bg-current transition-opacity duration-300" style="opacity: ${initPageIdx === 0 ? '1' : '0.3'};"></div>
          <div id="home-dot-1" class="w-1.5 h-1.5 rounded-full bg-current transition-opacity duration-300" style="opacity: ${initPageIdx === 1 ? '1' : '0.3'};"></div>
       </div>
 
-      <div class="w-full px-4 pb-6 sm:pb-8 pt-1 z-20 shrink-0">
-         <div class="w-full h-[76px] sm:h-[84px] ${isDark?'bg-black/10 border-black/10':'bg-white/10 border-white/10'} backdrop-blur-xl rounded-[24px] sm:rounded-[28px] flex justify-around items-center shadow-sm border px-2 sm:px-3">
+      <div class="w-full px-4 pb-6 sm:pb-4 z-20 shrink-0">
+         <div class="w-full h-[72px] sm:h-[85px] ${isDark?'bg-black/10 border-black/10':'bg-white/10 border-white/10'} backdrop-blur-xl rounded-[24px] sm:rounded-[28px] flex justify-around items-center shadow-sm border px-2 sm:px-3">
              ${createDockIcon('book-open', '世界书', "window.actions.setCurrentApp('worldbook')", 'mc-icon-worldbook', isDark)}
              ${createDockIcon('brain', '记忆库', "window.actions.setCurrentApp('memory')", 'mc-icon-memory', isDark)}
              ${createDockIcon('palette', '外观', "window.actions.setCurrentApp('appearance')", 'mc-icon-appearance', isDark)}
