@@ -67,7 +67,7 @@ if (!window.homeState) window.homeState = {
     showCompanionModal: false, tempLyrics: null, isGeneratingReaction: false, isGeneratingFortune: false,
     lastScrollLeft: 0, 
     isRestoringScroll: false,
-    isBooting: true // 🆕 增加开屏状态标志
+    isBooting: true 
 };
 
 // 全局歌词引擎
@@ -108,7 +108,6 @@ if (!window.lyricTimerInt) {
 
 if (!window.homeActions) {
   window.homeActions = {
-    // 🆕 处理开屏完成
     finishBooting: () => {
       window.homeState.isBooting = false;
       window.homeActions.doRender();
@@ -132,7 +131,6 @@ if (!window.homeActions) {
         }
     },
 
-    // ... (以下代码保持不变，直到 createAppIcon)
     updateAvatar: (e) => {
       const file = e.target.files[0]; if(!file) return;
       window.actions.compressImage(file, (base64) => { store.personas[0].avatar = base64; window.homeActions.doRender(); });
@@ -439,7 +437,7 @@ if (!window.homeActions) {
   };
 }
 
-// 🌟 为网格专门优化的居中图标，大小绝对受控
+// 🌟 为网格专门优化的居中图标
 function createAppIcon(iconName, label, actionStr, mcClass, isDark) {
   const bgClass = isDark ? 'bg-black/50 border-black/20' : 'bg-white/50 border-white/20';
   const iconClass = isDark ? 'text-white opacity-90' : 'text-gray-900 opacity-60';
@@ -470,7 +468,7 @@ function createDockIcon(iconName, label, actionStr, mcClass, isDark) {
   `;
 }
 
-// 🆕 注入开屏动画所需要的 CSS
+// 🆕 注入开屏动画 CSS
 const bootStyle = document.createElement('style');
 bootStyle.innerHTML = `
 @keyframes catRun { to { stroke-dashoffset: 0; } }
@@ -479,7 +477,7 @@ bootStyle.innerHTML = `
 
 .nekophone-boot-screen {
   position: absolute; inset: 0; z-index: 9999;
-  background-color: #F8F7F3; /* 极简米白纸张色 */
+  background-color: #F8F7F3; 
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   overflow: hidden;
   transition: opacity 1s ease, visibility 1s ease;
@@ -488,17 +486,17 @@ bootStyle.innerHTML = `
 
 .cat-outline {
   width: 140px; height: 140px;
-  stroke: #1A1A1A; /* 炭黑色线条 */
+  stroke: #1A1A1A; 
   stroke-width: 2.5; 
   stroke-linecap: round; stroke-linejoin: round;
   fill: none;
-  stroke-dasharray: 400; stroke-dashoffset: 400; /* 计算好的完美路径长度 */
+  stroke-dasharray: 400; stroke-dashoffset: 400; 
   animation: catRun 3s ease-in-out forwards;
 }
 
 .boot-text {
   margin-top: 25px;
-  font-family: 'Playfair Display', serif; /* 纤细衬线字体 */
+  font-family: 'Playfair Display', serif; 
   font-weight: 300; font-size: 20px; color: #1A1A1A;
   letter-spacing: 0.35em; text-transform: lowercase;
   opacity: 0; transform: translateY(10px);
@@ -507,7 +505,6 @@ bootStyle.innerHTML = `
 `;
 document.head.appendChild(bootStyle);
 
-// 🆕 增加Playfair Display字体的引用
 if(!document.getElementById('playfair-font')) {
     const link = document.createElement('link');
     link.id = 'playfair-font'; link.rel = 'stylesheet'; link.href = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,300;1,300&display=swap';
@@ -515,9 +512,7 @@ if(!document.getElementById('playfair-font')) {
 }
 
 export function renderHomeApp(store) {
-  // 🆕 如果正在开屏，只渲染开屏动画界面
   if (window.homeState?.isBooting) {
-    // 3.5秒后自动结束开屏（动画3s + 留白0.5s）
     setTimeout(() => { window.homeActions?.finishBooting(); }, 3500);
 
     return `
@@ -541,7 +536,6 @@ export function renderHomeApp(store) {
     `;
   }
 
-  // 以下为原有的主界面渲染逻辑
   const list = store.customAudio || [];
   if (list.length > 0 && window.homeAudioEngine && !window.homeAudioEngine.getAttribute('src')) {
       window.audioState.currentIndex = Math.min(window.audioState.currentIndex || 0, list.length - 1);
@@ -566,11 +560,11 @@ export function renderHomeApp(store) {
   const polaroidHtml = `
       <div class="w-full h-full flex items-center justify-center transform scale-[0.85]">
           <div class="relative w-full h-full max-w-[140px] max-h-[170px] cursor-pointer group active:scale-95 transition-transform" onclick="document.getElementById('home-polaroid-upload').click()">
-              <div class="absolute top-1 -left-2 w-full h-full bg-white/70 rounded-sm shadow-md border border-white/40 transform -rotate-6 flex flex-col p-1 z-0 transition-transform group-hover:-rotate-12 duration-300">
+              <div class="absolute top-1 -left-2 w-full h-full bg-white/70 rounded-sm shadow-md border border-white/40 transform -rotate-6 flex flex-col p-1.5 z-0 transition-transform group-hover:-rotate-12 duration-300">
                   <div class="w-full flex-1 bg-gray-300/30 rounded-sm"></div>
                   <div class="h-5"></div>
               </div>
-              <div class="absolute top-0 right-0 w-full h-full bg-[#fdfdfd] rounded-sm shadow-xl border border-white/60 transform rotate-3 flex flex-col p-1 z-10 transition-transform group-hover:rotate-6 duration-300">
+              <div class="absolute top-0 right-0 w-full h-full bg-[#fdfdfd] rounded-sm shadow-xl border border-white/60 transform rotate-3 flex flex-col p-1.5 z-10 transition-transform group-hover:rotate-6 duration-300">
                   <div class="w-full flex-1 bg-gray-100 rounded-sm overflow-hidden flex items-center justify-center relative">
                       ${polaroidImg ? `<img src="${polaroidImg}" class="w-full h-full object-cover" />` : `<i data-lucide="image-plus" class="w-6 h-6 text-gray-300"></i>`}
                       <div class="absolute inset-0 shadow-[inset_0_2px_10px_rgba(0,0,0,0.1)] pointer-events-none"></div>
@@ -601,7 +595,7 @@ export function renderHomeApp(store) {
       
           <div id="home-swiper-scroll" class="row-span-6 w-full h-full flex overflow-x-auto snap-x snap-mandatory hide-scrollbar relative z-10" onscroll="if(!window.homeState.isRestoringScroll) window.homeActions.updateDots(event)">
             
-            <div class="w-full h-full flex-shrink-0 snap-center pt-8 sm:pt-10 px-4 sm:px-5 pb-0 relative">
+            <div class="w-full h-full flex-shrink-0 snap-center pt-6 sm:pt-10 px-4 sm:px-5 pb-0 relative">
                
                <div class="w-full h-full grid grid-cols-4 gap-x-2 gap-y-2 sm:gap-x-3 sm:gap-y-3" style="grid-template-rows: repeat(6, minmax(0, 1fr));">
                   
@@ -719,7 +713,7 @@ export function renderHomeApp(store) {
 
                   <div class="col-span-2 row-span-1 flex flex-col justify-center space-y-2 min-h-0 w-full h-full pr-2">
                      <input type="text" value="正在进入..." class="w-full ${inputBg} backdrop-blur-2xl px-3 py-1.5 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm shrink-0" onclick="event.stopPropagation()" />
-                     <input type="text" value="梦之旅途" class="w-[80%] ml-[20%] ${inputBg} backdrop-blur-2xl px-3 py-1.5 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm shrink-0" onclick="event.stopPropagation()" />
+                     <input type="text" value="梦之旅途" class="w-[85%] ml-[15%] ${inputBg} backdrop-blur-2xl px-3 py-1.5 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm shrink-0" onclick="event.stopPropagation()" />
                   </div>
 
                   <div class="col-span-2 row-span-1 grid grid-cols-2 gap-1 min-h-0 w-full h-full items-center pl-1">
@@ -730,7 +724,7 @@ export function renderHomeApp(store) {
                </div>
             </div>
 
-            <div class="w-full h-full flex-shrink-0 snap-center pt-8 sm:pt-10 px-4 sm:px-5 pb-0 relative overflow-hidden">
+            <div class="w-full h-full flex-shrink-0 snap-center pt-6 sm:pt-10 px-4 sm:px-5 pb-0 relative overflow-hidden">
                 <div class="w-full h-full grid grid-cols-4 gap-y-2 gap-x-2" style="grid-template-rows: repeat(6, minmax(0, 1fr));">
                      
                      <div id="keep-alive-status" class="col-span-4 row-span-4 w-full h-full grid grid-rows-4 gap-y-1 rounded-[32px] ${isDark?'bg-black/30':'bg-white/30'} relative z-10 p-4 sm:p-5 backdrop-blur-md min-h-0 shadow-sm border ${isDark?'border-white/10':'border-white/40'}">
