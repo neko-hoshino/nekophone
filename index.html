@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>NeKoPhone</title>
   
   <link rel="manifest" href="manifest.json">
@@ -14,7 +14,7 @@
   
  <style>
     :root {
-      /* 🌟 极简底座：只保留最基础的系统环境字体 */
+      /* 只保留最基础的系统环境字体 */
       --system-font: system-ui, -apple-system, sans-serif;
     }
 
@@ -29,21 +29,54 @@
     
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    /* ================= 🌟 iOS 防放大终极装甲 ================= */
+    /* 强制所有输入框的字体至少为 16px，彻底斩断 iOS 自动放大的判定条件 */
+    input, textarea, select { font-size: 16px !important; }
+    
+    /* 禁用双击放大手势 */
+    * {
+        touch-action: manipulation;
+    }
+    /* ========================================================= */
   </style>
 </head>
 <body class="bg-gray-100 flex items-center justify-center sm:p-4 min-h-screen">
   
   <div class="relative w-full h-[100dvh] sm:w-[375px] sm:h-[812px] bg-white sm:rounded-[40px] sm:shadow-2xl overflow-hidden" id="phone-container">
-    <div class="w-full h-full flex items-center justify-center text-gray-400 font-bold">
-      手机启动中...
-    </div>
+    <div id="auth-screen" style="display: none;" class="fixed inset-0 z-[9999] bg-[#F8F7F3] flex flex-col items-center justify-center transition-opacity duration-700">
+      <div class="flex flex-col items-center">
+          <i data-lucide="lock-keyhole" class="w-10 h-10 text-gray-800 mb-6 opacity-80"></i>
+          <h2 class="text-2xl font-serif tracking-widest text-gray-900 mb-2 uppercase">NekoPhone</h2>
+          <p class="text-[11px] text-gray-400 tracking-widest uppercase mb-10">Private Access Only</p>
+          <div class="relative w-64">
+              <input id="invite-code-input" type="text" placeholder="Enter Invite Code" 
+                     class="w-full bg-white/50 border border-gray-200 rounded-2xl px-5 py-4 text-center text-[14px] font-mono tracking-widest text-gray-800 outline-none shadow-sm focus:border-gray-400 transition-colors placeholder-gray-300">
+          </div>
+          <button onclick="window.verifyCode()" id="verify-btn"
+                  class="mt-6 w-64 bg-gray-900 text-white rounded-2xl py-4 text-[12px] font-bold tracking-widest uppercase active:scale-95 transition-transform shadow-lg flex items-center justify-center">
+              <span>Verify Access</span>
+          </button>
+          <p id="auth-error-msg" class="text-red-500 text-[11px] mt-4 h-4 font-bold opacity-0 transition-opacity"></p>
+      </div>
+  </div>
+    <div class="w-full h-full flex flex-col relative z-10" id="app-root"></div>
   </div>
 
-  <div id="toast-container" class="absolute top-14 inset-x-0 flex justify-center z-[100] hidden opacity-0 transition-opacity duration-300 pointer-events-none">
-    <div id="toast-msg" class="bg-gray-800/90 backdrop-blur-sm text-white px-5 py-2.5 rounded-full shadow-lg text-sm font-medium"></div>
-  </div>
+  <div id="toast-container" class="fixed top-10 left-1/2 transform -translate-x-1/2 z-[1000] flex flex-col space-y-2 pointer-events-none"></div>
 
-  <script type="module" src="./js/main.js"></script>
-  
+  <script type="module" src="js/main.js"></script>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js')
+          .then(reg => console.log('Service Worker 注册成功:', reg.scope))
+          .catch(err => console.log('Service Worker 注册失败:', err));
+      });
+    }
+
+    // 🌟 旧版简陋的 boot-screen 及其定时器已经被彻底删除！
+    // 现在完全由 home.js 里的极简杂志风猫咪接管开屏大权！
+  </script>
 </body>
 </html>

@@ -14,6 +14,112 @@ import { renderBloggerApp } from './apps/blogger.js';
 import { renderAo3App } from './apps/ao3.js';
 import { renderDarkroomApp } from './apps/darkroom.js';
 
+// 1. 获取/生成设备唯一标识
+function getDeviceId() {
+    let id = localStorage.getItem('neko_device_id');
+    if (!id) {
+        id = 'dev-' + Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+        localStorage.setItem('neko_device_id', id);
+    }
+    return id;
+}
+
+// 2. 🌟 全新核验逻辑：每次刷新网页都偷偷问一下服务器，码还在不在？
+async function checkAuth() {
+    const isVerified = localStorage.getItem('neko_is_verified');
+    const savedCode = localStorage.getItem('neko_active_code'); // 取出他上次登录用的码
+    const authUI = document.getElementById('auth-screen');
+    const deviceId = getDeviceId();
+
+    // 如果他以前登录过，拿着他当时的码去服务器查岗
+    if (isVerified === 'true' && savedCode) {
+        try {
+            const res = await fetch('https://neko-hoshino.duckdns.org/api/verify-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: savedCode, deviceId })
+            });
+            const result = await res.json();
+            
+            if (res.ok && result.success) {
+                // 码还在，主人没删，隐身放行！
+                if(authUI) authUI.style.display = 'none';
+                return true;
+            } else {
+                // 💥 关键点：服务器说码无效了（被你删了）！抛出错误！
+                throw new Error('授权已被管理员收回');
+            }
+        } catch (e) {
+            // 💥 踢人逻辑：清除他的登录状态，重新弹出密码锁！
+            localStorage.removeItem('neko_is_verified');
+            localStorage.removeItem('neko_active_code');
+            if(authUI) {
+                authUI.style.display = 'flex';
+                const errMsg = document.getElementById('auth-error-msg');
+                if(errMsg) {
+                    errMsg.innerText = '授权已失效，请重新输入有效邀请码';
+                    errMsg.style.opacity = '1';
+                }
+            }
+            if(window.lucide) window.lucide.createIcons();
+            return false;
+        }
+    } else {
+        // 根本没登录过，直接拦截
+        if(authUI) authUI.style.display = 'flex';
+        if(window.lucide) window.lucide.createIcons();
+        return false;
+    }
+}
+
+// 3. 全局验证函数 (用户手动点 Verify 按钮时执行)
+window.verifyCode = async function() {
+    const code = document.getElementById('invite-code-input').value.trim();
+    const btn = document.getElementById('verify-btn');
+    const errMsg = document.getElementById('auth-error-msg');
+    const deviceId = getDeviceId();
+
+    if (!code) { errMsg.innerText = "请输入验证码"; errMsg.style.opacity = '1'; return; }
+
+    btn.disabled = true;
+    btn.innerHTML = '<i class="w-4 h-4 animate-spin text-white">⏳</i>'; 
+
+    try {
+        const res = await fetch('https://neko-hoshino.duckdns.org/api/verify-code', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code, deviceId })
+        });
+        const result = await res.json();
+        
+        if (res.ok && result.success) {
+            // 🌟 验证成功，把状态和码都存进手机里
+            localStorage.setItem('neko_is_verified', 'true');
+            localStorage.setItem('neko_active_code', code); 
+            
+            btn.innerHTML = 'Success!';
+            setTimeout(() => {
+                document.getElementById('auth-screen').style.opacity = '0';
+                setTimeout(() => { 
+                    document.getElementById('auth-screen').style.display = 'none'; 
+                    initApp(); // 启动系统
+                }, 700);
+            }, 500);
+        } else {
+            errMsg.innerText = result.error || '验证失败';
+            errMsg.style.opacity = '1';
+        }
+    } catch (e) {
+        errMsg.innerText = '无法连接验证服务器';
+        errMsg.style.opacity = '1';
+    } finally {
+        if (btn.innerHTML !== 'Success!') {
+            btn.disabled = false;
+            btn.innerHTML = '<span>Verify Access</span>';
+        }
+    }
+};
+
 // 🌟 核心：全局注入 iOS 开关样式，所有 App 均可白嫖！
 if (!document.getElementById('global-ios-switch-css')) {
     const style = document.createElement('style');
@@ -171,55 +277,64 @@ function render() {
   }
   // ================= 全局外观与图库引擎 =================
   const ap = store.appearance || {};
-  let fontCss = '';
+  let fontCss = ''; // 保留空变量防止下面报错，但我们改用 Head 注入，彻底解决闪烁！
 
-  if (ap.sysFont) {
-    let safeUrl = ap.sysFont.trim();
-    let fontName = 'system-ui, -apple-system, sans-serif';
+  // 🌟 终极修复：增加“字体记忆锁”，只有当字体真的被修改时，才去触碰底层 CSS
+  if (window._lastFontRender !== ap.sysFont) {
+      window._lastFontRender = ap.sysFont;
+      
+      let safeUrl = ap.sysFont ? ap.sysFont.trim() : '';
+      let fontName = 'system-ui, -apple-system, sans-serif';
 
-    // 🌟 兼容判断：无论是 http 链接，还是我们刚刚一键导入的 data:base64 数据，统统接管！
-    if (safeUrl.includes('http') || safeUrl.startsWith('data:')) {
-        fontName = 'MC_CustomFont';
-        
-        let fontFormat = '';
-        if (safeUrl.startsWith('data:')) {
-            // 解析本地 Base64 的格式
-            if (safeUrl.includes('font/ttf') || safeUrl.includes('application/x-font-ttf')) fontFormat = "format('truetype')";
-            else if (safeUrl.includes('font/otf')) fontFormat = "format('opentype')";
-            else if (safeUrl.includes('font/woff2')) fontFormat = "format('woff2')";
-            else if (safeUrl.includes('font/woff')) fontFormat = "format('woff')";
-        } else {
-            // 解析网络直链的格式
-            safeUrl = encodeURI(safeUrl); 
-            if (safeUrl.toLowerCase().includes('.ttf')) fontFormat = "format('truetype')";
-            else if (safeUrl.toLowerCase().includes('.otf')) fontFormat = "format('opentype')";
-            else if (safeUrl.toLowerCase().includes('.woff2')) fontFormat = "format('woff2')";
-            else if (safeUrl.toLowerCase().includes('.woff')) fontFormat = "format('woff')";
+      // 斩杀旧的字体文件标签
+      let existingStyle = document.getElementById('mc-custom-font-style');
+      if (existingStyle) existingStyle.remove();
+
+      // 斩杀旧的全局覆盖标签
+      let rootStyle = document.getElementById('mc-root-font-style');
+      if (rootStyle) rootStyle.remove();
+
+      if (safeUrl) {
+          // 判断是网络链接还是 Base64
+          if (safeUrl.includes('http') || safeUrl.startsWith('data:')) {
+              fontName = 'MC_CustomFont';
+              let fontFormat = '';
+              if (safeUrl.startsWith('data:')) {
+                  if (safeUrl.includes('font/ttf') || safeUrl.includes('application/x-font-ttf')) fontFormat = "format('truetype')";
+                  else if (safeUrl.includes('font/otf')) fontFormat = "format('opentype')";
+                  else if (safeUrl.includes('font/woff2')) fontFormat = "format('woff2')";
+                  else if (safeUrl.includes('font/woff')) fontFormat = "format('woff')";
+              } else {
+                  safeUrl = encodeURI(safeUrl); 
+                  if (safeUrl.toLowerCase().includes('.ttf')) fontFormat = "format('truetype')";
+                  else if (safeUrl.toLowerCase().includes('.otf')) fontFormat = "format('opentype')";
+                  else if (safeUrl.toLowerCase().includes('.woff2')) fontFormat = "format('woff2')";
+                  else if (safeUrl.toLowerCase().includes('.woff')) fontFormat = "format('woff')";
+              }
+
+              const style = document.createElement('style');
+              style.id = 'mc-custom-font-style';
+              // 加入 font-display: swap 让字体加载更平滑
+              style.textContent = `@font-face { font-family: '${fontName}'; src: url('${safeUrl}') ${fontFormat}; font-display: swap; }`;
+              document.head.appendChild(style);
+          } else {
+              // 识别为本地系统字体 (如 Arial)
+              fontName = safeUrl; 
+          }
+      }
+
+      // 将字体规则死死钉在 document.head 里，脱离 render 循环！
+      const rStyle = document.createElement('style');
+      rStyle.id = 'mc-root-font-style';
+      rStyle.textContent = `
+        :root {
+           --system-font: '${fontName}', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
         }
-
-        // 斩杀旧标签，建新标签
-        let existingStyle = document.getElementById('mc-custom-font-style');
-        if (existingStyle) existingStyle.remove();
-
-        const style = document.createElement('style');
-        style.id = 'mc-custom-font-style';
-        style.textContent = `@font-face { font-family: '${fontName}'; src: url('${safeUrl}') ${fontFormat}; font-display: swap; }`;
-        document.head.appendChild(style);
-        
-    } else {
-        // 本地系统字体名 (如 Arial)
-        fontName = safeUrl;
-    }
-
-    // 覆盖全域
-    fontCss += `
-      :root {
-         --system-font: '${fontName}', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif !important;
-      }
-      body, body *, .font-sans, .font-serif, .font-mono, .font-cursive { 
-         font-family: var(--system-font) !important; 
-      }
-    `;
+        body, body *, .font-sans, .font-serif, .font-mono, .font-cursive { 
+           font-family: var(--system-font) !important; 
+        }
+      `;
+      document.head.appendChild(rStyle);
   }
   // 🌟 核心破局：纯数值比例缩放引擎！严格防范 px * px 的非法数学错误
   if (ap.sysFontSize) {
@@ -522,7 +637,8 @@ function render() {
 };
 window.DB = DB; // 暴露给全局
 
-window.onload = async () => {
+// 🌟 将原本的 window.onload 改装成一个叫 initApp 的启动引擎
+async function initApp() {
   updateTime();
   setInterval(updateTime, 1000); 
 
@@ -531,18 +647,25 @@ window.onload = async () => {
     const savedDB = await DB.get();
     if (savedDB) {
        Object.assign(store, savedDB);
-       store.currentApp = null; // 强制回城防卡死
-    } else {
-       // 如果新数据库是空的，检查有没有老版 localStorage 存档
-       const oldLocal = localStorage.getItem('neko_store');
-       if (oldLocal) {
-          Object.assign(store, JSON.parse(oldLocal));
-          store.currentApp = null;
-          await DB.set(store); // 瞬间存入新硬盘
-          localStorage.removeItem('neko_store');
-       }
+       store.currentApp = null;
     }
-  } catch(e) { console.log('读取DB失败', e) }
+    window.render();
+  } catch (e) {
+    console.log('数据加载失败', e);
+    window.render();
+  }
+}
 
-  render(); 
+// 🌟 真正的页面加载入口
+window.onload = async () => {
+  // 先把黑布拉下来（显示黑色的背景，防止验证的时候看到白屏），然后等核验结果
+  document.body.style.backgroundColor = "#F8F7F3"; 
+  
+  const isAuthorized = await checkAuth();
+  
+  if (isAuthorized) {
+      // 服务器说钥匙有效，立刻启动系统！
+      initApp();
+  }
+  // 如果无效，checkAuth 函数会自动把密码锁弹出来，系统保持静默。
 };

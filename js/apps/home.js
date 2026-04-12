@@ -61,12 +61,13 @@ if (!window.homeAudioEngine) {
     };
 }
 
-// 初始化弹窗与定时器状态
+// 🌟 初始化弹窗与开屏状态
 if (!window.homeState) window.homeState = { 
     showAddAudioModal: false, showPlaylistModal: false, showTodoModal: false, showPeriodModal: false, 
     showCompanionModal: false, tempLyrics: null, isGeneratingReaction: false, isGeneratingFortune: false,
     lastScrollLeft: 0, 
-    isRestoringScroll: false 
+    isRestoringScroll: false,
+    isBooting: true // 🆕 增加开屏状态标志
 };
 
 // 全局歌词引擎
@@ -107,6 +108,12 @@ if (!window.lyricTimerInt) {
 
 if (!window.homeActions) {
   window.homeActions = {
+    // 🆕 处理开屏完成
+    finishBooting: () => {
+      window.homeState.isBooting = false;
+      window.homeActions.doRender();
+    },
+
     doRender: () => {
         const el = document.getElementById('home-swiper-scroll');
         if (el && !window.homeState.isRestoringScroll) {
@@ -125,6 +132,7 @@ if (!window.homeActions) {
         }
     },
 
+    // ... (以下代码保持不变，直到 createAppIcon)
     updateAvatar: (e) => {
       const file = e.target.files[0]; if(!file) return;
       window.actions.compressImage(file, (base64) => { store.personas[0].avatar = base64; window.homeActions.doRender(); });
@@ -462,7 +470,78 @@ function createDockIcon(iconName, label, actionStr, mcClass, isDark) {
   `;
 }
 
+// 🆕 注入开屏动画所需要的 CSS
+const bootStyle = document.createElement('style');
+bootStyle.innerHTML = `
+@keyframes catRun { to { stroke-dashoffset: 0; } }
+@keyframes textFadeIn { to { opacity: 1; transform: translateY(0); } }
+@keyframes bootOut { to { opacity: 0; visibility: hidden; } }
+
+.nekophone-boot-screen {
+  position: absolute; inset: 0; z-index: 9999;
+  background-color: #F8F7F3; /* 极简米白纸张色 */
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  overflow: hidden;
+  transition: opacity 1s ease, visibility 1s ease;
+}
+.nekophone-boot-screen.fade-out { animation: bootOut 1s ease forwards; animation-delay: 1.5s; }
+
+.cat-outline {
+  width: 140px; height: 140px;
+  stroke: #1A1A1A; /* 炭黑色线条 */
+  stroke-width: 2.5; 
+  stroke-linecap: round; stroke-linejoin: round;
+  fill: none;
+  stroke-dasharray: 400; stroke-dashoffset: 400; /* 计算好的完美路径长度 */
+  animation: catRun 3s ease-in-out forwards;
+}
+
+.boot-text {
+  margin-top: 25px;
+  font-family: 'Playfair Display', serif; /* 纤细衬线字体 */
+  font-weight: 300; font-size: 20px; color: #1A1A1A;
+  letter-spacing: 0.35em; text-transform: lowercase;
+  opacity: 0; transform: translateY(10px);
+  animation: textFadeIn 1s ease forwards; animation-delay: 2.5s;
+}
+`;
+document.head.appendChild(bootStyle);
+
+// 🆕 增加Playfair Display字体的引用
+if(!document.getElementById('playfair-font')) {
+    const link = document.createElement('link');
+    link.id = 'playfair-font'; link.rel = 'stylesheet'; link.href = 'https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,300;1,300&display=swap';
+    document.head.appendChild(link);
+}
+
 export function renderHomeApp(store) {
+  // 🆕 如果正在开屏，只渲染开屏动画界面
+  if (window.homeState?.isBooting) {
+    // 3.5秒后自动结束开屏（动画3s + 留白0.5s）
+    setTimeout(() => { window.homeActions?.finishBooting(); }, 3500);
+
+    return `
+      <div class="nekophone-boot-screen ${window.homeState.isBooting ? '' : 'fade-out'}">
+        <svg class="cat-outline" viewBox="0 0 100 100">
+          <path d="M 80 65 
+                   C 95 65, 95 90, 70 90 
+                   L 35 90 
+                   C 10 90, 15 50, 35 40 
+                   L 32 20 
+                   Q 32 14, 37 18 
+                   L 47 28 
+                   C 52 25, 58 25, 63 28 
+                   L 75 17 
+                   Q 80 13, 79 21 
+                   L 75 40 
+                   C 85 55, 80 85, 55 85" />
+        </svg>
+        <span class="boot-text">nekophone</span>
+      </div>
+    `;
+  }
+
+  // 以下为原有的主界面渲染逻辑
   const list = store.customAudio || [];
   if (list.length > 0 && window.homeAudioEngine && !window.homeAudioEngine.getAttribute('src')) {
       window.audioState.currentIndex = Math.min(window.audioState.currentIndex || 0, list.length - 1);
@@ -640,7 +719,7 @@ export function renderHomeApp(store) {
 
                   <div class="col-span-2 row-span-1 flex flex-col justify-center space-y-2 min-h-0 w-full h-full pr-2">
                      <input type="text" value="正在进入..." class="w-full ${inputBg} backdrop-blur-2xl px-3 py-1.5 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm shrink-0" onclick="event.stopPropagation()" />
-                     <input type="text" value="梦之旅途" class="w-[85%] ml-[15%] ${inputBg} backdrop-blur-2xl px-3 py-1.5 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm shrink-0" onclick="event.stopPropagation()" />
+                     <input type="text" value="梦之旅途" class="w-[80%] ml-[20%] ${inputBg} backdrop-blur-2xl px-3 py-1.5 text-[11px] font-cursive rounded-full outline-none text-center shadow-sm shrink-0" onclick="event.stopPropagation()" />
                   </div>
 
                   <div class="col-span-2 row-span-1 grid grid-cols-2 gap-1 min-h-0 w-full h-full items-center pl-1">
