@@ -290,6 +290,7 @@ const wxState = {
   showNewChatModal: false,
   newChatStep: 'chooseType', // 'chooseType' | 'singleList' | 'groupSelect' | 'groupSetup'
   newGroupData: { members: [], name: '', personaId: null },
+  revealingMsgIds: new Set(), // 🌟 iOS 防杀：逐条揭示动画的隐藏队列（纯内存，永不持久化）
 };
 wxState.ringtone.loop = true;
 window.wxState = wxState; // 🌟 把微信内部状态暴露给全局，方便外部读取
@@ -2128,21 +2129,35 @@ ${relation}
     if (oldAutoMsg && !targetObj.autoMsgEnabled) {
     console.log('[系统] 主动聊天已关闭，发送空包弹狙杀云端 AUTO 闹钟！');
     const memberIds = chat.isGroup ? chat.memberIds : [targetObj.id];
-    memberIds.forEach(mId => {
+    const cancelPromises = memberIds.map(mId => {
         const mChar = store.contacts.find(c => c.id === mId);
         if (mChar && typeof window.planCloudBrain === 'function') {
-            window.planCloudBrain(-1, mChar, [], 'AUTO|' + chat.charId + '|' + mId + '|0', 0, 0, true).catch(()=>{});
+            return window.planCloudBrain(-1, mChar, [], 'AUTO|' + chat.charId + '|' + mId + '|0', 0, 0, true);
         }
+        return Promise.resolve();
+    });
+    Promise.all(cancelPromises).catch(e => {
+        console.error('[空包弹发射失败]', e.message || e);
+        targetObj.autoMsgEnabled = true; // 回滚开关状态
+        window.actions.showToast('关闭主动聊天失败，云端闹钟未能取消，请检查网络后重试');
+        window.render();
     });
 }
 if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
     console.log('[系统] 朋友圈已关闭，发送空包弹狙杀云端 MOMENT 闹钟！');
     const memberIds = chat.isGroup ? chat.memberIds : [targetObj.id];
-    memberIds.forEach(mId => {
+    const cancelPromises = memberIds.map(mId => {
         const mChar = store.contacts.find(c => c.id === mId);
         if (mChar && typeof window.planCloudBrain === 'function') {
-            window.planCloudBrain(-1, mChar, [], 'MOMENT|' + chat.charId + '|' + mId + '|0', 0, 0, true).catch(()=>{});
+            return window.planCloudBrain(-1, mChar, [], 'MOMENT|' + chat.charId + '|' + mId + '|0', 0, 0, true);
         }
+        return Promise.resolve();
+    });
+    Promise.all(cancelPromises).catch(e => {
+        console.error('[朋友圈空包弹发射失败]', e.message || e);
+        targetObj.autoMomentFreq = oldMomentFreq; // 回滚开关状态
+        window.actions.showToast('关闭自动朋友圈失败，云端闹钟未能取消，请检查网络后重试');
+        window.render();
     });
 }
     
@@ -4014,7 +4029,7 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
     let lastRenderedTime = ''; 
     
     // 🌟 核心切片：将线上消息提取出来，根据 displayCount 截断，并在顶部加上加载按钮！
-    const onlineMsgs = chatData.messages.filter(m => !m.isOffline && !m.isHidden);
+    const onlineMsgs = chatData.messages.filter(m => !m.isOffline && !m.isHidden && !wxState.revealingMsgIds.has(m.id));
     const displayCount = wxState.displayCount || 50;
     
     const messagesHtml = (onlineMsgs.length > displayCount ? `<div class="flex justify-center my-2"><div class="text-[11px] font-bold tracking-widest text-gray-600 bg-gray-100/80 px-4 py-1.5 rounded-full cursor-pointer active:scale-90 transition-transform" onclick="window.wxActions.loadMoreHistory()">点击加载更多历史记录</div></div>` : '') + 
@@ -4121,11 +4136,12 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
                safeText = doc.body.innerHTML;
             }
         } catch(e) {}
-        
+
         if (msg.quote) {
-           quoteHtmlOut = `<div class="mc-quote-out text-[11px] text-gray-500 bg-gray-200/60 rounded-[8px] px-2.5 py-1.5 mb-1 max-w-full break-words whitespace-pre-wrap ${msg.isMe ? 'self-end' : 'self-start'}">${msg.quote.sender}：${msg.quote.text}</div>`;
+           quoteHtmlOut = `<div class="mc-quote-out text-[11px] text-gray-800 bg-gray-300/80 rounded-[8px] px-2.5 py-1.5 mb-1 max-w-full break-words whitespace-pre-wrap ${msg.isMe ? 'self-end' : 'self-start'}">${msg.quote.sender}：${msg.quote.text}</div>`;
         }
-        contentHtml = safeText;
+        // 🌟 保留用户消息中的换行符，使其在气泡中正确显示
+        contentHtml = msg.isMe ? safeText.replace(/\n/g, '<br>') : safeText;
       } else if (msg.msgType === 'real_image') {
         maxWidthClass = 'max-w-[40%]';
         bubbleClass = 'mc-bubble-img bg-white p-1 rounded-xl shadow-sm border border-gray-100'; 
@@ -6107,6 +6123,8 @@ const cloudTime = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString('zh
         let shouldSmashChat = false;
         if (isAutoTask && !targetObj.autoMsgEnabled) {
             shouldSmashChat = true; // 主动聊天关了，砸碎！
+            console.log(`[砸碎引擎] ${char.name} 的主动聊天已关闭，拦截此条云端消息！`);
+            continue; // 🌟 直接跳过这条消息的全部处理，不解析、不入库、不渲染
         }
         if (isMomentTask) {
             shouldSmashChat = true; // 🌟 核心：朋友圈专属线程【绝对不允许】将任何文字漏到聊天窗口！砸碎所有常规气泡！
@@ -6233,6 +6251,10 @@ if (/\[(?:退回转账|退还转账)\]/.test(remainingText)) {
         
         // 🌟 【新增代码】：在解析开始前，全局扫描聊天内容，强行把掉到下一行的照片和定位吸附回上一行！
         remainingText = remainingText.replace(/[\r\n]+\s*(\[附带虚拟照片|\[附带定位)/g, ' $1');
+
+        // 🌟 【AI格式修正】：在所有[]指令前强制加入换行符，避免AI忘记换行导致格式错误
+        // 注意：朋友圈的[附带虚拟照片]和[附带定位]已经在上面被吸附到同一行，不会被这里影响
+        remainingText = remainingText.replace(/([^\n])\[(?!附带)(语音|虚拟照片|表情包|发送定位|发起转账|点击收款|退回转账|发起语音通话|发起视频通话|设置闹钟|定时发送|更换头像|修改备注|撤回上一条消息|发朋友圈|戳一戳|修改被戳动作|修改被戳后缀|拉黑用户|淘宝下单|下单|保持拉黑|解除拉黑|发送好友申请)/g, '$1\n[$2');
 
         // 🌟 终极安全的朋友圈拦截器：只吃当前这一行，绝对不吞噬换行后的正常聊天！
         if (/\[(?:发朋友圈|发布朋友圈)\]/.test(remainingText)) {
@@ -6934,6 +6956,19 @@ if (cleanedBeforeText.trim()) {
 
                 if (finalMsgs.length === 0 && !hasSystemAction) {
     const fallbackText = (replyText && replyText.trim()) ? replyText : 'AI 没有生成有效回复';
+    // 🌟 朋友圈线程的报错信息：重定向到朋友圈动态里，不进聊天室！
+    if (isMomentTask) {
+        store.moments = store.moments || [];
+        store.moments.push({
+            id: Date.now() + sysMsgOffset++, senderId: char.id, senderName: char.name, avatar: char.avatar,
+            text: `⚠️ 朋友圈生成失败: ${fallbackText}`,
+            imageUrl: null, virtualImageText: null,
+            time: cloudTime, timestamp: Date.now() + sysMsgOffset++, likes: [], comments: [],
+            isError: true
+        });
+        if (typeof window.render === 'function' && wxState.view === 'moments') window.render();
+        continue; // 已重定向到朋友圈，跳过后续聊天室逻辑
+    }
     // 改为推入 finalMsgs，而不是直接 chat.messages.push
     finalMsgs.push({
         id: Date.now() + sysMsgOffset++,
@@ -6951,22 +6986,35 @@ if (cleanedBeforeText.trim()) {
 
 if (finalMsgs.length === 0 && !hasSystemAction) continue;
 
+        // 🌟 砸碎引擎最终裁决：朋友圈线程的消息只允许提取朋友圈动态（上面已处理），绝不允许漏聊天气泡！
+        if (shouldSmashChat) {
+            console.log(`[砸碎引擎] 朋友圈线程消息已拦截，${finalMsgs.length} 条气泡被砸碎，不进入聊天窗口。`);
+            continue;
+        }
+
         // ==========================================
         // 🌟 核心分流引擎：精准拿捏 Render 时机
         // ==========================================
         const isUserWatchingChat = isActive && !document.hidden;
 
+        // ==========================================
+        // 🌟 iOS 生存第一法则：无论任何场景，先全量落袋到内存 + 持久化！
+        //    绝不允许消息只存在于 JS 闭包的 setTimeout 里！
+        // ==========================================
+        chat.messages.push(...finalMsgs);
+        // 🌟 立刻持久化到 IndexedDB，就算 iOS 下一秒杀页面也不怕！
+        if (window.DB) {
+            window.DB.set(JSON.parse(JSON.stringify(store))).catch(e => console.warn('紧急落盘失败:', e));
+        }
+
         if (!isUserWatchingChat) {
             // 【场景 2 & 3】：用户不在聊天室，或者切到后台了
-            // 1. 瞬间全量落袋为安，防止 iOS 截杀
-            chat.messages.push(...finalMsgs);
-            if (typeof saveToLocalStorage === 'function') saveToLocalStorage();
 
-            // 2. 增加未读红点（不发出叮咚声，按你之前非活跃状态逻辑走）
+            // 1. 增加未读红点
             chat.unreadCount = (chat.unreadCount || 0) + finalMsgs.length;
             try { new Audio(store.appearance?.newMsgSound || ' ').play().catch(()=>{}); } catch(e) {}
 
-            // 3. 决定是否 Render (千万别打扰别的页面)
+            // 2. 决定是否 Render (千万别打扰别的页面)
             if (typeof wxState !== 'undefined' && wxState.view === 'main') {
                 // 【场景 2】：人在消息列表，需要红点跳一下！
                 if (typeof window.render === 'function') window.render();
@@ -6974,11 +7022,11 @@ if (finalMsgs.length === 0 && !hasSystemAction) continue;
                 // 【场景 3】：人在朋友圈/通讯录，默默数数，绝对不 render 打扰！
             }
 
-            // 4. 后台默默去处理通话语音（隐形闭包，不阻塞）
+            // 3. 后台默默去处理通话语音（隐形闭包，不阻塞）
             (async () => {
                 for (let i = 0; i < finalMsgs.length; i++) {
                     const newMsg = finalMsgs[i];
-                    let senderChar = char; 
+                    let senderChar = char;
                     if (newMsg.sender && typeof newMsg.sender === 'string') {
                         let found = store.contacts.find(c => c.name === newMsg.sender || c.id === newMsg.sender);
                         if (found) senderChar = found;
@@ -6995,16 +7043,32 @@ if (finalMsgs.length === 0 && !hasSystemAction) continue;
             })();
 
         } else {
-            // 【场景 1】：用户就盯着这个聊天室！我们要一条条冒出来的流式感！
+            // 【场景 1】：用户就盯着这个聊天室！数据已落袋，现在做逐条冒出的视觉动画！
             if (typeof wxState !== 'undefined' && wxState.typingStatus) wxState.typingStatus[chatId] = false;
 
+            // 🌟 用纯内存 Set 记录待揭示的消息 ID（不污染消息对象，永远不会被持久化到 IndexedDB）
+            const revealIds = finalMsgs.map(m => m.id);
+            revealIds.forEach(id => wxState.revealingMsgIds.add(id));
+            // 先 render 一次确保 UI 干净（Set 里的消息不渲染）
+            if (typeof window.render === 'function') window.render();
+
             (async () => {
-                for (let i = 0; i < finalMsgs.length; i++) {
-                    const newMsg = finalMsgs[i];
-                    
-                    // 1. 进一条，存一条，绝不贪多
-                    chat.messages.push(newMsg);
-                    if (typeof saveToLocalStorage === 'function') saveToLocalStorage();
+                for (let i = 0; i < revealIds.length; i++) {
+                    // 🌟 iOS 生存检查：如果页面被隐藏（切到后台），立即停止渲染循环，防止内存爆炸
+                    if (document.hidden) {
+                        // 批量清空剩余的待揭示消息，避免下次切回来时重复渲染
+                        for (let j = i; j < revealIds.length; j++) {
+                            wxState.revealingMsgIds.delete(revealIds[j]);
+                        }
+                        break;
+                    }
+
+                    const msgId = revealIds[i];
+                    const newMsg = chat.messages.find(m => m.id === msgId);
+                    if (!newMsg) break; // 防御性检查
+
+                    // 1. 从 Set 中移除，揭开这条消息
+                    wxState.revealingMsgIds.delete(msgId);
 
                     // 2. 出来一条就 Render 一下！画面稳稳跟上！
                     if (typeof window.render === 'function') window.render();
@@ -7016,7 +7080,7 @@ if (finalMsgs.length === 0 && !hasSystemAction) continue;
                     }
 
                     // 4. 通话语音处理
-                    let senderChar = char; 
+                    let senderChar = char;
                     if (newMsg.sender && typeof newMsg.sender === 'string') {
                         let found = store.contacts.find(c => c.name === newMsg.sender || c.id === newMsg.sender);
                         if (found) senderChar = found;
@@ -7028,12 +7092,12 @@ if (finalMsgs.length === 0 && !hasSystemAction) continue;
                             newMsg.audioUrl = url;
                             playCallAudio(url);
                             callAudioPlayed = true;
-                            if (typeof window.render === 'function') window.render(); // 拿到语音后再刷新下UI
+                            if (typeof window.render === 'function') window.render();
                         }
                     }
 
                     // 5. 核心魔法：停顿 0.8 秒，给你完美的打字感
-                    if (i < finalMsgs.length - 1 && !document.hidden) {
+                    if (i < revealIds.length - 1) {
                         await new Promise(resolve => setTimeout(resolve, callAudioPlayed ? 300 : 800));
                     }
                 }

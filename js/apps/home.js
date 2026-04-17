@@ -561,11 +561,11 @@ export function renderHomeApp(store) {
   const polaroidHtml = `
       <div class="w-full flex justify-end transform scale-[0.85] sm:scale-90 origin-right shrink-0">
           <div class="relative w-32 h-40 cursor-pointer group active:scale-95 transition-transform" onclick="document.getElementById('home-polaroid-upload').click()">
-              <div class="absolute top-1 -left-2 w-full h-full bg-white/70 rounded-sm shadow-md border border-white/40 transform -rotate-6 flex flex-col p-1.5 z-0 transition-transform group-hover:-rotate-12 duration-300">
+              <div class="absolute top-1 -left-8 w-full h-full bg-white/70 rounded-sm shadow-md border border-white/40 transform -rotate-6 flex flex-col p-1.5 z-0 transition-transform group-hover:-rotate-12 duration-300">
                   <div class="w-full flex-1 bg-gray-300/30 rounded-sm"></div>
                   <div class="h-6"></div>
               </div>
-              <div class="absolute top-0 right-0 w-full h-full bg-[#fdfdfd] rounded-sm shadow-xl border border-white/60 transform rotate-3 flex flex-col p-1.5 z-10 transition-transform group-hover:rotate-6 duration-300">
+              <div class="absolute top-0 right-4 w-full h-full bg-[#fdfdfd] rounded-sm shadow-xl border border-white/60 transform rotate-3 flex flex-col p-1.5 z-10 transition-transform group-hover:rotate-6 duration-300">
                   <div class="w-full flex-1 bg-gray-100 rounded-sm overflow-hidden flex items-center justify-center relative">
                       ${polaroidImg ? `<img src="${polaroidImg}" class="w-full h-full object-cover" />` : `<i data-lucide="image-plus" class="w-6 h-6 text-gray-300"></i>`}
                       <div class="absolute inset-0 shadow-[inset_0_2px_10px_rgba(0,0,0,0.1)] pointer-events-none"></div>

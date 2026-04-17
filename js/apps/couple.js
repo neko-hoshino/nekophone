@@ -272,27 +272,43 @@ if (!window.cpActions) {
 
   fetchQAnswer: async (charId, qId, text) => {
     const ctx = window.cpActions.getQContext(charId, text);
+    const targetQ = store.coupleSpacesData[charId].questions.find(q => q.id === qId);
+    if (!targetQ) return;
+
     try {
-        const taskMsg = `【系统任务】用户 ${ctx.boundP.name} 在情侣提问箱向你提问：“${text}”。\n请结合上述人设和记忆，真实、自然地回答。❗要求极度精简，字数严格控制在30字以内！直接输出回答正文，绝不要带任何前缀！`;
+        const taskMsg = `【系统任务】用户 ${ctx.boundP.name} 在情侣提问箱向你提问："${text}"。\n请结合上述人设和记忆，真实、自然地回答。❗要求极度精简，字数严格控制在30字以内！直接输出回答正文，绝不要带任何前缀！`;
         const prompt = window.cpActions.buildMasterPrompt(charId, {
             task: taskMsg,
             scenario: 'questions'
-        });  
+        });
         const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
             body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
         });
+
+        // 🌟 检查页面是否已经被关闭或切换
+        if (document.hidden || !store.coupleSpacesData[charId]) {
+            throw new Error('页面已切换或关闭');
+        }
+
         const data = await res.json();
         const answer = window.cpActions.cleanAI(data.choices[0].message.content);
-        const targetQ = store.coupleSpacesData[charId].questions.find(q => q.id === qId);
-        if (targetQ) {
-            targetQ.answer = answer;
+
+        // 🌟 再次检查目标问题是否还存在
+        const finalCheck = store.coupleSpacesData[charId].questions.find(q => q.id === qId);
+        if (finalCheck) {
+            finalCheck.answer = answer;
             // 推入隐藏消息：用户提问，角色回答
             pushQnAHiddenMessage(charId, ctx.boundP.name, text, ctx.char.name, answer);
         }
         window.render();
     } catch(e) {
-        if (window.actions.showToast) window.actions.showToast('网络波动，TA没能回答');
+        // 🌟 兜底处理：如果中途打断，返回错误信息而不是卡住
+        if (targetQ) {
+            targetQ.answer = '（网络波动或页面切换，TA 没能回答。请点击重新提问）';
+        }
+        if (window.actions?.showToast) window.actions.showToast('网络波动或页面切换，请重试');
+        window.render();
     }
 },
 
@@ -312,11 +328,11 @@ if (!window.cpActions) {
     const input = document.getElementById('ans-input-' + qId);
     const text = input.value.trim();
     if (!text) return;
-    
+
     const spaceData = store.coupleSpacesData[charId];
     const targetQ = spaceData.questions.find(q => q.id === qId);
     if (!targetQ) return;
-    
+
     targetQ.answer = text;
     const ctx = window.cpActions.getQContext(charId);
     const askerName = ctx.char.name;
@@ -326,7 +342,7 @@ if (!window.cpActions) {
     window.render();
 
     try {
-        const taskMsg = `【系统任务】你之前在提问箱向用户提问：“${targetQ.text}”。\n用户刚才回答了你：“${text}”。\n请对用户的回答做出简短、自然的反应/评价。❗要求极度精简，字数严格控制在30字以内！直接输出反应正文，绝不要带任何前缀！`;
+        const taskMsg = `【系统任务】你之前在提问箱向用户提问："${targetQ.text}"。\n用户刚才回答了你："${text}"。\n请对用户的回答做出简短、自然的反应/评价。❗要求极度精简，字数严格控制在30字以内！直接输出反应正文，绝不要带任何前缀！`;
         const prompt = window.cpActions.buildMasterPrompt(charId, {
             task: taskMsg,
             scenario: 'questions'
@@ -335,11 +351,26 @@ if (!window.cpActions) {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
             body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
         });
+
+        // 🌟 检查页面是否已经被关闭或切换
+        if (document.hidden || !store.coupleSpacesData[charId]) {
+            throw new Error('页面已切换或关闭');
+        }
+
         const data = await res.json();
-        targetQ.reaction = window.cpActions.cleanAI(data.choices[0].message.content);
+        const reaction = window.cpActions.cleanAI(data.choices[0].message.content);
+
+        // 🌟 再次检查目标问题是否还存在
+        const finalCheck = store.coupleSpacesData[charId].questions.find(q => q.id === qId);
+        if (finalCheck) {
+            finalCheck.reaction = reaction;
+        }
         window.render();
     } catch(e) {
-        targetQ.reaction = "（TA 似乎在忙，轻轻摸了摸你的头...）";
+        // 🌟 兜底处理：如果中途打断，返回错误信息而不是卡住
+        if (targetQ) {
+            targetQ.reaction = "（网络波动或页面切换，TA 没能看到。请点击重新生成）";
+        }
         window.render();
     }
 },
@@ -350,7 +381,7 @@ if (!window.cpActions) {
       targetQ.reaction = null;
       window.render();
       try {
-          const taskMsg = `【系统任务】你之前在提问箱向用户提问：“${targetQ.text}”。\n用户刚才回答了你：“${targetQ.answer}”。\n请对用户的回答做出简短、自然的反应/评价。❗要求极度精简，字数严格控制在30字以内！直接输出反应正文，绝不要带任何前缀！`;
+          const taskMsg = `【系统任务】你之前在提问箱向用户提问："${targetQ.text}"。\n用户刚才回答了你："${targetQ.answer}"。\n请对用户的回答做出简短、自然的反应/评价。❗要求极度精简，字数严格控制在30字以内！直接输出反应正文，绝不要带任何前缀！`;
           const prompt = window.cpActions.buildMasterPrompt(charId, {
               task: taskMsg,
               scenario: 'questions'
@@ -359,11 +390,26 @@ if (!window.cpActions) {
               method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
               body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: Number(store.apiConfig?.temperature ?? 0.85) })
           });
+
+          // 🌟 检查页面是否已经被关闭或切换
+          if (document.hidden || !store.coupleSpacesData[charId]) {
+              throw new Error('页面已切换或关闭');
+          }
+
           const data = await res.json();
-          targetQ.reaction = window.cpActions.cleanAI(data.choices[0].message.content);
+          const reaction = window.cpActions.cleanAI(data.choices[0].message.content);
+
+          // 🌟 再次检查目标问题是否还存在
+          const finalCheck = store.coupleSpacesData[charId].questions.find(q => q.id === qId);
+          if (finalCheck) {
+              finalCheck.reaction = reaction;
+          }
           window.render();
       } catch(e) {
-          targetQ.reaction = "（TA 似乎在忙，轻轻摸了摸你的头...）";
+          // 🌟 兜底处理：如果中途打断，返回错误信息而不是卡住
+          if (targetQ) {
+              targetQ.reaction = "（网络波动或页面切换，TA 没能看到。请点击重新生成）";
+          }
           window.render();
       }
   },
