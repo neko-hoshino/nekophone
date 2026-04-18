@@ -24,7 +24,7 @@ function getDeviceId() {
     return id;
 }
 
-// 2. 🌟 全新核验逻辑：每次刷新网页都偷偷问一下服务器，码还在不在？
+// 2. 🌟 全新核验逻辑
 async function checkAuth() {
     const isVerified = localStorage.getItem('neko_is_verified');
     const savedCode = localStorage.getItem('neko_active_code'); 
@@ -67,7 +67,7 @@ async function checkAuth() {
     }
 }
 
-// 3. 全局验证函数 (用户手动点 Verify 按钮时执行)
+// 3. 全局验证函数
 window.verifyCode = async function() {
     const code = document.getElementById('invite-code-input').value.trim();
     const btn = document.getElementById('verify-btn');
@@ -114,7 +114,6 @@ window.verifyCode = async function() {
     }
 };
 
-// 🌟 核心：全局注入 iOS 开关样式
 if (!document.getElementById('global-ios-switch-css')) {
     const style = document.createElement('style');
     style.id = 'global-ios-switch-css';
@@ -150,7 +149,6 @@ window.actions = {
       setTimeout(() => toastContainer.classList.add('hidden'), 300);
     }, 2500);
   },
-// 智能无损与高画质压缩
   compressImage: (source, callback, forceCompress = false) => {
      const processImage = (src, skipCompress = false) => {
         if (skipCompress) {
@@ -193,7 +191,6 @@ window.actions = {
   }
 };
 
-// ================= 全局消息通知引擎 =================
 window.actions.notify = (title, text, avatarUrl) => {
   if ("Notification" in window && Notification.permission === "granted" && store.enableNotifications !== false) {
     try {
@@ -251,7 +248,6 @@ function updateTime() {
 }
 if (!window.globalScrollStates) window.globalScrollStates = {};
 
-// ================= 🌟 拖拽悬浮窗原生引擎 🌟 =================
 window.floatCallPos = null;
 window.startDragFloatCall = function(e) {
     let isDragging = false;
@@ -276,17 +272,15 @@ window.startDragFloatCall = function(e) {
         let dx = currentX - startX;
         let dy = currentY - startY;
 
-        // 超过 5px 才判定为拖动，防止误触
         if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
             isDragging = true;
         }
 
         if (isDragging) {
-            moveEvent.preventDefault(); // 防止拖拽时屏幕跟着滚动
+            moveEvent.preventDefault();
             let newLeft = initialLeft + dx;
             let newTop = initialTop + dy;
             
-            // 限制在屏幕范围内
             newLeft = Math.max(0, Math.min(newLeft, containerRect.width - elRect.width));
             newTop = Math.max(0, Math.min(newTop, containerRect.height - elRect.height));
 
@@ -306,13 +300,84 @@ window.startDragFloatCall = function(e) {
         el.style.transition = '';
 
         if (isDragging) {
-            // 保存位置以供下次 render 时继承
             window.floatCallPos = { x: parseFloat(el.style.left), y: parseFloat(el.style.top) };
         } else {
-            // 如果没发生拖拽，则判定为点击，执行恢复通话
             if (window.wxActions && window.wxActions.resumeCall) {
                 window.wxActions.resumeCall();
             }
+        }
+    };
+
+    document.addEventListener('mousemove', moveHandler);
+    document.addEventListener('touchmove', moveHandler, { passive: false });
+    document.addEventListener('mouseup', endHandler);
+    document.addEventListener('touchend', endHandler);
+};
+
+// ================= 🌟 快捷悬浮菜单引擎 (智能防溢出 + 全局毛玻璃) =================
+window.quickMenuPos = null;
+window.quickMenuExpanded = false;
+
+window.toggleQuickMenu = function(e) {
+    if (e) e.stopPropagation();
+    window.quickMenuExpanded = !window.quickMenuExpanded;
+    window.render();
+};
+
+window.startDragQuickMenu = function(e) {
+    let isDragging = false;
+    let startX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+    let startY = e.type.includes('mouse') ? e.clientY : e.touches[0].clientY;
+    const el = document.getElementById('mc-quick-menu');
+    if (!el) return;
+
+    el.style.transition = 'none'; 
+
+    const container = document.getElementById('phone-container');
+    const containerRect = container.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+
+    let initialLeft = elRect.left - containerRect.left;
+    let initialTop = elRect.top - containerRect.top;
+
+    const moveHandler = (moveEvent) => {
+        let currentX = moveEvent.type.includes('mouse') ? moveEvent.clientX : moveEvent.touches[0].clientX;
+        let currentY = moveEvent.type.includes('mouse') ? moveEvent.clientY : moveEvent.touches[0].clientY;
+        
+        let dx = currentX - startX;
+        let dy = currentY - startY;
+
+        if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+            isDragging = true;
+        }
+
+        if (isDragging) {
+            moveEvent.preventDefault(); 
+            let newLeft = initialLeft + dx;
+            let newTop = initialTop + dy;
+            
+            newLeft = Math.max(0, Math.min(newLeft, containerRect.width - elRect.width));
+            newTop = Math.max(0, Math.min(newTop, containerRect.height - elRect.height));
+
+            el.style.left = newLeft + 'px';
+            el.style.top = newTop + 'px';
+            el.style.right = 'auto';
+            el.style.bottom = 'auto';
+        }
+    };
+
+    const endHandler = () => {
+        document.removeEventListener('mousemove', moveHandler);
+        document.removeEventListener('touchmove', moveHandler);
+        document.removeEventListener('mouseup', endHandler);
+        document.removeEventListener('touchend', endHandler);
+        
+        el.style.transition = '';
+
+        if (isDragging) {
+            window.quickMenuPos = { x: parseFloat(el.style.left), y: parseFloat(el.style.top) };
+        } else {
+            window.toggleQuickMenu();
         }
     };
 
@@ -529,7 +594,12 @@ function render() {
 
   injectCustomIcons(ap.customIcons);
   injectCustomButtons(ap.customButtons);
+  
+  // 🌟 暴力隐藏全局所有容器的滚动条
   fontCss += `
+    .hide-scrollbar::-webkit-scrollbar { display: none !important; }
+    .hide-scrollbar { -ms-overflow-style: none !important; scrollbar-width: none !important; }
+    
     input[type="file"] { display: none !important; position: absolute !important; width: 0 !important; height: 0 !important; opacity: 0 !important; z-index: -9999 !important; pointer-events: none !important; }
     #wx-input, #publish-moment-text, #moment-comment-input, #edit-msg-textarea, #virtual-input, 
     #transfer-amount, #transfer-note, #edit-persona-prompt, #edit-char-prompt, #global-prompt-input, 
@@ -570,9 +640,14 @@ function render() {
         <button onclick="window.actions.setCurrentApp(null)" class="mt-6 px-4 py-2 bg-blue-500 text-white font-bold rounded-xl active:scale-95 transition-transform">返回桌面</button>
       </div>`;
 
+  // 🌟 新增判断：当前是否处于开屏动画阶段？
+  const isBooting = store.currentApp === null && window.homeState && window.homeState.isBooting;
+
   const isHomeDark = store.currentApp === null && (ap.darkMode || false);
   const txtClass = isHomeDark ? 'text-white drop-shadow-md' : 'text-gray-800 drop-shadow-sm';
-  const statusBarHtml = ap.hideStatusBar ? '' : `
+  
+  // 🌟 如果在开屏阶段，直接隐藏状态栏
+  const statusBarHtml = (ap.hideStatusBar || isBooting) ? '' : `
     <div id="mc-status-bar" class="absolute top-0 left-0 right-0 flex bg-transparent justify-between items-center px-6 pt-3 pb-2 text-[11px] font-bold z-[9999] pointer-events-none ${txtClass}">
       <span id="status-time" class="tracking-wider">${store.currentTime || '12:00'}</span>
       <div class="flex items-center space-x-1.5 opacity-80">
@@ -584,7 +659,8 @@ function render() {
   `;
 
   let globalCallHtml = '';
-  if (store.globalCallAlert) {
+  // 🌟 如果在开屏阶段，抑制全局弹窗显示
+  if (!isBooting && store.globalCallAlert) {
       const alert = store.globalCallAlert;
       let avatarHtml = '';
       if (alert.avatar && (alert.avatar.includes('http') || alert.avatar.startsWith('data:'))) {
@@ -608,9 +684,9 @@ function render() {
       `;
   }
 
-  // 🌟 2. 全局通话悬浮窗渲染（注入坐标记忆与防拖拽误触）
   let floatCallHtml = '';
-  if (store.activeCall && (store.currentApp !== 'wechat' || window.wxState?.view !== 'call')) {
+  // 🌟 如果在开屏阶段，隐藏悬浮球
+  if (!isBooting && store.activeCall && (store.currentApp !== 'wechat' || window.wxState?.view !== 'call')) {
       const isVideo = store.activeCall.type === 'video';
       const duration = store.activeCall.duration || 0;
       const m = String(Math.floor(duration / 60)).padStart(2, '0');
@@ -635,7 +711,79 @@ function render() {
       `;
   }
 
-  container.innerHTML = statusBarHtml + appHtml + globalCallHtml + floatCallHtml;
+  let quickMenuHtml = '';
+  // 🌟 如果在开屏阶段，彻底隐藏快捷设置悬浮球！
+  if (!isBooting && store.enableQuickMenu) {
+      const isExpanded = window.quickMenuExpanded;
+      let posStyle = '';
+      let posClasses = isExpanded ? 'rounded-[16px]' : 'rounded-full w-10 h-10'; 
+      
+      const container = document.getElementById('phone-container');
+      const containerWidth = container ? container.clientWidth : window.innerWidth;
+      const containerHeight = container ? container.clientHeight : window.innerHeight;
+
+      let renderX = window.quickMenuPos ? window.quickMenuPos.x : null;
+      let renderY = window.quickMenuPos ? window.quickMenuPos.y : null;
+      
+      if (renderX === null || renderY === null) {
+          renderX = containerWidth - (isExpanded ? 190 : 50); 
+          renderY = containerHeight * 0.25; 
+      }
+      
+      if (isExpanded) {
+          const menuWidth = 180; 
+          const menuHeight = 145; 
+          
+          if (renderX + menuWidth > containerWidth - 12) renderX = containerWidth - menuWidth - 12;
+          if (renderX < 12) renderX = 12;
+
+          if (renderY + menuHeight > containerHeight - 12) renderY = containerHeight - menuHeight - 12;
+          if (renderY < 12) renderY = 12;
+      } else {
+          const menuWidth = 40; 
+          const menuHeight = 40;
+          if (renderX + menuWidth > containerWidth) renderX = containerWidth - menuWidth;
+          if (renderX < 0) renderX = 0;
+          if (renderY + menuHeight > containerHeight) renderY = containerHeight - menuHeight;
+          if (renderY < 0) renderY = 0;
+      }
+      
+      posStyle = `left: ${renderX}px; top: ${renderY}px; right: auto; bottom: auto;`;
+
+      const presetsHtml = (store.apiPresets || []).map((p, i) => `<option value="${i}" ${store.apiConfig?.name === p.name ? 'selected' : ''}>${p.name}</option>`).join('');
+
+      if (isExpanded) {
+          quickMenuHtml = `
+              <div id="mc-quick-menu" class="absolute z-[99995] bg-white/50 backdrop-blur-xl border border-white/40 shadow-[0_8px_30px_rgba(0,0,0,0.12)] p-3.5 flex flex-col space-y-3 animate-in zoom-in duration-200 select-none ${posClasses}" 
+                   style="width: 180px; touch-action: none; ${posStyle}">
+                  <div class="flex justify-between items-center mb-1 cursor-grab" onmousedown="window.startDragQuickMenu(event)" ontouchstart="window.startDragQuickMenu(event)">
+                      <span class="text-[12px] font-black text-gray-800 flex items-center tracking-widest drop-shadow-sm"><i data-lucide="layers" class="w-3.5 h-3.5 mr-1.5 text-indigo-600"></i>快捷菜单</span>
+                      <i data-lucide="x" class="w-4 h-4 text-gray-600 cursor-pointer active:scale-90 bg-white/60 rounded-full p-0.5 shadow-sm" onclick="window.toggleQuickMenu(event)"></i>
+                  </div>
+                  <div class="flex flex-col space-y-1" onclick="event.stopPropagation()">
+                      <select onchange="window.settingsActions.quickLoadPreset(this.value)" class="w-full bg-white/60 border border-white/50 rounded-lg p-2 text-[11px] font-bold text-gray-800 outline-none focus:border-indigo-400 shadow-sm backdrop-blur-md">
+                          <option value="">-- 切换 API 预设 --</option>
+                          ${presetsHtml}
+                      </select>
+                  </div>
+                  <button class="w-full bg-indigo-50/70 text-indigo-700 border border-indigo-200/50 rounded-lg py-2 text-[11px] font-bold active:bg-indigo-100/80 transition-colors flex items-center justify-center shadow-sm backdrop-blur-md" onclick="event.stopPropagation(); window.settingsActions.exportData()">
+                      <i data-lucide="download-cloud" class="w-3.5 h-3.5 mr-1.5"></i>导出数据备份
+                  </button>
+              </div>
+          `;
+      } else {
+          quickMenuHtml = `
+              <div id="mc-quick-menu" class="absolute z-[99995] bg-white/50 backdrop-blur-xl border border-white/40 shadow-lg flex items-center justify-center cursor-grab active:scale-95 transition-transform select-none ${posClasses}" 
+                   onmousedown="window.startDragQuickMenu(event)" ontouchstart="window.startDragQuickMenu(event)"
+                   style="touch-action: none; ${posStyle}">
+                  <i data-lucide="settings-2" class="w-5 h-5 text-indigo-600 pointer-events-none drop-shadow-sm"></i>
+              </div>
+          `;
+      }
+  }
+
+  // 合并渲染！
+  container.innerHTML = statusBarHtml + appHtml + globalCallHtml + floatCallHtml + quickMenuHtml;
   
   if (window.lucide) window.lucide.createIcons();
   

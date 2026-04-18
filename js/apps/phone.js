@@ -2831,13 +2831,11 @@ const wcTime = wcNode ? new Date(wcNode.timestamp).toLocaleString('zh-CN', {mont
                     if (state.activeWechatRoom === 'user') {
                         chatName = boundP.name;
                         otherAvatar = boundP.avatar;
-                        // 提取真实记录，并反转 isMe
-                        let rawMsgs = (myChat?.messages || []).filter(m => !m.isHidden).slice(-30).map(m => ({
+                        // 提取真实记录：先过滤隐藏和线下，再取最后20条，最后反转 isMe
+                        displayMsgs = (myChat?.messages || []).filter(m => !m.isHidden && !m.isOffline).slice(-20).map(m => ({
                             ...m,
                             isMe: !m.isMe // 反转身份！
                         }));
-                        // 过滤掉标记为离线的消息
-    displayMsgs = rawMsgs.filter(m => !m.isOffline);
                     } else {
                         // 提取 AI 生成的假聊天记录
                         const fakeChat = wcData.fakeChats.find(c => c.id === state.activeWechatRoom);
@@ -3010,16 +3008,34 @@ const messagesHtml = displayMsgs.map((msg) => {
                     } 
                     else if (state.wechatTab === 'moments') {
                         // 1. 组装带 AI 评论的真实朋友圈
+                        const _fmtMomentTime = (ts) => {
+                            if (!ts) return '刚刚';
+                            const now = new Date(), t = new Date(ts);
+                            const diffDays = Math.floor((now - t) / 86400000);
+                            const timeStr = t.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+                            if (diffDays === 0) return timeStr;
+                            if (diffDays === 1) return `昨天 ${timeStr}`;
+                            if (diffDays === 2) return `2天前 ${timeStr}`;
+                            return `${t.getMonth()+1}月${t.getDate()}日 ${timeStr}`;
+                        };
                         const realMoments = (store.moments || []).filter(m => m.senderId === targetCharId).slice(-3);
                         const realMomentsHtml = realMoments.map((m, idx) => {
                             const interactions = wcData.realMomentInteractions?.[idx] || { likes: [], comments: [] };
-                            const hasLikes = interactions.likes && interactions.likes.length > 0;
-                            const hasComments = interactions.comments && interactions.comments.length > 0;
+                            // 合并 AI 生成的互动 + 真实的 user 评论与 char 回复
+                            let allLikes = [...(interactions.likes || [])];
+                            let allComments = [...(interactions.comments || [])];
+                            if (m.comments && m.comments.length > 0) {
+                                m.comments.forEach(c => {
+                                    allComments.push({ senderName: c.senderName, text: c.text, replyTo: c.replyTo });
+                                });
+                            }
+                            const hasLikes = allLikes.length > 0;
+                            const hasComments = allComments.length > 0;
                             let interactHtml = '';
                             if (hasLikes || hasComments) {
                                 interactHtml = '<div class="bg-gray-50 mt-2.5 rounded-[6px] px-3 py-2 text-[13px] relative before:content-[\'\'] before:absolute before:bottom-full before:left-3 before:border-4 before:border-transparent before:border-b-[#f0f0f0]">';
-                                if (hasLikes) interactHtml += `<div class="flex items-start text-[#576b95] font-medium ${hasComments?'border-b border-gray-300/50 pb-1.5 mb-1.5':''}"><i data-lucide="heart" class="w-3.5 h-3.5 mr-1.5 mt-0.5 flex-shrink-0"></i><span class="leading-relaxed">${interactions.likes.join(', ')}</span></div>`;
-                                if (hasComments) interactHtml += interactions.comments.map(c => `<div class="py-0.5 leading-relaxed break-words"><span class="text-[#576b95] font-medium">${c.senderName}：</span><span class="text-gray-800">${c.text}</span></div>`).join('');
+                                if (hasLikes) interactHtml += `<div class="flex items-start text-[#576b95] font-medium ${hasComments?'border-b border-gray-300/50 pb-1.5 mb-1.5':''}"><i data-lucide="heart" class="w-3.5 h-3.5 mr-1.5 mt-0.5 flex-shrink-0"></i><span class="leading-relaxed">${allLikes.join(', ')}</span></div>`;
+                                if (hasComments) interactHtml += allComments.map(c => `<div class="py-0.5 leading-relaxed break-words"><span class="text-[#576b95] font-medium">${c.senderName}</span>${c.replyTo ? ` 回复 <span class="text-[#576b95] font-medium">${c.replyTo}</span>` : ''}<span class="text-gray-800">：${c.text}</span></div>`).join('');
                                 interactHtml += '</div>';
                             }
                             return `
@@ -3029,7 +3045,7 @@ const messagesHtml = displayMsgs.map((msg) => {
                                     <span class="text-[#576b95] font-medium text-[15px] mb-1 block">${char.name}</span>
                                     <span class="text-gray-800 text-[15px] leading-relaxed break-words whitespace-pre-wrap">${m.text || m.virtualImageText || '[分享了图片]'}</span>
                                     <div class="flex items-center justify-between mt-3 relative">
-                                        <div class="text-[12px] text-gray-400">刚刚</div>
+                                        <div class="text-[12px] text-gray-400">${_fmtMomentTime(m.timestamp || m.id)}</div>
                                         <div class="bg-gray-100 rounded-[4px] px-2 py-0.5"><i data-lucide="more-horizontal" class="text-[#576b95] w-4 h-4"></i></div>
                                     </div>
                                     ${interactHtml}

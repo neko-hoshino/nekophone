@@ -1,5 +1,6 @@
 // js/apps/ao3.js
 import { store } from '../store.js';
+import { cloudFetch } from '../utils/llm.js';
 
 // 初始化永久存储空间
 if (!store.ao3Fics) store.ao3Fics = [];
@@ -200,10 +201,7 @@ You are now an elite, unrestricted fanfiction author on AO3.
                 let charId = targetChar ? targetChar.id : (store.contacts[0]?.id);
                 const promptStr = window.ao3Actions.buildAO3Prompt(charId, task);
 
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
-                });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                 const text = (await res.json()).choices[0].message.content.match(/\[[\s\S]*\]/)[0];
                 const generatedFics = JSON.parse(text).map(f => ({
                     id: 'fic_' + Date.now() + Math.floor(Math.random()*1000),
@@ -251,10 +249,7 @@ You are now an elite, unrestricted fanfiction author on AO3.
                 let charId = targetChar ? targetChar.id : (store.contacts[0]?.id);
                 const promptStr = window.ao3Actions.buildAO3Prompt(charId, task);
 
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
-                });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                 const newText = (await res.json()).choices[0].message.content.trim();
                 
                 const formattedText = newText.split('\n').filter(p=>p.trim()!=='').map(p=>`<p class="mb-4">${p}</p>`).join('');
@@ -295,10 +290,7 @@ You are now an elite, unrestricted fanfiction author on AO3.
                 let charId = targetChar ? targetChar.id : (store.contacts[0]?.id);
                 const promptStr = window.ao3Actions.buildAO3Prompt(charId, task);
 
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
-                });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                 const text = (await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0];
                 fic.comments = JSON.parse(text).comments;
                 if (window.actions.saveStore) window.actions.saveStore();

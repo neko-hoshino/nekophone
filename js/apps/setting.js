@@ -13,7 +13,7 @@ function getFormValues() {
 
 function getMinimaxValues() {
   return {
-    enabled: document.getElementById('minimax-enabled').checked, // 新增：全局开关
+    enabled: document.getElementById('minimax-enabled').checked, 
     groupId: document.getElementById('minimax-group-id').value.trim(),
     apiKey: document.getElementById('minimax-api-key').value.trim()
   };
@@ -21,11 +21,9 @@ function getMinimaxValues() {
 
 // --- 2. 绑定给 HTML 按钮的交互事件 ---
 window.settingsActions = {
-  // 拖动滑块时实时显示数值
   updateTempDisplay: (val) => {
     document.getElementById('temp-display').innerText = val;
   },
-  // 数据备份引擎
   exportData: () => {
     const dataStr = JSON.stringify(store);
     const blob = new Blob([dataStr], { type: "application/json" });
@@ -36,13 +34,10 @@ window.settingsActions = {
     a.click();
     window.actions.showToast('备份已导出！请妥善保存在手机文件里');
   },
-  // 数据清空引擎
   factoryReset: () => {
     if (confirm('⚠️ 严重警告：这将彻底清空您的所有聊天记录、角色、身份、世界书以及设定！\n\n您确定要【恢复出厂设置】吗？')) {
        if (confirm('🚨 【最终确认】此操作绝对不可逆！\n请确保您已经导出了备份！真的要全部删除吗？')) {
-          // 1. 炸掉 LocalStorage
           localStorage.removeItem('neko_store');
-          // 2. 炸掉海量数据库 IndexedDB
           if (window.DB) {
              const req = indexedDB.deleteDatabase('NekoPhoneDB');
              req.onsuccess = () => {
@@ -56,88 +51,76 @@ window.settingsActions = {
        }
     }
   },
-  // 内存探针更新
   updateStorageDisplay: () => {
     const dbSize = JSON.stringify(store).length;
     const mb = (dbSize / 1024 / 1024).toFixed(2);
     const el = document.getElementById('storage-size-display');
     if (el) el.innerText = `${mb} MB`;
   },
-  // 一键瘦身与无用数据清理引擎
-    optimizeStorage: async () => {
-        window.actions.showToast('正在执行深层瘦身，请勿退出页面...');
-        const beforeSize = JSON.stringify(store).length;
-        
-        // 1. 物理抹杀孤儿数据 (删掉已经被删除的角色的聊天和记忆)
-        const validCharIds = store.contacts.map(c => c.id);
-        store.chats = store.chats.filter(c => validCharIds.includes(c.charId));
-        store.memories = (store.memories || []).filter(m => validCharIds.includes(m.charId));
-        const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
-        const oldMomentsCount = (store.moments || []).length;
-        store.moments = (store.moments || []).filter(m => m.id >= threeDaysAgo);
-        const deletedCount = oldMomentsCount - store.moments.length;
-        if (deletedCount > 0) console.log(`[系统] 已物理销毁 ${deletedCount} 条过期朋友圈数据`);
-        
-        // 🌟 2. 将历史积压的庞大 Base64 原图进行智能分级瘦身
-        const compressPromises = [];
-        const compressIfNeed = (obj, key, isAvatar = false) => {
-            // 头像及UI小图标：只要大于 500KB (约 650000 字符) 就强制触发压缩
-            // 其他图片(壁纸/照片)：大于 5MB (约 6500000 字符) 才执行压缩
-            const threshold = isAvatar ? 650000 : 6500000;
-            if (obj[key] && obj[key].length > threshold && obj[key].startsWith('data:image')) {
-                compressPromises.push(new Promise(res => {
-                    // 第三个参数传 isAvatar，决定是否进行中度/重度分辨率压缩
-                    window.actions.compressImage(obj[key], (newBase64) => {
-                        obj[key] = newBase64; res();
-                    }, isAvatar);
-                }));
-            }
-        };
+  optimizeStorage: async () => {
+      window.actions.showToast('正在执行深层瘦身，请勿退出页面...');
+      const beforeSize = JSON.stringify(store).length;
+      
+      const validCharIds = store.contacts.map(c => c.id);
+      store.chats = store.chats.filter(c => validCharIds.includes(c.charId));
+      store.memories = (store.memories || []).filter(m => validCharIds.includes(m.charId));
+      const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
+      const oldMomentsCount = (store.moments || []).length;
+      store.moments = (store.moments || []).filter(m => m.id >= threeDaysAgo);
+      const deletedCount = oldMomentsCount - store.moments.length;
+      if (deletedCount > 0) console.log(`[系统] 已物理销毁 ${deletedCount} 条过期朋友圈数据`);
+      
+      const compressPromises = [];
+      const compressIfNeed = (obj, key, isAvatar = false) => {
+          const threshold = isAvatar ? 650000 : 6500000;
+          if (obj[key] && obj[key].length > threshold && obj[key].startsWith('data:image')) {
+              compressPromises.push(new Promise(res => {
+                  window.actions.compressImage(obj[key], (newBase64) => {
+                      obj[key] = newBase64; res();
+                  }, isAvatar);
+              }));
+          }
+      };
 
-        // 明确指定谁是头像，谁是壁纸
-        store.personas.forEach(p => compressIfNeed(p, 'avatar', true));
-        store.contacts.forEach(c => { 
-            compressIfNeed(c, 'avatar', true); 
-            compressIfNeed(c, 'videoAvatar', true); 
-            compressIfNeed(c, 'bgImage', false); // 聊天背景属于大图
-        });
+      store.personas.forEach(p => compressIfNeed(p, 'avatar', true));
+      store.contacts.forEach(c => { 
+          compressIfNeed(c, 'avatar', true); 
+          compressIfNeed(c, 'videoAvatar', true); 
+          compressIfNeed(c, 'bgImage', false); 
+      });
 
-        // 🌟 核心升级：外观图库全面纳入监控！
-        if (store.appearance) {
-            compressIfNeed(store.appearance, 'wallpaper', false);
-            compressIfNeed(store.appearance, 'topBarBg', false);
-            compressIfNeed(store.appearance, 'bottomBarBg', false);
-            compressIfNeed(store.appearance, 'interfaceBg', false);
+      if (store.appearance) {
+          compressIfNeed(store.appearance, 'wallpaper', false);
+          compressIfNeed(store.appearance, 'topBarBg', false);
+          compressIfNeed(store.appearance, 'bottomBarBg', false);
+          compressIfNeed(store.appearance, 'interfaceBg', false);
 
-            // 遍历监控所有【桌面 App 图标】
-            if (store.appearance.customIcons) {
-                Object.keys(store.appearance.customIcons).forEach(iconKey => {
-                    compressIfNeed(store.appearance.customIcons, iconKey, true);
-                });
-            }
-            // 遍历监控所有【聊天室与扩展菜单按钮】
-            if (store.appearance.customButtons) {
-                Object.keys(store.appearance.customButtons).forEach(btnKey => {
-                    compressIfNeed(store.appearance.customButtons, btnKey, true);
-                });
-            }
-        }
+          if (store.appearance.customIcons) {
+              Object.keys(store.appearance.customIcons).forEach(iconKey => {
+                  compressIfNeed(store.appearance.customIcons, iconKey, true);
+              });
+          }
+          if (store.appearance.customButtons) {
+              Object.keys(store.appearance.customButtons).forEach(btnKey => {
+                  compressIfNeed(store.appearance.customButtons, btnKey, true);
+              });
+          }
+      }
 
-        if (store.momentBg) compressIfNeed(store, 'momentBg', false);
-        store.chats.forEach(chat => chat.messages.forEach(m => { 
-            if (m.imageUrl) compressIfNeed(m, 'imageUrl', false); 
-        }));
-        store.moments?.forEach(m => { 
-            if (m.imageUrl) compressIfNeed(m, 'imageUrl', false); 
-        });
+      if (store.momentBg) compressIfNeed(store, 'momentBg', false);
+      store.chats.forEach(chat => chat.messages.forEach(m => { 
+          if (m.imageUrl) compressIfNeed(m, 'imageUrl', false); 
+      }));
+      store.moments?.forEach(m => { 
+          if (m.imageUrl) compressIfNeed(m, 'imageUrl', false); 
+      });
 
-        await Promise.all(compressPromises);
-        const afterSize = JSON.stringify(store).length;
-        const savedMb = ((beforeSize - afterSize) / 1024 / 1024).toFixed(2);
-        window.actions.showToast(`瘦身完成！共为您清理出 ${savedMb} MB 空间！`);
-        window.render();
-    },
-  // 恢复数据也必须写入新的 DB 引擎
+      await Promise.all(compressPromises);
+      const afterSize = JSON.stringify(store).length;
+      const savedMb = ((beforeSize - afterSize) / 1024 / 1024).toFixed(2);
+      window.actions.showToast(`瘦身完成！共为您清理出 ${savedMb} MB 空间！`);
+      window.render();
+  },
   importData: (event) => {
     const file = event.target.files[0]; if(!file) return;
     const r = new FileReader();
@@ -159,7 +142,6 @@ window.settingsActions = {
     r.readAsText(file);
     event.target.value = '';
   },
-  // 系统通知滑块专属动作
   toggleNotification: (e) => {
     const isChecked = e.target.checked;
     if (isChecked) {
@@ -168,7 +150,7 @@ window.settingsActions = {
           store.enableNotifications = true;
           window.actions.showToast('系统通知已开启！请放心切后台');
         } else {
-          e.target.checked = false; // 授权失败，把滑块自动弹回去
+          e.target.checked = false; 
           store.enableNotifications = false;
           window.actions.showToast('授权被拒绝！请确保是从主屏幕打开的哦');
         }
@@ -180,7 +162,6 @@ window.settingsActions = {
       window.render();
     }
   },
-  // 🌟 高精定位开关引擎
   toggleLocation: (e) => {
     const isChecked = e.target.checked;
     if (isChecked) {
@@ -206,7 +187,6 @@ window.settingsActions = {
           { enableHighAccuracy: true, timeout: 5000 }
       );
     } else {
-      // 关闭时：切断定位并强行销毁当前的真实外卖库，逼迫 AI 产生幻觉
       store.enableLocation = false;
       if (store.foodPoolInfo) store.foodPoolInfo = null;
       if (store.shoppingData && store.shoppingData.userRealLocation) store.shoppingData.userRealLocation = '';
@@ -215,21 +195,18 @@ window.settingsActions = {
       window.render();
     }
   },
-  // 🌟 云端推送绑定引擎
+  toggleQuickMenu: (e) => {
+    store.enableQuickMenu = e.target.checked;
+    if (window.actions.saveStore) window.actions.saveStore();
+    window.actions.showToast(store.enableQuickMenu ? '快捷菜单已开启，悬浮在屏幕边缘' : '快捷菜单已关闭');
+    window.render();
+  },
   connectPushServer: async () => {
     try {
-      // 🌟 1. 把 Toast 放在最前面，只要按钮能按，就一定会弹！
       window.actions.showToast('正在启动天线并请求权限...');
-      
-      // 🌟 2. 强行把天线文件安装进浏览器 (假设 sw.js 和 index.html 在同一个文件夹)
-      // 如果你的 sw.js 在 js 文件夹里，请改成 './js/sw.js'
       await navigator.serviceWorker.register('./sw.js'); 
-      
       const reg = await navigator.serviceWorker.ready;
-      
-      // 把你的乱码 Public Key 填在这里 (保留单引号)
       const publicVapidKey = 'BHrrXkaw9VrEtv1g2XcykgbQPsFrSL8WwsxqoZ2Qg3tZGWXr1bHln5LUMUZmiYwLr7RwX7OW9HSAA5EiSA3g3QY'; 
-      
       const padding = '='.repeat((4 - publicVapidKey.length % 4) % 4);
       const base64 = (publicVapidKey + padding).replace(/\-/g, '+').replace(/_/g, '/');
       const rawData = window.atob(base64);
@@ -240,7 +217,6 @@ window.settingsActions = {
         userVisibleOnly: true,
         applicationServerKey: keyArray
       });
-      // 🌟 终极 HTTPS 域名！
       const serverUrl = 'https://neko-hoshino.duckdns.org/subscribe'; 
       
       window.actions.showToast('权限获取成功，正在直连纽约机房...');
@@ -248,7 +224,7 @@ window.settingsActions = {
         method: 'POST',
         headers: { 
             'Content-Type': 'application/json',
-            'x-secret-token': localStorage.getItem('neko_server_pwd') || '' // 👈 交上秘密令牌，验证身份用
+            'x-secret-token': localStorage.getItem('neko_server_pwd') || '' 
         },
         body: JSON.stringify(sub)
       });
@@ -271,51 +247,80 @@ window.settingsActions = {
         method: 'POST', 
         headers: { 
             'Content-Type': 'application/json',
-            'x-secret-token': localStorage.getItem('neko_server_pwd') || '' // 👈 交上秘密令牌，验证身份用
+            'x-secret-token': localStorage.getItem('neko_server_pwd') || '' 
         },
-        body: JSON.stringify({ endpoint: sub.endpoint }) // 👈 同样交上设备号
+        body: JSON.stringify({ endpoint: sub.endpoint }) 
      });
      window.actions.showToast('已向云端发射专属测试指令！');
   },
-  // 读取预设并填入表单
   loadPreset: (index) => {
     if (index === "") return;
     const preset = store.apiPresets[index];
     document.getElementById('api-base-url').value = preset.baseUrl;
     document.getElementById('api-key').value = preset.apiKey;
-    document.getElementById('api-model').value = preset.model;
+    const modelSelect = document.getElementById('api-model');
+    modelSelect.innerHTML = `<option value="${preset.model}">${preset.model}</option>`;
+    modelSelect.value = preset.model;
+    
     document.getElementById('api-temp').value = preset.temperature;
     document.getElementById('temp-display').innerText = preset.temperature;
     window.actions.showToast(`已加载预设：${preset.name}`);
   },
 
-  // 把当前表单保存为新预设
+  quickLoadPreset: (index) => {
+    if (index === "") return;
+    const preset = store.apiPresets[index];
+    store.apiConfig = {
+        baseUrl: preset.baseUrl,
+        apiKey: preset.apiKey,
+        model: preset.model,
+        temperature: preset.temperature
+    };
+    if (window.actions.saveStore) window.actions.saveStore();
+    window.actions.showToast(`✅ 已快捷切换至预设：${preset.name}`);
+    window.quickMenuExpanded = false; 
+    window.render();
+  },
+
+  deletePreset: () => {
+    const selectEl = document.getElementById('preset-selector');
+    const index = selectEl.value;
+    if (index === "") return window.actions.showToast('请先选择一个预设');
+    
+    const presetName = store.apiPresets[index].name;
+    if (confirm(`确定要删除预设 [${presetName}] 吗？`)) {
+        store.apiPresets.splice(index, 1);
+        if (window.actions.saveStore) window.actions.saveStore();
+        window.actions.showToast(`✅ 预设已删除`);
+        window.actions.setCurrentApp('settings'); 
+    }
+  },
+
   savePreset: () => {
     const name = document.getElementById('new-preset-name').value.trim();
     if (!name) return window.actions.showToast('⚠️ 请输入预设名称！');
     
     const newPreset = { name, ...getFormValues() };
     store.apiPresets.push(newPreset);
-    document.getElementById('new-preset-name').value = ''; // 清空输入框
+    document.getElementById('new-preset-name').value = ''; 
     window.actions.showToast(`✅ 预设 [${name}] 保存成功！`);
     
-    // 刷新一下当前页面，让下拉菜单里出现新预设
     window.actions.setCurrentApp('settings');
   },
 
-  // 一键拉取可用模型
-  fetchModels: async () => {
-    const btn = document.getElementById('fetch-models-btn');
+  autoFetchModels: async (selectEl) => {
+    if (selectEl.options.length > 1) return;
+
     const vals = getFormValues();
     if (!vals.baseUrl || !vals.apiKey) {
-      return window.actions.showToast('⚠️ 请先填写 Base URL 和 API Key');
+      window.actions.showToast('⚠️ 请先填写 Base URL 和 API Key');
+      return;
     }
 
-    btn.innerText = '拉取中...';
-    btn.disabled = true;
+    const currentModel = selectEl.value;
+    selectEl.innerHTML = `<option value="${currentModel}">正在拉取可用模型...</option>`;
 
     try {
-      // 兼容 OpenAI 格式的拉取接口
       const res = await fetch(`${vals.baseUrl.replace(/\/+$/, '')}/models`, {
         headers: { 'Authorization': `Bearer ${vals.apiKey}` }
       });
@@ -330,21 +335,16 @@ window.settingsActions = {
       }
 
       if (models.length > 0) {
-        window.actions.showToast(`✅ 成功拉取 ${models.length} 个模型！`);
-        // 把拉取到的模型塞进 datalist 下拉提示框里
-        const dataList = document.getElementById('model-list');
-        dataList.innerHTML = models.map(m => `<option value="${m}">`).join('');
-        document.getElementById('api-model').value = models[0]; // 自动填入第一个
+        selectEl.innerHTML = models.map(m => `<option value="${m}" ${m === currentModel ? 'selected' : ''}>${m}</option>`).join('');
+      } else {
+        selectEl.innerHTML = `<option value="${currentModel}">${currentModel}</option>`;
       }
     } catch (error) {
-      window.actions.showToast(`❌ 拉取失败: ${error.message}`);
-    } finally {
-      btn.innerText = '拉取可用模型';
-      btn.disabled = false;
+      window.actions.showToast(`❌ 拉取模型失败: ${error.message}`);
+      selectEl.innerHTML = `<option value="${currentModel}">${currentModel}</option>`;
     }
   },
 
-  // 最终应用：保存到全局 Store
   applySettings: () => {
     store.apiConfig = getFormValues();
     store.minimaxConfig = getMinimaxValues(); 
@@ -354,7 +354,7 @@ window.settingsActions = {
 
 // --- 3. 渲染 UI 界面 ---
 export function renderSettingsApp(store) {
-  const c = store.apiConfig; // 当前生效的配置
+  const c = store.apiConfig; 
   const presetsHtml = store.apiPresets.map((p, i) => `<option value="${i}">${p.name}</option>`).join('');
 
   return `
@@ -367,7 +367,7 @@ export function renderSettingsApp(store) {
         <span class="absolute left-1/2 -translate-x-1/2 font-black text-gray-800 text-[17px]">系统设置</span>
       </div>
 
-      <div id="setting-scroll" class="flex-1 overflow-y-auto p-4 space-y-4 pb-20">
+      <div id="setting-scroll" class="flex-1 overflow-y-auto hide-scrollbar p-4 space-y-4 pb-20">
 
       <div class="bg-white p-4 rounded-[16px] shadow-sm border border-gray-100 mt-4 space-y-4">
             <div class="flex justify-between items-center border-b border-gray-50 pb-3">
@@ -385,6 +385,14 @@ export function renderSettingsApp(store) {
                 </div>
                 <input type="checkbox" ${store.enableLocation ? 'checked' : ''} onchange="window.settingsActions.toggleLocation(event)" class="ios-switch shrink-0" />
             </div>
+
+            <div class="flex justify-between items-center border-t border-gray-50 pt-3">
+                <div class="flex flex-col">
+                    <span class="font-bold text-gray-800 text-[14px] flex items-center"><i data-lucide="layers" class="w-4 h-4 mr-2 text-indigo-500"></i>全局快捷悬浮菜单</span>
+                    <span class="text-[10px] text-gray-400 mt-0.5 ml-6">在屏幕侧边显示悬浮窗，快捷切换预设/导出数据</span>
+                </div>
+                <input type="checkbox" ${store.enableQuickMenu ? 'checked' : ''} onchange="window.settingsActions.toggleQuickMenu(event)" class="ios-switch shrink-0" />
+            </div>
         </div>
         
         <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 space-y-3">
@@ -393,12 +401,17 @@ export function renderSettingsApp(store) {
             <h3 class="font-bold text-gray-800 text-sm">文本对话 API 设置</h3>
           </div>
           
-          <div class="pb-2 border-b border-gray-50">
-            <span class="text-[10px] font-bold text-gray-500 block mb-1">快速加载预设：</span>
-            <select onchange="window.settingsActions.loadPreset(this.value)" class="w-full p-2 bg-blue-50 text-blue-600 border border-blue-100 rounded-xl text-xs font-bold outline-none cursor-pointer">
-              <option value="">-- 选择已保存的预设 --</option>
-              ${presetsHtml}
-            </select>
+          <div class="pb-2 border-b border-gray-50 flex items-center space-x-2">
+            <div class="flex-1">
+              <span class="text-[10px] font-bold text-gray-500 block mb-1">快速加载预设：</span>
+              <select id="preset-selector" onchange="window.settingsActions.loadPreset(this.value)" class="w-full p-2 bg-blue-50 text-blue-600 border border-blue-100 rounded-xl text-xs font-bold outline-none cursor-pointer">
+                <option value="">-- 选择已保存的预设 --</option>
+                ${presetsHtml}
+              </select>
+            </div>
+            <button onclick="window.settingsActions.deletePreset()" class="mt-4 w-9 h-9 flex items-center justify-center bg-red-50 text-red-500 rounded-xl active:bg-red-100 transition-colors" title="删除选中预设">
+              <i data-lucide="trash-2" class="w-4 h-4"></i>
+            </button>
           </div>
           
           <span class="text-[10px] font-bold text-gray-500 block -mb-1 mt-2">Base URL (兼容 OpenAI 格式):</span>
@@ -407,18 +420,13 @@ export function renderSettingsApp(store) {
           <span class="text-[10px] font-bold text-gray-500 block -mb-1">API Key (秘钥):</span>
           <input type="password" id="api-key" value="${c.apiKey}" class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500 transition-colors" />
 
-          <div class="flex justify-between items-end mb-1 mt-2">
-            <span class="text-[10px] font-bold text-gray-500 block">模型名称 (Model):</span>
-            <button id="fetch-models-btn" onclick="window.settingsActions.fetchModels()" class="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-blue-100 text-blue-600 active:bg-blue-200 transition-colors">
-              拉取可用模型
-            </button>
-          </div>
-          <input type="text" id="api-model" value="${c.model}" list="model-list" placeholder="手动输入，或点击上方拉取" 
-          onfocus="this.dataset.old = this.value; this.value = '';" 
-          onblur="if(!this.value) this.value = this.dataset.old;" 
-          onchange="store.apiConfig.model = this.value; window.render();"
-          class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500 transition-colors" />
-          <datalist id="model-list"></datalist>
+          <span class="text-[10px] font-bold text-gray-500 block -mb-1 mt-2">模型名称 (Model):</span>
+          <select id="api-model" 
+                  onfocus="window.settingsActions.autoFetchModels(this)" 
+                  onchange="store.apiConfig.model = this.value; window.render();"
+                  class="w-full p-2.5 bg-gray-50 border border-gray-200 rounded-xl text-sm outline-none focus:border-blue-500 transition-colors cursor-pointer appearance-none">
+             <option value="${c.model}">${c.model}</option>
+          </select>
           
           <div class="pt-2">
             <div class="flex justify-between items-center mb-2">
