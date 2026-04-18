@@ -2740,9 +2740,9 @@ if (!chat.isGroup) {
       const errMsg = rawErr.replace(/</g, '&lt;').replace(/>/g, '&gt;');
       wxState.showPlusMenu = false; wxState.showEmojiMenu = false;
       chat.messages.push({ 
-        id: Date.now(), sender: document.hidden ? 'system' : char.name, 
+        id: Date.now(), sender: char.name, 
         text: document.hidden ? `连接被系统强行中断。请重roll。` : `[系统] 请求失败: ${errMsg} (请重roll)`, 
-        isMe: document.hidden, source: 'wechat', isOffline: isOffline, msgType: document.hidden ? 'system' : 'text', time: getNowTime() 
+        isMe: document.hidden, source: 'wechat', isOffline: isOffline, msgType: 'text', time: getNowTime() 
       });
     } finally {
       if (!delegatedToCloud) {
@@ -6675,11 +6675,12 @@ if (cleanedBeforeText.trim()) {
             
             // 🌟 将 TA 的外卖单写入系统
             if (typeof store !== 'undefined' && store.shoppingData) {
-                const deliveryMs = 30 * 60 * 1000; 
+                const deliveryMs = 30 * 60 * 1000;
+                const orderBase = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now();
                 store.shoppingData.orders.unshift({
-                    orderNum: 'WM' + Date.now().toString().slice(-8),
-                    time: new Date().toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}),
-                    timestamp: Date.now(), deliveryTime: Date.now() + deliveryMs,
+                    orderNum: 'WM' + orderBase.toString().slice(-8),
+                    time: new Date(orderBase).toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}),
+                    timestamp: orderBase, deliveryTime: orderBase + deliveryMs,
                     type: 'food', storeName: storeName, items: foodItemsArr, totalPrice: totalPriceStr,
                     status: '骑手赶往中', 
                     recipient: recipientName, // 🌟 这里直接使用解析出来的收件人
@@ -6748,10 +6749,11 @@ if (cleanedBeforeText.trim()) {
     // 同步到 shoppingData（如果需要）
     if (typeof store !== 'undefined' && store.shoppingData) {
         const deliveryMs = 2 * 24 * 60 * 60 * 1000;
+        const taobaoOrderBase = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now();
         store.shoppingData.orders.unshift({
             orderNum: orderNum,
-            time: new Date().toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}),
-            timestamp: Date.now(), deliveryTime: Date.now() + deliveryMs,
+            time: new Date(taobaoOrderBase).toLocaleString('zh-CN', {month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'}),
+            timestamp: taobaoOrderBase, deliveryTime: taobaoOrderBase + deliveryMs,
             type: 'shop', storeName: '淘宝精选', items: parsedItems, totalPrice: totalAmount.toFixed(2),
             status: '卖家已发货', recipient: recipient,
             targetCharId: char.id, buyFor: 'user_by_ta'
@@ -6774,7 +6776,8 @@ if (cleanedBeforeText.trim()) {
                     store.shoppingData.orders.forEach(o => {
                         if (o.orderNum === orderData.orderNum && o.status === '未结账') {
                             o.status = o.type === 'food' ? '骑手赶往中' : '卖家已发货';
-                            o.deliveryTime = Date.now() + (o.type === 'food' ? 30*60*1000 : 2*24*60*60*1000); // 真正付款才开始倒计时！
+                            const payBase = msg.timestamp ? new Date(msg.timestamp).getTime() : Date.now();
+                            o.deliveryTime = payBase + (o.type === 'food' ? 30*60*1000 : 2*24*60*60*1000); // 真正付款才开始倒计时！
                         }
                     });
                     if (window.actions?.saveStore) window.actions.saveStore();

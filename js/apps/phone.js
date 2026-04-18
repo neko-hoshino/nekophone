@@ -1,5 +1,6 @@
 // js/apps/phone.js
 import { store } from '../store.js';
+import { cloudFetch } from '../utils/llm.js';
 
 window.phoneState = {
     view: 'select_char', // 'select_char' | 'auth_prompt' | 'desktop' | 等等
@@ -644,10 +645,7 @@ ${recentMsgs}
 4. 严格只输出你的回复文本内容，绝不要任何前缀、解释、换行或引号！`;
 
             try {
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: prompt }], temperature: 0.9 })
-                });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: prompt }], temperature: 0.9 });
                 const data = await res.json();
                 let fullReply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
 
@@ -941,10 +939,7 @@ export function renderPhoneApp(store) {
 
             const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
 
-            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 })
-            });
+            const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 });
 
             const data = await res.json();
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
@@ -1002,10 +997,7 @@ export function renderPhoneApp(store) {
 
             const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
 
-            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 })
-            });
+            const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 });
 
             const data = await res.json();
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
@@ -1057,10 +1049,7 @@ export function renderPhoneApp(store) {
 
             const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
 
-            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.88 })
-            });
+            const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.88 });
 
             const data = await res.json();
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
@@ -1112,10 +1101,7 @@ export function renderPhoneApp(store) {
 ]`;
 
             const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
-            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.88 })
-            });
+            const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.88 });
 
             const data = await res.json();
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
@@ -1165,10 +1151,7 @@ export function renderPhoneApp(store) {
 }`;
 
             const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
-            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 })
-            });
+            const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 });
 
             const data = await res.json();
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
@@ -1224,10 +1207,7 @@ export function renderPhoneApp(store) {
 }`;
 
             const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
-            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 })
-            });
+            const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 });
 
             const data = await res.json();
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
@@ -1276,10 +1256,7 @@ export function renderPhoneApp(store) {
 }`;
 
             const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
-            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.88 })
-            });
+            const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.88 });
 
             const data = await res.json();
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
@@ -1328,10 +1305,7 @@ export function renderPhoneApp(store) {
 }`;
 
             const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
-            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.9 }) // 稍微调高温度，让答案更狂野
-            });
+            const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.9 }); // 稍微调高温度，让答案更狂野
 
             const data = await res.json();
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
@@ -1382,10 +1356,7 @@ export function renderPhoneApp(store) {
 ]`;
 
             const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
-            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 })
-            });
+            const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 });
 
             const data = await res.json();
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
@@ -1448,10 +1419,7 @@ export function renderPhoneApp(store) {
 ]`;
 
             const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
-            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.88 })
-            });
+            const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.88 });
 
             const data = await res.json();
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();
@@ -1519,10 +1487,7 @@ ${realMomentsContext || '暂无真实朋友圈。'}
 }`;
 
             const masterPrompt = buildMasterPrompt(charId, { task: task, scenario: 'phone' });
-            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 })
-            });
+            const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: masterPrompt }], temperature: 0.85 });
 
             const data = await res.json();
             let reply = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim().replace(/^```json/i, '').replace(/^```/, '').replace(/```$/, '').trim();

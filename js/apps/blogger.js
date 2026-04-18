@@ -1,5 +1,6 @@
 // js/apps/blogger.js
 import { store } from '../store.js';
+import { cloudFetch } from '../utils/llm.js';
 
 if (!window.bloggerState) {
     window.bloggerState = {
@@ -269,10 +270,7 @@ if (!window.bloggerActions) {
 3. 严格输出 JSON 格式：{"mediaDesc": "画面描述", "content_addon": "补充的正文内容"}`;
                 
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { recentText: currentDraft, task: task });
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
-                });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                 const data = await res.json();
                 let text = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 let json = JSON.parse(text.match(/\{[\s\S]*\}/)[0]);
@@ -303,7 +301,7 @@ if (!window.bloggerActions) {
                             const task = `公关危机：${acc.studioData.pr.desc}${prevConsequence}\n实际真相：${acc.studioData.pr.truth}\n博主发了澄清文：${pure}。\n请评估是否越抹越黑？严格输出JSON：{"success": boolean, "feedback": "详细反馈", "isEscalated": boolean, "escalationDetail": "若升级，描述具体后果(如：被指责撒谎、引发更多爆料)"}`;
                             
                             const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
-                            const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                            const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                             const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                             
                             if (parsed.success) {
@@ -423,9 +421,7 @@ if (!window.bloggerActions) {
 [{"author": "路人甲", "content": "好漂亮！", "myReply": ""}, {"author": "黑粉乙", "content": "太假了", "myReply": "有本事你拍一个"}]`;
                 
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task: task + context, excludeHistory: true });
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { 
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) 
-                });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                 const data = await res.json();
                 let text = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 let cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
@@ -479,10 +475,7 @@ if (!window.bloggerActions) {
 博主（网名：${acc.name}）刚刚亲自回复了你：“${text}”。
 请基于你的网民性格，写一条简短的追评（惊叹被翻牌了/继续争论/开心互动等）。严禁Emoji。直接输出文字，不要前缀。`;
                         const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task, excludeHistory: true, excludePersona: true });
-                        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                            method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                            body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
-                        });
+                        const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                         const data = await res.json();
                         const reaction = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
                         if (reaction) comment.replies.push({ author: comment.author, content: reaction });
@@ -527,7 +520,7 @@ if (!window.bloggerActions) {
 严禁Emoji。输出JSON数组：[{"question":"问题", "target": "user/partner/both", "answeredByPartner":"回答内容(若留给用户回答请留空)"}]`;
                 
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task, excludeHistory: true });
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                 const text = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 const cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
                 acc.qaBox = []; acc.posts = acc.posts || [];
@@ -582,7 +575,7 @@ if (!window.bloggerActions) {
 严禁Emoji。JSON格式：[{"author": "网名", "target": "user/partner", "messages": [{"sender": "网名", "text": "内容"}, {"sender": "博主", "text": "回复(仅找partner时生成)"}]}]`;
                 
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task, excludeHistory: true });
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                 const text = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 const cms = JSON.parse(text.match(/\[[\s\S]*\]/)[0]);
                 acc.inbox = []; 
@@ -682,7 +675,7 @@ ${truthContext}
                         const prevConsequence = pr.lastFailure ? `\n【上一次失败后果】：${pr.lastFailure}` : '';
                         const task = `公关危机传闻：${pr.desc}${prevConsequence}\n实际真相：${pr.truth}\n处理方式：博主选择了【冷处理/装死不回应】。\n请结合娱乐圈舆论规律严厉评估：这种程度的危机“装死”能混过去吗？\n严格输出JSON：{"success": boolean, "feedback": "详细反馈", "isEscalated": boolean, "escalationDetail": "若升级描述后果"}`;
                         const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
-                        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                        const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                         const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
 
                         if (parsed.success) {
@@ -755,7 +748,7 @@ ${truthContext}
   "resultText": "交涉结果(如：对方被真相打脸认怂 / 彻底破裂)"
 }`;
                     const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
-                    const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                    const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                     const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                     
                     chatObj.messages.push(...parsed.transcript);
@@ -803,7 +796,7 @@ ${truthContext}
                         const task = `你扮演狗仔/黑粉 [${chatObj.author}]。网上传闻：${acc.studioData.pr.desc}${prevConsequence}。实际真相：${acc.studioData.pr.truth}。\n对话记录：${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}\n博主的回复是否解决了危机？\n严格输出JSON：{"reply": "回怼/服软", "isResolved": boolean, "isEscalated": boolean, "escalationDetail": "若升级的具体表现", "resultText": "系统结果描述"}`;
                         
                         promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task, excludeHistory: true, excludePersona: true });
-                        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                        const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                         const parsed = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                         
                         if (parsed.reply) chatObj.messages.push({ sender: chatObj.author, text: parsed.reply, isMe: false });
@@ -827,7 +820,7 @@ ${truthContext}
 ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
 请回复博主。严禁Emoji，直接输出纯文本。`;
                         promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task, excludeHistory: true, excludePersona: true });
-                        const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                        const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                         const reply = (await res.json()).choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
                         if (reply) chatObj.messages.push({ sender: chatObj.author, text: reply, isMe: false });
                     }
@@ -860,10 +853,7 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
 严禁Emoji。严格输出 JSON：
 {"activity": {"title": "标题", "desc": "描述", "topic": "话题词(不带#)"}, "commercial": {"title": "标题", "desc": "描述", "product": "商品名", "price": 真实合理的商品售价(纯数字), "commissionRate": 行业合理的带货提成比例(例如0.05到0.15之间的数字), "payout": 坑位费(纯数字)}, "pr": {"title": "标题(表面黑料)", "desc": "表面黑料具体描述", "truth": "不为人知的搞笑/乌龙真相", "target": "user/character/both", "stakeholder": "狗仔/黑粉网名"}}`;
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] })
-                });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                 const data = await res.json();
                 let text = data.choices[0].message.content.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').replace(/```json|```/gi, '').trim();
                 let parsed = JSON.parse(text.match(/\{[\s\S]*\}/)[0]);
@@ -910,7 +900,7 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
                     // 🌟 降低初始任务奖金
                     const task = `博主刚刚开启了情侣直播。请结合平台风格和账号定位，以后台DM的身份，生成一个有趣的具体的直播互动小任务（例如：让伴侣夸你、给粉丝发个福利等），要具体且有互动性。严格输出JSON：{"taskTitle": "任务描述", "reward": 随机金币数(20到80之间)}`;
                     const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
-                    const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                    const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                     const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                     window.bloggerState.live.task = { title: json.taskTitle, reward: json.reward, status: 'unaccepted' };
                     window.bloggerState.live.messages.push({ type: 'system', author: '系统', content: `🎯 直播互动任务已派发：${json.taskTitle}` });
@@ -975,7 +965,7 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
             try {
                 const task = `博主发起了互动投票：“想看主播干什么？”。结合平台风格和账号定位，生成3个极具看点、抓马或高甜的选项，要符合直播场景好执行，并随机分配投票百分比(总和100)。输出 JSON 格式：{"options": [{"text": "选项1", "percent": 30}, {"text": "选项2", "percent": 45}, {"text": "选项3", "percent": 25}]}`;
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                 const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                 
                 const winner = json.options.reduce((a, b) => (a.percent > b.percent) ? a : b);
@@ -1001,7 +991,7 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
 
             try {
                 const task = `请结合平台风格，生成一对专门用于直播PK连麦的【对立面情侣博主】（如工业糖精情侣、搞笑夫妻等）。并生成他们连麦接通时的第一句开场白。输出JSON：{"name": "网名(情侣账号)", "greeting": "嚣张或绿茶的连麦开场白"}`;
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: task }] }) });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: task }] });
                 const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                 
                 live.pk.opponent.name = json.name || '做作的网红情侣';
@@ -1048,11 +1038,7 @@ ${pkAddon}
 严格输出 JSON：{"partnerReply": "伴侣的话语/动作", "danmaku": ["起哄弹幕1", "弹幕2"]}`;
 
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { 
-                    method: 'POST', 
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, 
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) 
-                });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                 const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
 
                 if(json.partnerReply) live.messages.push({ type: 'partner', author: char.name, content: json.partnerReply });
@@ -1126,7 +1112,7 @@ ${pkAddon}
                     const task = `情侣直播中，用户刚刚做了：${val}。\n近期上下文：\n${recentHistory}\n${prStatus}${voteAddon}\n【内置礼物】：荧光棒(￥1)、奶茶(￥15)、纯爱钻戒(￥99)。\n${pkAddon}${taskAddon}\n请生成：1. 伴侣的实时回应(切忌替用户采取任何行动，仅作回应)。2. 3-5条弹幕。3. 随机0-2个粉丝送出礼物。\n${isPRActive ? "【极其重要】：由于在公关危机中，若需下发newTask，必须是关于进一步澄清、拿出证据、转移视线或安抚粉丝的具体公关任务！\n" : ""}严格输出 JSON：{"partnerReply": "伴侣的话语/动作", "danmaku": ["粉丝弹幕1", "弹幕2", "弹幕3"], "gifts": [{"fan": "粉丝网名", "giftName": "奶茶", "value": 15}], "isTaskCompleted": boolean, "newTask": {"title": "新任务", "reward": 金额(20到80)}, "prResolved": 是否解除危机(boolean), "prFeedback": "若危机改变网友最新评价" ${live.view === 'pk' ? ',"opponentReply": "...","scoreBoost": 0,"punishment": ""' : ''}}`;
 
                     const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
-                    const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                    const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                     const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
 
                     if(json.partnerReply) live.messages.push({ type: 'partner', author: char.name, content: json.partnerReply });
@@ -1213,7 +1199,7 @@ ${pkAddon}
             try {
                 const task = `直播PK刚刚结束。${isWin ? `你们赢了，对方【${live.pk.opponent.name}】输了。` : `你们输了，对方【${live.pk.opponent.name}】赢了。`}\n系统指定的惩罚大冒险是：${punishment}。\n请生成：1. 输家执行惩罚时的抓马反应/话语。2. 赢家在一旁看戏、嘲讽或得意的反应。3. 3条粉丝弹幕。\n严格输出JSON：{"loserReaction": "输家的反应", "winnerReaction": "赢家的反应", "danmaku": ["弹幕1", "弹幕2", "弹幕3"]}`;
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` }, body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] }) });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                 const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
                 
                 live.messages.push({ type: 'system', author: '系统', content: `💥 进入惩罚环节：${punishment}` });

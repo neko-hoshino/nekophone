@@ -1,5 +1,6 @@
 // js/apps/couple.js
 import { store } from '../store.js';
+import { cloudFetch } from '../utils/llm.js';
 
 // 🌟 1:00 AM 跨日逻辑引擎
 const getLogicalDateStr = (dateObj = new Date()) => {
@@ -794,7 +795,7 @@ if (!window.cpActions) {
   requestTacitReply: async (charId) => {
       const spaceData = store.coupleSpacesData[charId];
       spaceData.tacitChat = spaceData.tacitChat || [];
-      
+
       // 插入 Loading 气泡
       const loadingId = Date.now();
       spaceData.tacitChat.push({ id: loadingId, sender: 'ai', isMe: false, msgType: 'loading' });
@@ -1092,10 +1093,7 @@ if (!window.cpActions) {
           });  
         
           const temp = store.apiConfig?.temperature !== undefined ? Number(store.apiConfig.temperature) : 0.85;
-          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: temp })
-          });
+          const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: temp });
           const data = await res.json();
           target.messages.push({ id: Date.now(), sender: 'ai', isMe: false, text: window.cpActions.cleanAI(data.choices[0].message.content) });
       } catch(e) {
@@ -1349,10 +1347,7 @@ if (!window.cpActions) {
               scenario: 'dareStory'
           });
           const temp = Number(store.apiConfig?.temperature ?? 0.85);
-          const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-              method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-              body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: temp })
-          });
+          const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'system', content: prompt }], temperature: temp });
           const data = await res.json();
           tod.messages.push({ id: Date.now(), sender: 'ai', text: window.cpActions.cleanAI(data.choices[0].message.content) });
       } catch(e) { } finally {

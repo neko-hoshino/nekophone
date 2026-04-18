@@ -1,5 +1,6 @@
 // js/apps/darkroom.js
 import { store } from '../store.js';
+import { cloudFetch } from '../utils/llm.js';
 
 // 🌟 初始化番外剧场独立数据库
 if (!store.drArchives) {
@@ -374,10 +375,7 @@ You are now operating in a private, fictional, and explicitly immersive roleplay
             try {
                 const promptMessages = window.drActions.buildDarkroomPrompt(char, task);
                 
-                const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
-                    method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-                    body: JSON.stringify({ model: store.apiConfig.model, messages: promptMessages, temperature: 0.85 })
-                });
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: promptMessages, temperature: 0.85 });
                 const data = await res.json();
                 let reply = data.choices[0].message.content.trim();
 

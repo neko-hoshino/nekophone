@@ -1,6 +1,26 @@
 // js/utils/llm.js
 import { store } from '../store.js';
 
+export async function cloudFetch(body) {
+    const pwd = localStorage.getItem('neko_server_pwd');
+    if (!pwd) {
+        return fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
+            body: JSON.stringify(body)
+        });
+    }
+    return fetch('https://neko-hoshino.duckdns.org/api-proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-secret-token': pwd },
+        body: JSON.stringify({
+            baseUrl: store.apiConfig.baseUrl,
+            apiKey: store.apiConfig.apiKey,
+            ...body
+        })
+    });
+}
+
 export async function buildLLMPayload(charId, history, isOffline = false, isCall = false, groupInfo = null, readingInfo = null) {
   const chatId = groupInfo ? groupInfo.id : charId;
   const chat = store.chats.find(c => c.charId === chatId);
