@@ -10,7 +10,8 @@ export async function cloudFetch(body) {
             body: JSON.stringify(body)
         });
     }
-    return fetch('https://neko-hoshino.duckdns.org/api-proxy', {
+    // 1. 提交任务，立刻拿到 taskId
+    const submitRes = await fetch('https://neko-hoshino.duckdns.org/api-proxy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-secret-token': pwd },
         body: JSON.stringify({
@@ -19,6 +20,23 @@ export async function cloudFetch(body) {
             ...body
         })
     });
+    const { taskId } = await submitRes.json();
+
+    // 2. 轮询结果（每次轮询是极短请求，iOS 杀不死）
+    const maxPolls = 60; // 最多轮询 60 次 × 2s = 120s
+    for (let i = 0; i < maxPolls; i++) {
+        await new Promise(r => setTimeout(r, 2000));
+        try {
+            const pollRes = await fetch(`https://neko-hoshino.duckdns.org/api-proxy/result?taskId=${taskId}`, {
+                headers: { 'x-secret-token': pwd }
+            });
+            if (pollRes.status === 202) continue; // 还在处理中
+            return pollRes; // 完成，返回 Response 对象（调用方可直接 .json()）
+        } catch (e) {
+            continue; // 网络抖动或 iOS 短暂中断，下一轮重试
+        }
+    }
+    throw new Error('云端代理超时（120s）');
 }
 
 export async function buildLLMPayload(charId, history, isOffline = false, isCall = false, groupInfo = null, readingInfo = null) {
