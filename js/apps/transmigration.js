@@ -222,11 +222,16 @@ async function checkAdminStatus(pId) {
       .eq('id', pId)
       .maybeSingle();
     if (!error && data) {
-      window.transState.isAdmin = data.is_admin === true;
+      const newVal = data.is_admin === true;
+      if (newVal !== window.transState.isAdmin) {
+        window.transState.isAdmin = newVal;
+        return true; // 有变化，调用方触发 render
+      }
     }
   } catch (e) {
-    window.transState.isAdmin = false;
+    // 网络失败不改变现有状态
   }
+  return false;
 }
 
 async function loadRanking() {
@@ -472,7 +477,7 @@ function renderRanking(player, pName, pAvatar, pId) {
   const isCloudData = state.cloudPlayers !== null;  // null=未连通，[]或有数据=已连通
   const isAdmin     = state.isAdmin;
 
-  const allPlayers = players.filter(r => r.id !== pId && r.name !== pName);
+  const allPlayers = players.filter(r => r.id !== pId);
   allPlayers.push({ id: pId, name: pName, level: player.level, points: player.points, worlds: player.completedWorlds, is_admin: isAdmin, is_banned: false, isMe: true });
   allPlayers.sort((a, b) => b.points - a.points);
 
@@ -495,7 +500,7 @@ function renderRanking(player, pName, pAvatar, pId) {
   function adminTapAttr(r) {
     if (!isAdmin || r.isMe) return '';
     const payload = JSON.stringify({ id: r.id, name: r.name, is_banned: r.is_banned || false }).replace(/'/g, '&#39;');
-    return `onclick="window.transActions.setAdminTarget(${payload})"`;
+    return `onclick='window.transActions.setAdminTarget(${payload})'`;
   }
 
   return `
@@ -623,6 +628,9 @@ function renderAdminTargetModal() {
 // ─── 主渲染函数 ───────────────────────────────────────────────────
 export const renderTransmigrationApp = (store) => {
   initData();
+  // 每次渲染都异步刷新管理员权限，结果回来后触发重渲染
+  const _pId = 'TRV-' + String(store.transData.player.joinedAt).slice(-8);
+  checkAdminStatus(_pId).then(changed => { if (changed) window.render(); });
   const state  = window.transState;
   const player = store.transData.player;
 
@@ -739,10 +747,6 @@ window.transActions = {
     window.render();
     if (tab === 'terminal') {
       syncPlayerToCloud();
-      // 首次打开终端时检测管理员身份
-      initData();
-      const pId = 'TRV-' + String(store.transData.player.joinedAt || Date.now()).slice(-8);
-      checkAdminStatus(pId).then(() => window.render());
     }
     if (tab === 'ranking') loadRanking();
     if (tab === 'forum')   loadForum();
@@ -834,6 +838,19 @@ window.transActions = {
     if (!text) return;
     initData();
     const player = store.transData.player;
+
+    // 发帖前实时查封号状态
+    const _pId = 'TRV-' + String(player.joinedAt).slice(-8);
+    try {
+      const { data } = await supabase.from('players').select('is_banned').eq('id', _pId).maybeSingle();
+      if (data?.is_banned) {
+        window.actions.showToast('您的账号已被封禁，无法发布内容');
+        return;
+      }
+    } catch (e) {
+      // 网络异常时放行，交给后端 RLS 兜底
+    }
+
     const defaultPersona = store.personas?.[0] || {};
     const pName = player.name || defaultPersona.name || '旅行者';
     const pId   = 'TRV-' + String(player.joinedAt || Date.now()).slice(-8);
