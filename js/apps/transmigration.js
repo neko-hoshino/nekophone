@@ -17,6 +17,7 @@ window.transState = {
   loadingPlayers: false,
   loadingPosts:   false,
   isAdmin:        false,   // 当前玩家是否为管理员
+  isBanned:       false,   // 当前玩家是否被封号
   adminTarget:    null,    // 排名页点击的目标玩家 { id, name, is_banned }
 };
 
@@ -222,11 +223,12 @@ async function checkAdminStatus(pId) {
       .eq('id', pId)
       .maybeSingle();
     if (!error && data) {
-      const newVal = data.is_admin === true;
-      if (newVal !== window.transState.isAdmin) {
-        window.transState.isAdmin = newVal;
-        return true; // 有变化，调用方触发 render
-      }
+      const newAdmin  = data.is_admin  === true;
+      const newBanned = data.is_banned === true;
+      const changed = newAdmin !== window.transState.isAdmin || newBanned !== window.transState.isBanned;
+      window.transState.isAdmin  = newAdmin;
+      window.transState.isBanned = newBanned;
+      return changed;
     }
   } catch (e) {
     // 网络失败不改变现有状态
@@ -241,7 +243,7 @@ async function loadRanking() {
   try {
     const { data, error } = await supabase
       .from('players')
-      .select('id, name, level, points, worlds, is_admin, is_banned')  // ← worlds
+      .select('id, name, avatar, level, points, worlds, is_admin, is_banned')
       .order('points', { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
@@ -282,9 +284,18 @@ function renderTerminal(player, pName, pAvatar, pId, title) {
   const activeWorld = player.activeWorldId ? MISSIONS.find(m => m.id === player.activeWorldId) : null;
   const invCount = (player.inventory || []).length;
 
+  const isBanned = window.transState.isBanned;
   return `
   <div class="p-4 space-y-3">
-    <div class="rounded-2xl p-4 relative overflow-hidden" style="background:linear-gradient(135deg,#0d1f2d,#0d1117);border:1px solid rgba(88,212,245,0.35);box-shadow:0 0 20px rgba(88,212,245,0.08);">
+    ${isBanned ? `
+    <div class="rounded-xl px-4 py-3 flex items-center gap-2" style="background:rgba(248,81,73,0.1);border:1px solid rgba(248,81,73,0.4);">
+      <i data-lucide="ban" style="width:16px;height:16px;color:#f85149;flex-shrink:0;"></i>
+      <div>
+        <div class="text-[13px] font-black" style="color:#f85149;">账号已被封禁</div>
+        <div class="text-[11px]" style="color:#8b949e;">您无法发布内容，如有异议请联系管理员。</div>
+      </div>
+    </div>` : ''}
+    <div class="rounded-2xl p-4 relative overflow-hidden" style="background:linear-gradient(135deg,#0d1f2d,#0d1117);border:1px solid ${isBanned ? 'rgba(248,81,73,0.35)' : 'rgba(88,212,245,0.35)'};box-shadow:0 0 20px ${isBanned ? 'rgba(248,81,73,0.08)' : 'rgba(88,212,245,0.08)'};">
       <div class="absolute top-0 right-0 w-32 h-32 opacity-5" style="background:radial-gradient(circle,#58d4f5,transparent);"></div>
       <div class="absolute bottom-0 left-0 w-24 h-24 opacity-5" style="background:radial-gradient(circle,#bc8cff,transparent);"></div>
       <div class="flex items-start relative z-10 gap-3">
@@ -493,6 +504,7 @@ function renderRanking(player, pName, pAvatar, pId) {
 
   function avatarForRank(r, sizeClass, fontSize) {
     if (r.isMe) return myAvatar(pAvatar, pName, sizeClass, fontSize);
+    if (r.avatar) return `<img src="${r.avatar}" class="${sizeClass} rounded-full object-cover shrink-0" />`;
     return npcAvatar(r.name, sizeClass, fontSize);
   }
 
