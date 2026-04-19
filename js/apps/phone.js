@@ -532,7 +532,7 @@ if (!window.phoneActions) {
             <div style="width:100%; max-width:360px; margin:5px 0; font-family:-apple-system, sans-serif; user-select:text;">
               <details style="background:#f8fafc; border-radius:12px; box-shadow:0 2px 10px rgba(0,0,0,0.05); border: 1px solid #cbd5e1; overflow:hidden;">
                 <summary style="padding:12px 15px; cursor:pointer; list-style:none; display:flex; align-items:center; justify-content:space-between; background:#e2e8f0; color:#0f172a; outline:none; font-size:14px;">
-                  <span style="font-weight:800; display:flex; align-items:center;">🔍 搜索与浏览记录</span>
+                  <span style="font-weight:800; display:flex; align-items:center;">🔍 ${char.name}的搜索与浏览记录</span>
                   <span style="font-size:11px; color:#2563eb; font-weight:bold;">Safari</span>
                 </summary>
                 <div style="padding:15px; background:#f8fafc; color:#333; border-top: 1px solid #cbd5e1;">

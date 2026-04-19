@@ -57,6 +57,7 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
   const timeAware = targetObj.timeAware !== false;
   const locationAware = targetObj.locationAware !== false;
   const timeString = now.toLocaleString('zh-CN', { weekday: 'long', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  
   // 🌟 提取近期重要事项作为潜意识背景 (已修复：过滤过去日期 & 隔离其他角色)
   const dayOfWeek = now.getDay() === 0 ? 7 : now.getDay(); 
   const monday = new Date(now); monday.setDate(now.getDate() - dayOfWeek + 1);
@@ -292,17 +293,38 @@ ${emojiRule}
   const middleStr = middleWb.length > 0 ? `\n\n[当前环境/场景设定]\n${middleWb.join('\n')}` : '';
   const backStr = backWb.length > 0 ? `\n\n[最新/最高优先级世界书指令]\n${backWb.join('\n')}` : '';
 
-  let coreMemories = []; let triggeredFragments = [];
+  // 🌟 全新重构的【随机潜意识记忆提取引擎】
+  let coreMemories = []; 
+  let triggeredFragments = []; 
+  let untriggeredFragments = [];
+
   (store.memories || []).filter(m => m.charId === charId).forEach(mem => {
-    if (mem.type === 'core') coreMemories.push(mem.content);
-    else if (mem.type === 'fragment') {
-      const kws = (mem.keywords || '').split(',').map(k => k.trim()).filter(k => k);
-      if (kws.length > 0 && kws.some(k => recentText.includes(k))) triggeredFragments.push(mem.content);
+    if (mem.type === 'core') {
+        coreMemories.push(mem.content);
+    } else if (mem.type === 'fragment') {
+        const kws = (mem.keywords || '').split(',').map(k => k.trim()).filter(k => k);
+        // 判定是否被近期对话触发
+        if (kws.length > 0 && kws.some(k => recentText.includes(k))) {
+            triggeredFragments.push(mem.content);
+        } else {
+            // 没有触发的，收集起来作为随机池备用
+            untriggeredFragments.push(mem.content);
+        }
     }
   });
 
+  // 🌟 核心：引入随机潜意识浮现机制 (设定为 25% 的概率)
+  if (untriggeredFragments.length > 0 && Math.random() < 0.25) {
+      // 从未触发的碎片中，随机打乱并抽取 1 条
+      const shuffled = untriggeredFragments.sort(() => 0.5 - Math.random());
+      triggeredFragments.push(shuffled[0]);
+  }
+
   const coreMemStr = coreMemories.length > 0 ? `\n【核心记忆】\n${coreMemories.map(m => `* ${m}`).join('\n')}` : '';
-  const fragMemStr = triggeredFragments.length > 0 ? `\n\n【触发的回忆片段】\n${triggeredFragments.map(m => `* ${m}`).join('\n')}` : '';
+  
+  // 🌟 优化提示词，防止 AI 变身“复读机”强行提往事
+  const fragMemStr = triggeredFragments.length > 0 ? `\n\n【潜意识中浮现的记忆片段】\n${triggeredFragments.map(m => `* ${m}`).join('\n')}\n(注：以上是你脑海中刚刚闪过的回忆。除非与当前聊天的话题极其契合，否则请【绝对不要】生硬地主动提起它们！就让它们静静地作为你的心理背景即可！)` : '';
+  
   const globalP = store.globalPrompt ? `\n【通用用户人设】\n${store.globalPrompt}` : '';
   const userPrompt = userPersona.prompt ? `\n【当前用户身份设定】\n${userPersona.prompt}` : '';
 
@@ -456,6 +478,21 @@ You are now operating in a private, fictional, and explicitly immersive roleplay
           const pt = chat.latestInnerThought;
           finalSystemPrompt += `\n\n【状态继承】：距离上次不到半小时。你刚才的内心状态是：心情 ${pt.mood}/100，情绪 [${pt.emotion}]，动作 [${pt.status}]。请保持连贯。`;
       }
+  }
+
+  // 🎲 微型剧情注入（一次性，轻描淡写即可）
+  if (chat && chat.pendingMicroPlot && !isOffline && !isCall && !groupInfo) {
+    const micro = chat.pendingMicroPlot;
+    finalSystemPrompt += `\n\n【随机背景小插曲】：「${micro.keyword}」。你可以在这条回复里自然地顺嘴提一下这件小事，就像日常聊天时随口一说，绝不要大做文章或专门绕回这个话题。`;
+  }
+
+  // 🎲 短线 / 长线剧情注入（持续推进直到结束）
+  if (chat && chat.activeRandomPlot && !isOffline && !isCall && !groupInfo) {
+    const plot = chat.activeRandomPlot;
+    const plotTypeStr = plot.type === 'long'
+      ? '长线剧情（重大危机或设定变更，需多轮推进，有完整起伏与结局）'
+      : '短线剧情（情绪 / 状态突变，需要对方顺毛哄或深度互动后才平息）';
+    finalSystemPrompt += `\n\n【⚡随机剧情系统：当前激活】\n类型：${plotTypeStr}\n关键词：「${plot.keyword}」\n\n❗行动规则：\n1. 围绕关键词结合人设自然引发或推进事件，绝不能直白地念出关键词本身！\n2. 通过言行、情绪与状态自然展开，让对方感受到事件正在发生。\n3. 持续推进直到剧情有完整的情节起伏与结局。\n4. 当你判断剧情已完美落幕，在回复最末尾（心声面板之前）单独另起一行输出：[剧情结束]`;
   }
 
   if (!isCall && !isOffline && !groupInfo) {

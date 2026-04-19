@@ -25,7 +25,6 @@ export async function triggerAutoMemory(charId, msgs) {
         return `[${window.formatFullTimeForAI(m.timestamp, m.time)}] ${senderName}: ${content}`;
     }).join('\n');
 
-    // 🌟 修改 Prompt：强制锁定“我”与“你”的视角！
     const promptStr = `【后台任务】请判断以下近期的对话记录中，是否包含剧情进展、情感转折或新设定。
 如果只是毫无营养的日常闲聊（如早安、吃了吗等），请务必只输出"无"这一个字。
 如果有重要内容，请客观简练地总结为一个记忆碎片（50字以内）。
@@ -59,18 +58,17 @@ ${logText}`;
     if (memType === 'fragment') {
         const kwRes = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
-            body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: `请思考当聊到什么话题、遇到什么场景、或有什么情绪时，【${char.name}】应该回想起下面这段记忆？请提取2-3个核心名词作为触发关键词，用英文逗号分隔，不要输出多余符号。\n❗绝对禁令：触发关键词中【绝对禁止】出现具体名字（禁止使用：${myName}, ${char.name}, 我, 你, 他, 她）！\n${summary}` }], temperature: 0.3 })
+            // 🌟 在这里同步加入了极其严格的两字口语词限制！
+            body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: `请提取2-3个核心触发词。必须是日常聊天中最容易出现的【2字或3字的高频口语词汇】（如：做饭, 吵架, 电影, 散步, 晚安）！绝不能用四字成语或长句总结！\n思考“当用户在微信里随意打出哪两个字时，【${char.name}】应该回想起下面这段记忆？”\n用英文逗号分隔，不要输出多余符号。❗绝对禁令：触发关键词中【绝对禁止】出现具体名字（禁止使用：${myName}, ${char.name}, 我, 你, 他, 她）！\n\n记忆内容：\n${summary}` }], temperature: 0.3 })
         });
         const kwData = await kwRes.json();
         kws = window.cpActions.cleanAI(kwData.choices[0].message.content).replace(/^["']|["']$/g, '');
     }
 
-    // 🌟 在存入 store 之前，给内容打上时间戳
-    const dateStr = new Date().toLocaleDateString('zh-CN'); // 例如：2026/4/18
+    const dateStr = new Date().toLocaleDateString('zh-CN'); 
     const finalSummary = `[${dateStr}] ${summary}`;
 
     store.memories = store.memories || [];
-    // 微信静默提取的记忆默认未整理（isOrganized: false）
     store.memories.push({ id: Date.now(), charId: charId, type: memType, content: finalSummary, keywords: kws, createdAt: Date.now(), isOrganized: false });
     console.log(`[系统] 提取到高价值 ${memType === 'core' ? '❤️核心' : '🧩碎片'} 记忆:`, finalSummary);
   } catch (e) {}

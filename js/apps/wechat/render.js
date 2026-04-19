@@ -216,7 +216,20 @@ export function renderWeChatApp(store) {
                    <i data-lucide="chevron-right" class="text-gray-300 w-4 h-4 pointer-events-none"></i>
                  </div>
             </div>
-            ` : ''}
+            ` : `
+            <div class="bg-white rounded-[16px] p-4 mb-4 shadow-sm border border-gray-100 flex justify-between items-center">
+                 <div class="flex items-center flex-1">
+                    <i data-lucide="user-square" class="w-5 h-5 mr-3 text-purple-500"></i>
+                    <span class="text-[15px] font-medium text-gray-800">你的身份</span>
+                 </div>
+                 <div class="flex items-center">
+                   <select onchange="window.wxActions.updateSingleChatPersona(this.value)" class="outline-none text-[15px] text-gray-500 font-medium bg-transparent cursor-pointer appearance-none text-right pr-2">
+                       ${store.personas.map(p => `<option value="${p.id}" ${char.boundPersonaId === p.id ? 'selected' : ''}>${p.name}</option>`).join('')}
+                   </select>
+                   <i data-lucide="chevron-right" class="text-gray-300 w-4 h-4 pointer-events-none"></i>
+                 </div>
+            </div>
+            `}
 
           ${!chatData.isGroup ? `
             <div class="bg-white rounded-[16px] mb-4 shadow-sm border border-gray-100 flex flex-col overflow-hidden"> 
@@ -279,11 +292,11 @@ export function renderWeChatApp(store) {
                </div>
                <div class="flex justify-between items-center border-t border-gray-100 pt-4">
                  <span class="text-[15px] font-medium text-gray-800">未读冷落触发时长</span>
-                 <div class="flex items-center"><input type="number" id="set-auto-interval" value="${targetObj.autoMsgInterval || 30}" class="w-12 text-center outline-none bg-gray-50 p-1.5 rounded-lg text-[15px] font-medium text-black" /><span class="ml-2 text-[13px] text-gray-500">分钟</span></div>
+                 <div class="flex items-center"><input type="number" id="set-auto-interval" value="${targetObj.autoMsgInterval || 30}" class="w-14 text-center outline-none bg-gray-50 p-1.5 rounded-lg text-[15px] font-medium text-black" /><span class="ml-0 text-[13px] text-gray-500">分钟</span></div>
                </div>
                <div class="flex justify-between items-center border-t border-gray-100 pt-4">
                  <div class="flex flex-col"><span class="text-[15px] font-medium text-gray-800">附带历史记忆条数</span><span class="text-[10px] text-gray-500">1-100，耗费Token</span></div>
-                 <div class="flex items-center"><input type="number" id="set-context-limit" value="${targetObj.contextLimit || 30}" class="w-12 text-center outline-none bg-gray-50 p-1.5 rounded-lg text-[15px] font-medium text-black" /><span class="ml-2 text-[13px] text-gray-500">回合</span></div>
+                 <div class="flex items-center"><input type="number" id="set-context-limit" value="${targetObj.contextLimit || 30}" class="w-14 text-center outline-none bg-gray-50 p-1.5 rounded-lg text-[15px] font-medium text-black" /><span class="ml-0 text-[13px] text-gray-500">回合</span></div>
                </div>
                ${!chatData.isGroup ? `
 <div class="flex justify-between items-center border-t border-gray-100 pt-4">
@@ -298,22 +311,51 @@ export function renderWeChatApp(store) {
       <option value="8" ${targetObj.autoMomentFreq === 8 ? 'selected' : ''}>每 8 小时</option>
   </select>
 </div>
-<div class="flex justify-between items-center border-t border-gray-100 pt-4">
-  <div class="flex flex-col">
-    <span class="text-[15px] font-medium text-gray-800">偷看手机权限</span>
-    <span class="text-[10px] text-gray-400">开启后ta可能趁你不注意偷翻你的聊天和朋友圈</span>
-  </div>
-  <input type="checkbox" id="set-peek-phone" ${targetObj.canPeekPhone ? 'checked' : ''} class="ios-switch" />
-</div>
-<div class="flex justify-between items-center border-t border-gray-100 pt-4">
-  <div class="flex flex-col">
-    <span class="text-[15px] font-medium text-gray-800">偷看触发概率</span>
-    <span class="text-[10px] text-gray-400">每次AI回复后随机触发的概率</span>
-  </div>
-  <div class="flex items-center"><input type="number" id="set-peek-phone-prob" value="${targetObj.peekPhoneProb || 15}" min="1" max="80" class="w-12 text-center outline-none bg-gray-50 p-1.5 rounded-lg text-[15px] font-medium text-black" /><span class="ml-2 text-[13px] text-gray-500">%</span></div>
-</div>
 ` : ''}
             </div>
+
+            ${!chatData.isGroup ? `
+            <div class="bg-white rounded-[16px] p-4 space-y-4 shadow-sm border border-gray-100 mb-4">
+              <div class="flex justify-between items-center">
+                <div class="flex flex-col">
+                  <span class="text-[15px] font-medium text-gray-800">偷看手机权限</span>
+                  <span class="text-[10px] text-gray-400 mt-0.5">开启后ta可能趁你不注意偷翻你的聊天和朋友圈</span>
+                </div>
+                <input type="checkbox" id="set-peek-phone" ${targetObj.canPeekPhone ? 'checked' : ''} class="ios-switch" />
+              </div>
+              <div class="flex justify-between items-center border-t border-gray-100 pt-4">
+                <div class="flex flex-col">
+                  <span class="text-[15px] font-medium text-gray-800">偷看触发概率</span>
+                  <span class="text-[10px] text-gray-400 mt-0.5">每次AI回复后随机触发的概率</span>
+                </div>
+                <div class="flex items-center"><input type="number" id="set-peek-phone-prob" value="${targetObj.peekPhoneProb || 15}" min="1" max="80" class="w-12 text-center outline-none bg-gray-50 p-1.5 rounded-lg text-[15px] font-medium text-black" /><span class="ml-2 text-[13px] text-gray-500">%</span></div>
+              </div>
+              <div class="flex justify-between items-center border-t border-gray-100 pt-4">
+                <div class="flex flex-col">
+                  <span class="text-[15px] font-medium text-gray-800">随机剧情</span>
+                  <span class="text-[10px] text-gray-400 mt-0.5">获取回复时有概率触发随机事件（微型20%·短线15%·长线8%）</span>
+                </div>
+                <input type="checkbox" id="set-random-plot" ${chatData.randomPlotEnabled ? 'checked' : ''} class="ios-switch" />
+              </div>
+              ${chatData.activeRandomPlot ? `
+              <div class="flex justify-between items-center border-t border-gray-100 pt-4">
+                <div class="flex flex-col">
+                  <span class="text-[15px] font-medium text-gray-800">当前进行中剧情</span>
+                  <span class="text-[10px] text-${chatData.activeRandomPlot.type === 'long' ? 'orange' : 'blue'}-500 font-bold mt-0.5">${chatData.activeRandomPlot.type === 'long' ? '🔴 长线' : '🔵 短线'} · ${chatData.activeRandomPlot.keyword}</span>
+                </div>
+                <button onclick="window.wxActions.clearActiveRandomPlot()" class="text-xs text-red-500 bg-red-50 px-3 py-1.5 rounded-full font-bold active:scale-95 transition-transform">强制终止</button>
+              </div>
+              ` : ''}
+              ${chatData.pendingMicroPlot ? `
+              <div class="flex justify-between items-center border-t border-gray-100 pt-4">
+                <div class="flex flex-col">
+                  <span class="text-[15px] font-medium text-gray-800">待触发的微型插曲</span>
+                  <span class="text-[10px] text-gray-400 font-bold mt-0.5">⚡ ${chatData.pendingMicroPlot.keyword}</span>
+                </div>
+              </div>
+              ` : ''}
+            </div>
+            ` : ''}
 
             <div class="bg-white rounded-[16px] p-4 space-y-3 shadow-sm border border-gray-100 flex flex-col mb-6">
                <div class="flex justify-between items-center">

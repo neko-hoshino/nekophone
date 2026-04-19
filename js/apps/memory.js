@@ -47,17 +47,22 @@ if (!window.memActions) {
         if (idx !== -1) {
           store.memories[idx].content = content;
           store.memories[idx].keywords = keywords;
-          // 手动修改过的记忆，剥夺已整理标记，以便下次可以被重新整理
           store.memories[idx].isOrganized = false; 
         }
       } else {
+        let eventTime = Date.now();
+        const dateMatch = content.match(/^\[(\d{4})\/(\d{1,2})\/(\d{1,2})\]/);
+        if (dateMatch) {
+            eventTime = new Date(parseInt(dateMatch[1]), parseInt(dateMatch[2]) - 1, parseInt(dateMatch[3])).getTime();
+        }
+
         store.memories.push({
           id: Date.now(),
           charId: memState.activeCharId,
           type: memState.activeTab,
           content: content,
           keywords: keywords,
-          createdAt: Date.now(),
+          createdAt: eventTime,
           isOrganized: false
         });
       }
@@ -66,12 +71,10 @@ if (!window.memActions) {
       window.memActions.closeEdit();
     },
 
-    // 🌟 终极版：AI 智能整理记忆引擎 (智能去重 + 时间戳前置 + 人称视角锁定)
     organizeMemories: async (type) => {
         const charId = memState.activeCharId;
         if (!charId) return;
         
-        // 🚫 核心拦截：只把“未整理”的记忆捞出来喂给 AI
         const targetList = store.memories.filter(m => m.charId === charId && m.type === type && !m.isOrganized);
         
         if (targetList.length === 0) return window.actions.showToast('这里目前没有【未整理】的新记忆哦');
@@ -91,17 +94,22 @@ if (!window.memActions) {
             const memoryData = targetList.map((f, i) => `[条目${i+1}] ${f.keywords ? `标签：${f.keywords}\n` : ''}内容：${f.content}`).join('\n\n');
             
             const isCore = type === 'core';
-            // 核心记忆不需要关键词，碎片记忆需要
-            const keywordInstruction = isCore ? '' : `\n3. 🌟 触发词重构：不要简单提取名词。要思考“当聊到什么话题、遇到什么场景、有什么情绪时，我（${charName}）应该想起这件事？” 触发词用英文逗号分隔。\n❗绝对禁令：触发关键词中【绝对禁止】出现具体名字（禁止使用：${myName}, ${charName}, 我, 你, 他, 她）！`;
-            const jsonFormat = isCore ? `[\n  {\n    "content": "我视角下的整合记忆内容（含前因后果、情感感触）..."\n  }\n]` : `[\n  {\n    "content": "我视角下的整合记忆内容（含前因后果、情感感触）...",\n    "keywords": "相关话题,触发场景,关联情绪"\n  }\n]`;
+            
+            // 🌟 暴力的两字触发词限制
+            const keywordInstruction = isCore ? '' : `\n4. 🌟 极简触发词重构：【极其重要！】必须是日常聊天中最容易出现的【2字或3字词语】（如：做饭, 吵架, 电影, 散步, 吃醋, 晚安）！绝不能用四字成语或长句总结！你要思考的是“用户在微信里随意打出哪两个字时，我需要被唤醒这件事？”用英文逗号分隔。\n❗绝对禁令：触发关键词中【绝对禁止】出现具体名字（禁止使用：${myName}, ${charName}, 我, 你, 他, 她）！`;
+            
+            const jsonFormat = isCore ? `[\n  {\n    "content": "我视角下的整合记忆内容..."\n  }\n]` : `[\n  {\n    "content": "我视角下的整合记忆内容...",\n    "keywords": "两字,高频,口语"\n  }\n]`;
 
+            // 🌟 暴力的时间段拆分逻辑
             const task = `你现在是【${charName}】的潜意识处理器。请整理并合并以下关于我（${charName}）与你（用户 ${myName}）的“${isCore ? '核心' : '碎片'}”记忆。
 
-【整理人称与风格要求】：
+【整理人称与逻辑要求】：
 1. 🌟 第一人称视角：你【必须】以【${charName}】的身份写这段记忆。用“我”指代自己，用“你”指代用户（${myName}）。
-2. 🌟 文字调性：完整但简洁。写清楚事情的前因后果、经过以及关键瞬间。可以带入适度的内心描写、情感波澜，但禁止文学化堆砌、禁止啰嗦。
-3. 🌟 逻辑整合：将内容相关、时间相近的散装条目合并为连贯的段落。
-4. 🌟 时间线保留：【非常重要】在每条输出的 content 开头，必须加上时间戳（例如 [2026/4/18] ），并保留记忆中原有的具体日期或时间线索。${keywordInstruction}
+2. 🌟 强制时间拆分法则（极其重要！）：
+   - ✅【可以合并】：只有当几条碎片发生在【同一个时间段的同一场景】（例如全都是今天下午在游乐园），才能揉合成一条记忆！
+   - ❌【必须拆分】：如果两条记忆发生在【同一天的不同时间段】（比如下午去玩，晚上吵架），或者中间有明显的时间停顿，它们【必须】被拆分为独立的多个 JSON 对象！绝对不允许把一整天的流水账强行塞进一条内容里！
+3. 🌟 文字调性：完整但简洁。写清楚事情的前因后果、经过以及关键瞬间。带入情感，但禁止啰嗦和堆砌修辞。
+4. 🌟 时间线保留：在每条输出的 content 开头，必须加上时间戳（例如 [2026/4/18] ）。${keywordInstruction}
 
 【待整理列表】：
 ${memoryData}
@@ -122,28 +130,34 @@ ${jsonFormat}`;
             
             const newMemories = JSON.parse(match[0]);
 
-            // 物理擦除【参与了本次整理】的旧记忆，保留那些以前已经整理过的高级记忆
             const targetIds = targetList.map(m => m.id);
             store.memories = store.memories.filter(m => !targetIds.includes(m.id));
             
-            const dateStr = new Date().toLocaleDateString('zh-CN'); // 例如：2026/4/18
+            const dateStr = new Date().toLocaleDateString('zh-CN');
 
-            // 注入整理好的高级记忆
-            newMemories.forEach(nm => {
+            newMemories.forEach((nm, index) => {
                 let finalContent = nm.content;
-                // 强制兜底：如果 AI 偷懒没在最前面加时间戳，系统给它补上
                 if (!/^\[\d{4}\/\d{1,2}\/\d{1,2}\]/.test(finalContent)) {
                     finalContent = `[${dateStr}] ${finalContent}`;
                 }
 
+                let eventTime = Date.now();
+                const dateMatch = finalContent.match(/^\[(\d{4})\/(\d{1,2})\/(\d{1,2})\]/);
+                if (dateMatch) {
+                    const y = parseInt(dateMatch[1]);
+                    const m = parseInt(dateMatch[2]) - 1;
+                    const d = parseInt(dateMatch[3]);
+                    eventTime = new Date(y, m, d).getTime() + (newMemories.length - index);
+                }
+
                 store.memories.push({
-                    id: Date.now() + Math.floor(Math.random() * 1000),
+                    id: Date.now() + Math.floor(Math.random() * 1000) + index,
                     charId: charId,
                     type: type,
                     content: finalContent,
                     keywords: nm.keywords || '',
-                    createdAt: Date.now(),
-                    isOrganized: true // 🌟 打上已整理的钢印，下次不再理它
+                    createdAt: eventTime,
+                    isOrganized: true 
                 });
             });
 
@@ -169,7 +183,6 @@ export function renderMemoryApp(store) {
     let currentList = store.memories.filter(m => m.charId === memState.activeCharId && m.type === memState.activeTab);
     currentList.sort((a, b) => b.createdAt - a.createdAt);
     
-    // 计算有几条待整理的记忆
     const unorganizedCount = currentList.filter(m => !m.isOrganized).length;
 
     return `

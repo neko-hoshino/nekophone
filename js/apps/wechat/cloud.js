@@ -580,6 +580,27 @@ let remainingText = replyText
         let hasSystemAction = false;
         
         if (/\[(语音|视频)?通话(已)?结束\]/.test(remainingText)) remainingText = remainingText.replace(/\[(语音|视频)?通话(已)?结束\][:：]?\s*/g, '').trim();
+
+        // 🎲 微型剧情消费（一次性，响应后立即清除）
+        if (chat.pendingMicroPlot) {
+            chat.pendingMicroPlot = null;
+        }
+
+        // 🎲 短线 / 长线剧情结束检测
+        if (remainingText.includes('[剧情结束]')) {
+            if (chat.activeRandomPlot) {
+                const endedKeyword = chat.activeRandomPlot.keyword;
+                chat.activeRandomPlot = null;
+                chat.messages.push({
+                    id: Date.now() + sysMsgOffset++, sender: 'system',
+                    text: `✨ 随机剧情「${endedKeyword}」已结束`,
+                    isMe: false, source: 'wechat', msgType: 'system', time: cloudTime
+                });
+                hasSystemAction = true;
+            }
+            remainingText = remainingText.replace(/\[剧情结束\]/g, '').trim();
+        }
+
         // 🌟 【新增】：AI 收款动作拦截器！
 
         // 🌟 新增：退回转账处理
@@ -1416,14 +1437,14 @@ if (finalMsgs.length === 0 && !hasSystemAction) continue;
                     text: pendingCrossChat.text,
                     isMe: true,
                     source: 'wechat', isOffline: false, msgType: 'text',
-                    time: cloudTime, timestamp: Date.now() + 8000
+                    time: getNowTime(), timestamp: Date.now() + 8000
                 });
                 chat.messages.push({
                     id: Date.now() + 8001,
                     sender: 'system',
                     text: `${char.name} 冒充你给【${targetChar.name}】发了一条消息："${pendingCrossChat.text}"`,
                     isMe: false, source: 'wechat', msgType: 'system',
-                    time: cloudTime, timestamp: Date.now() + 8001
+                    time: getNowTime(), timestamp: Date.now() + 8001
                 });
                 if (window.DB) window.DB.set(JSON.parse(JSON.stringify(store))).catch(() => {});
                 setTimeout(() => {

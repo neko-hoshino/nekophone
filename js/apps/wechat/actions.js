@@ -4,6 +4,7 @@ import { getNowTime, saveScroll, restoreScroll, playCallAudio } from './shared.j
 import { fetchMinimaxVoice } from './voice.js';
 import { triggerAutoMemory } from './memory.js';
 import { wxState } from './state.js';
+import { rollRandomPlot } from './plot.js';
 
 window.wxActions = {
 // 🌟 全局来电横幅：接听与挂断动作
@@ -186,6 +187,18 @@ window.wxActions = {
       if (chat && chat.isGroup) {
           chat.boundPersonaId = val;
           window.actions.showToast('群内身份已切换！');
+          window.render();
+      }
+      restoreScroll();
+  },
+  // 单聊身份切换
+  updateSingleChatPersona: (val) => {
+      saveScroll();
+      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+      const char = store.contacts.find(c => c.id === wxState.activeChatId);
+      if (char && !chat?.isGroup) {
+          char.boundPersonaId = val;
+          window.actions.showToast('聊天身份已切换！');
           window.render();
       }
       restoreScroll();
@@ -1839,6 +1852,7 @@ ${relation}
         targetObj.canPeekPhone = document.getElementById('set-peek-phone')?.checked || false;
         const peekProbEl = document.getElementById('set-peek-phone-prob');
         targetObj.peekPhoneProb = peekProbEl ? (parseInt(peekProbEl.value) || 15) : 15;
+        chat.randomPlotEnabled = document.getElementById('set-random-plot')?.checked || false;
     }
 
     // 🌟 核心拦截机制：发射省钱空包弹！如果你关掉了开关，立刻向云端发射指令，物理绞杀旧闹钟！
@@ -2306,8 +2320,27 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
     const char = store.contacts.find(c => c.id === charId);
     if (!char) return;
 
-    chat.lastGroupSpeaker = charId; 
+    chat.lastGroupSpeaker = charId;
     const isActive = wxState.activeChatId === chatId;
+
+    // 🎲 随机剧情 roll（仅用户主动触发的线上单聊，每次AI回复roll一次）
+    if (!isAuto && !chat.isGroup) {
+      const newPlot = rollRandomPlot(chat);
+      if (newPlot) {
+        if (newPlot.type === 'micro') {
+          chat.pendingMicroPlot = newPlot;
+        } else {
+          chat.activeRandomPlot = newPlot;
+          const typeLabel = newPlot.type === 'long' ? '长线剧情' : '短线剧情';
+          chat.messages.push({
+            id: Date.now() + 1, sender: 'system',
+            text: `🎲 随机${typeLabel}触发：${newPlot.keyword}`,
+            isMe: false, source: 'wechat', msgType: 'system', time: getNowTime()
+          });
+          if (isActive) { saveScroll(); window.render(); restoreScroll(); }
+        }
+      }
+    }
     // 🌟 修复5：通过 explicitIsOffline 强制读取维度坐标，防止线下和线上跨次元串台
     const isOffline = explicitIsOffline !== null ? explicitIsOffline : (wxState.view === 'offlineStory' && isActive);
     const isCall = wxState.view === 'call' && isActive && !chat.isGroup;
@@ -2524,5 +2557,17 @@ if (!chat.isGroup) {
     const peekPrompt = `【警告】你刚才趁 ${myName} 不注意，偷看了她的手机，发现了以下内容：${chatSummary}${momentsSummary}\n\n请根据你的人设和上述具体内容做出真实反应。如果你气急败坏到决定冒充 ${myName} 给某人发消息，可以在回复的某处嵌入一个 JSON（仅限一个，格式严格）：{"action":"reply_as_user","target":"对方在通讯录里的名字","text":"你要以她名义发出的内容"}\nJSON 以外的部分才是你说出来的话。保持人设，分段换行，绝不输出任何系统标签。`;
 
     await window.wxActions.getReply(true, null, peekPrompt, null, charId);
+  },
+
+  clearActiveRandomPlot: () => {
+    const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    if (!chat) return;
+    chat.activeRandomPlot = null;
+    chat.messages.push({
+      id: Date.now(), sender: 'system',
+      text: '已手动终止当前随机剧情',
+      isMe: false, source: 'wechat', msgType: 'system', time: getNowTime()
+    });
+    window.render();
   },
 };

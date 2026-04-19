@@ -13,6 +13,7 @@ import { renderShoppingApp } from './apps/shopping.js';
 import { renderBloggerApp } from './apps/blogger.js';
 import { renderAo3App } from './apps/ao3.js';
 import { renderDarkroomApp } from './apps/darkroom.js';
+import { renderTransmigrationApp } from './apps/transmigration.js';
 
 // 1. 获取/生成设备唯一标识
 function getDeviceId() {
@@ -505,7 +506,9 @@ function render() {
       #phone-container {
          background: url('${ap.interfaceBg}') center/cover no-repeat !important;
       }
-      #phone-container > div:not(#mc-chat-screen):not(#mc-status-bar) {
+      #trans-app-screen, #trans-app-screen * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+      #trans-app-screen { background: #0d1117 !important; background-image: none !important; }
+      #phone-container > div:not(#mc-chat-screen):not(#mc-status-bar):not(#trans-app-screen) {
          background-color: rgba(255, 255, 255, 0.3) !important; 
          background-image: none !important;
          backdrop-filter: blur(10px) !important; 
@@ -633,6 +636,7 @@ function render() {
   else if (store.currentApp === 'blogger') appHtml = renderBloggerApp(store);
   else if (store.currentApp === 'ao3') appHtml = renderAo3App(store);
   else if (store.currentApp === 'darkroom') appHtml = renderDarkroomApp(store);
+  else if (store.currentApp === 'transmigrate') appHtml = renderTransmigrationApp(store);
   else appHtml = `
       <div class="w-full h-full bg-white flex flex-col items-center justify-center text-gray-400">
         <i data-lucide="hammer" class="w-12 h-12 mb-4 text-gray-300"></i>

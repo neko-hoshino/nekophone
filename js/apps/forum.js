@@ -293,6 +293,9 @@ ${charProfiles}
 ${postInfo}
 ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsText}\n` : ''}
 
+【重要：用户身份说明】
+系统用户在论坛中的显示名（网名）是"${displayName}"。已知角色各自绑定了用户的不同身份（见各角色上下文中的【与该角色对话的用户身份】），但无论绑定的身份名称叫什么，在论坛里这个人统一显示为"${displayName}"。只要帖子作者或评论中出现了"${displayName}"，那就是用户本体，所有已知角色都应当能认出ta，并用符合自己人设的方式回应ta。
+
 【任务】
 为这篇帖子${isAppend ? `补充生成 10 条全新的评论，从第 ${nextFloor} 楼开始递增。` : `生成 10 条不同用户的评论，从第 1 楼开始递增。`}
 1. 可包含已知角色（每人最多1条）。剩下由随机路人发布。
@@ -361,7 +364,7 @@ ${existingCommentsText ? `\n【目前已有评论记录】\n${existingCommentsTe
                 ? `用户(${displayName})刚才在你的帖子里评论了你：${userReplyText}` 
                 : `你在帖子下评论说：${targetComment.content}\n用户(${displayName})刚才回复你：${userReplyText}`;
 
-            const prompt = `你是一个社交平台的模拟引擎。\n【论坛主题】${activeForum.topic || '综合闲聊日常'}\n【当前对话用户】名字：${displayName}\n全局性格：${globalP}\n\n${targetContext}\n【帖子内容】标题：${post.title||'无'} 正文：${post.content}\n【对话上下文】\n${actionContext}\n\n【任务】\n给出你对用户的直接回复！符合身份，50字内口语化。不包含<think>，只输出纯文本！`;
+            const prompt = `你是一个社交平台的模拟引擎。\n【论坛主题】${activeForum.topic || '综合闲聊日常'}\n【当前对话用户】论坛网名：${displayName}（这就是用户本体，即使你绑定的用户身份名字不同，这里的"${displayName}"也是同一个人）\n全局性格：${globalP}\n\n${targetContext}\n【帖子内容】标题：${post.title||'无'} 正文：${post.content}\n【对话上下文】\n${actionContext}\n\n【任务】\n给出你对用户的直接回复！符合身份，50字内口语化。不包含<think>，只输出纯文本！`;
 
             const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
                 method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
@@ -445,16 +448,17 @@ ${contactsProfiles}
             if (reactions.reactions) reactions = reactions.reactions; // 强力容错
             
             if (Array.isArray(reactions)) {
-                // 🌟 瞬间将所有人的回复分发到各自的单聊记录中
+                // 清除所有联系人的旧论坛私信，再写入新的
                 reactions.forEach(reaction => {
                     const char = contacts.find(c => c.name === reaction.author);
                     if (char) {
                         let fChat = store.forumChats.find(c => c.charId === char.id);
                         if (!fChat) { fChat = { charId: char.id, messages: [] }; store.forumChats.push(fChat); }
+                        fChat.messages = []; // 清除旧消息
                         fChat.messages.push({ id: Date.now() + Math.random(), sender: char.name, isMe: false, text: reaction.reply, timestamp: Date.now() });
                     }
                 });
-                
+
                 if (window.actions?.saveStore) window.actions.saveStore();
                 if (window.actions?.showToast) window.actions.showToast('私信刷新成功！');
             } else {
@@ -687,6 +691,21 @@ ${combos}
             setTimeout(() => { const el = document.getElementById('forum-chat-scroll'); if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' }); }, 100);
         },
         getForumChatReply: (charId) => { generateForumChatReply(charId); },
+        forwardForumChatToWeChat: (charId) => {
+            const char = store.contacts.find(c => c.id === charId);
+            const fChat = store.forumChats.find(c => c.charId === charId);
+            if (!char || !fChat || fChat.messages.length === 0) return window.actions?.showToast('没有可转发的私信');
+            const wChat = store.chats?.find(c => c.charId === charId);
+            if (!wChat) return window.actions?.showToast('微信中找不到对应聊天室');
+            const nowTs = Date.now();
+            const d = new Date(nowTs);
+            const nowTimeStr = `${d.getFullYear()}-${(d.getMonth()+1).toString().padStart(2,'0')}-${d.getDate().toString().padStart(2,'0')} ${d.toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false})}`;
+            fChat.messages.forEach((m, i) => {
+                wChat.messages.push({ id: nowTs + i, sender: m.sender, isMe: m.isMe, msgType: 'text', text: m.text, timestamp: nowTs + i, time: nowTimeStr });
+            });
+            if (window.actions?.saveStore) window.actions.saveStore();
+            if (window.actions?.showToast) window.actions.showToast('已转发到微信！');
+        },
         switchMessageTab: (tab) => { 
             window.forumState.messageTab = tab; 
             window.render(); 
@@ -1352,7 +1371,9 @@ ${combos}
                     <div class="pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200/50 z-20 sticky top-0 bg-white/90 backdrop-blur-md shadow-sm">
                         <div class="cursor-pointer active:opacity-50 text-gray-600 w-8" onclick="window.forumActions.closeForumChat()"><i data-lucide="chevron-left" class="w-7 h-7"></i></div>
                         <span class="text-[16px] font-black text-gray-800 absolute left-1/2 -translate-x-1/2">${char.name}</span>
-                        <div class="w-8"></div>
+                        <div class="w-8 flex justify-end">
+                            <div class="cursor-pointer active:opacity-50 text-gray-500 p-1" onclick="window.forumActions.forwardForumChatToWeChat('${char.id}')"><i data-lucide="forward" class="w-5 h-5"></i></div>
+                        </div>
                     </div>
                     
                     <div id="forum-chat-scroll" class="flex-1 overflow-y-auto p-4 hide-scrollbar">
