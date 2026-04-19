@@ -264,7 +264,7 @@ async function loadForum() {
   try {
     const { data, error } = await supabase
       .from('posts')
-      .select('id, author_name, author_level, content, tag, likes, comments, created_at')
+      .select('id, author_id, author_name, author_level, author_avatar, content, tag, likes, comments, created_at')
       .order('created_at', { ascending: false })
       .limit(50);
     if (error) throw new Error(error.message);
@@ -402,7 +402,7 @@ function renderShop(player) {
   </div>`;
 }
 
-function renderForum(pName, pAvatar) {
+function renderForum(pName, pAvatar, pId) {
   const state = window.transState;
   const sub   = state.forumSub;
   const source = state.cloudPosts !== null ? state.cloudPosts : MOCK_POSTS;
@@ -411,7 +411,7 @@ function renderForum(pName, pAvatar) {
   const isAdmin     = state.isAdmin;
 
   let allPosts;
-  if (sub === 'mine')     allPosts = source.filter(p => p.author_name === pName);
+  if (sub === 'mine')     allPosts = source.filter(p => p.author_id === pId);
   else if (sub === 'hot') allPosts = [...source].sort((a, b) => b.likes - a.likes);
   else                    allPosts = [...source].sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
@@ -434,10 +434,12 @@ function renderForum(pName, pAvatar) {
       ${isLoading ? loadingSkeleton(3) : allPosts.length === 0
         ? `<div class="text-center py-10 text-[13px]" style="color:#8b949e;">还没有帖子，来发第一篇吧！</div>`
         : allPosts.map(p => {
-          const isMe = p.author_name === pName;
+          const isMe = p.author_id === pId;
           const avatarHtml = isMe
             ? myAvatar(pAvatar, pName, 'w-7 h-7')
-            : npcAvatar(p.author_name, 'w-7 h-7', '12px');
+            : p.author_avatar
+              ? `<img src="${p.author_avatar}" class="w-7 h-7 rounded-full object-cover shrink-0" />`
+              : npcAvatar(p.author_name, 'w-7 h-7', '12px');
           const isMockPost = p.id.startsWith('mock-');
           return `
           <div class="rounded-xl p-3.5" style="background:#161b22;border:1px solid rgba(255,255,255,0.05);">
@@ -483,18 +485,21 @@ function renderForum(pName, pAvatar) {
 
 function renderRanking(player, pName, pAvatar, pId) {
   const state = window.transState;
-  const players = state.cloudPlayers !== null ? state.cloudPlayers : MOCK_PLAYERS;
-  const isLoading   = state.loadingPlayers && state.cloudPlayers === null;
-  const isCloudData = state.cloudPlayers !== null;  // null=未连通，[]或有数据=已连通
-  const isAdmin     = state.isAdmin;
+  const players    = state.cloudPlayers !== null ? state.cloudPlayers : MOCK_PLAYERS;
+  const isLoading  = state.loadingPlayers && state.cloudPlayers === null;
+  const isCloudData = state.cloudPlayers !== null;
+  const isAdmin    = state.isAdmin;
 
-  const allPlayers = players.filter(r => r.id !== pId);
-  allPlayers.push({ id: pId, name: pName, level: player.level, points: player.points, worlds: player.completedWorlds, is_admin: isAdmin, is_banned: false, isMe: true });
-  allPlayers.sort((a, b) => b.points - a.points);
+  // 固定使用云端排序（已按 points desc），取前 10 名展示
+  const top10  = players.slice(0, 10);
+  const top3   = top10.slice(0, 3);
+  const rank4to10 = top10.slice(3);
 
-  const top3   = allPlayers.slice(0, 3);
-  const rest   = allPlayers.slice(3);
-  const myRank = allPlayers.findIndex(r => r.isMe) + 1;
+  // 计算我的排名：在完整列表里按积分找位置
+  const fullSorted = [...players].sort((a, b) => b.points - a.points);
+  const myIdxInFull = fullSorted.findIndex(r => r.id === pId);
+  // 如果自己不在云端列表中，排名 = 列表末尾 + 1
+  const myRank = myIdxInFull >= 0 ? myIdxInFull + 1 : fullSorted.length + 1;
 
   const podiumRgb    = ['255,196,0', '192,192,192', '205,127,50'];
   const podiumLabels = ['👑', '🥈', '🥉'];
@@ -503,14 +508,14 @@ function renderRanking(player, pName, pAvatar, pId) {
   const podiumRankIdx = [1, 0, 2];
 
   function avatarForRank(r, sizeClass, fontSize) {
-    if (r.isMe) return myAvatar(pAvatar, pName, sizeClass, fontSize);
+    const isMe = r.id === pId;
+    if (isMe) return myAvatar(pAvatar, pName, sizeClass, fontSize);
     if (r.avatar) return `<img src="${r.avatar}" class="${sizeClass} rounded-full object-cover shrink-0" />`;
     return npcAvatar(r.name, sizeClass, fontSize);
   }
 
-  // 管理员可点击目标玩家
   function adminTapAttr(r) {
-    if (!isAdmin || r.isMe) return '';
+    if (!isAdmin || r.id === pId) return '';
     const payload = JSON.stringify({ id: r.id, name: r.name, is_banned: r.is_banned || false }).replace(/'/g, '&#39;');
     return `onclick='window.transActions.setAdminTarget(${payload})'`;
   }
@@ -534,11 +539,12 @@ function renderRanking(player, pName, pAvatar, pId) {
       ${podiumOrder.map((r, vi) => {
         if (!r) return '<div class="flex-1"></div>';
         const ri = podiumRankIdx[vi];
+        const isMe = r.id === pId;
         return `
-        <div class="flex flex-col items-center flex-1 cursor-pointer" ${adminTapAttr(r)}>
+        <div class="flex flex-col items-center flex-1 ${isAdmin && !isMe ? 'cursor-pointer' : ''}" ${adminTapAttr(r)}>
           ${avatarForRank(r, 'w-12 h-12', '18px')}
-          <div class="text-[11px] font-bold mt-1 mb-0.5 text-center" style="color:${r.isMe ? '#58d4f5' : r.is_banned ? '#8b949e' : '#e6edf3'};max-width:64px;word-break:break-all;">
-            ${r.name}${r.is_banned ? ' 🚫' : ''}
+          <div class="text-[11px] font-bold mt-1 mb-0.5 text-center" style="color:${isMe ? '#58d4f5' : r.is_banned ? '#8b949e' : '#e6edf3'};max-width:64px;word-break:break-all;">
+            ${r.name}${r.is_banned ? ' 🚫' : ''}${isMe ? ' (你)' : ''}
           </div>
           <div class="text-[9px] font-mono mb-2" style="color:#8b949e;">${fmtPts(r.points)} pts</div>
           <div class="w-full ${podiumHeights[vi]} rounded-t-xl flex items-center justify-center text-xl font-black"
@@ -549,37 +555,43 @@ function renderRanking(player, pName, pAvatar, pId) {
       }).join('')}
     </div>
 
-    <!-- 我的排名卡 -->
-    <div class="rounded-xl p-3 flex items-center gap-3" style="background:rgba(88,212,245,0.06);border:1px solid rgba(88,212,245,0.3);">
-      <div class="text-[20px] font-black font-mono w-8 text-center" style="color:#58d4f5;">#${myRank}</div>
-      <div class="text-[13px] font-bold" style="color:#58d4f5;">你的当前排名</div>
-      <div class="ml-auto text-right">
-        <div class="text-[11px] font-mono" style="color:#58d4f5;">${player.points.toLocaleString()} pts</div>
-        <div class="text-[9px]" style="color:#8b949e;">Lv.${player.level} · ${getTitle(player.level)}</div>
-      </div>
-    </div>
-
-    <!-- 4名以后列表 -->
-    ${rest.length > 0 ? `
+    <!-- 第 4–10 名列表 -->
+    ${rank4to10.length > 0 ? `
     <div class="rounded-xl overflow-hidden" style="border:1px solid rgba(255,255,255,0.06);">
-      ${rest.map((r, i) => `
-        <div class="flex items-center gap-3 px-3 py-2.5 ${isAdmin && !r.isMe ? 'cursor-pointer active:opacity-70' : ''}"
-          style="border-bottom:1px solid rgba(255,255,255,0.04);${r.isMe ? 'background:rgba(88,212,245,0.05);' : 'background:#161b22;'}"
+      ${rank4to10.map((r, i) => {
+        const isMe = r.id === pId;
+        return `
+        <div class="flex items-center gap-3 px-3 py-2.5 ${isAdmin && !isMe ? 'cursor-pointer active:opacity-70' : ''}"
+          style="border-bottom:1px solid rgba(255,255,255,0.04);${isMe ? 'background:rgba(88,212,245,0.05);' : 'background:#161b22;'}"
           ${adminTapAttr(r)}>
-          <div class="text-[14px] font-black w-6 text-center font-mono" style="color:${r.isMe ? '#58d4f5' : '#8b949e'};">${i + 4}</div>
+          <div class="text-[14px] font-black w-6 text-center font-mono" style="color:${isMe ? '#58d4f5' : '#8b949e'};">${i + 4}</div>
           ${avatarForRank(r, 'w-8 h-8', '13px')}
           <div class="flex-1 min-w-0">
-            <div class="text-[13px] font-bold truncate" style="color:${r.isMe ? '#58d4f5' : r.is_banned ? '#8b949e' : '#e6edf3'};">
-              ${r.name}${r.isMe ? ' (你)' : ''}${r.is_banned ? ' 🚫' : ''}${r.is_admin ? ' 🔑' : ''}
+            <div class="text-[13px] font-bold truncate" style="color:${isMe ? '#58d4f5' : r.is_banned ? '#8b949e' : '#e6edf3'};">
+              ${r.name}${isMe ? ' (你)' : ''}${r.is_banned ? ' 🚫' : ''}${r.is_admin ? ' 🔑' : ''}
             </div>
             <div class="text-[10px]" style="color:#8b949e;">Lv.${r.level} · ${getTitle(r.level)}</div>
           </div>
           <div class="text-right shrink-0">
             <div class="text-[12px] font-mono font-bold" style="color:#e6edf3;">${fmtPts(r.points)}</div>
-            <div class="text-[10px]" style="color:#8b949e;">${r.worlds}个副本</div>
+            <div class="text-[10px]" style="color:#8b949e;">${r.worlds ?? 0}个副本</div>
           </div>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>` : ''}
+
+    <!-- 我的排名卡（始终固定在底部） -->
+    <div class="rounded-xl p-3 flex items-center gap-3" style="background:rgba(88,212,245,0.06);border:1px solid rgba(88,212,245,0.3);">
+      ${myAvatar(pAvatar, pName, 'w-9 h-9', '15px')}
+      <div class="flex-1 min-w-0">
+        <div class="text-[13px] font-bold truncate" style="color:#58d4f5;">${pName}</div>
+        <div class="text-[10px]" style="color:#8b949e;">Lv.${player.level} · ${getTitle(player.level)}</div>
+      </div>
+      <div class="text-right shrink-0">
+        <div class="text-[20px] font-black font-mono" style="color:#58d4f5;">#${myRank}</div>
+        <div class="text-[10px] font-mono" style="color:#8b949e;">${player.points.toLocaleString()} pts</div>
+      </div>
+    </div>
     `}
   </div>`;
 }
@@ -655,7 +667,7 @@ export const renderTransmigrationApp = (store) => {
   const tabContents = {
     terminal: renderTerminal(player, pName, pAvatar, pId, title),
     shop:     renderShop(player),
-    forum:    renderForum(pName, pAvatar),
+    forum:    renderForum(pName, pAvatar, pId),
     ranking:  renderRanking(player, pName, pAvatar, pId),
     mission:  renderMission(player),
   };
@@ -722,8 +734,8 @@ export const renderTransmigrationApp = (store) => {
         <i data-lucide="chevron-left" style="width:22px;height:22px;"></i>
       </button>
       <div class="relative z-10 flex-1">
-        <div class="text-[9px] font-mono tracking-[3px] uppercase mb-0.5" style="color:#58d4f5;">System Terminal v2.4.1</div>
-        <div class="text-[17px] font-black tracking-wide" style="color:#e6edf3;">∞ 无限流副本系统</div>
+        <div class="text-[9px] font-mono tracking-[3px] uppercase mb-0.5" style="color:#58d4f5;">NEXUS // OBSERVER_NODE</div>
+        <div class="text-[17px] font-black tracking-wide" style="color:#e6edf3;">⟁ 星海枢纽 · 观测者节点</div>
       </div>
       <div class="relative z-10 text-right shrink-0">
         <div class="text-[9px]" style="color:#8b949e;">积分</div>
@@ -867,9 +879,10 @@ window.transActions = {
     const pName = player.name || defaultPersona.name || '旅行者';
     const pId   = 'TRV-' + String(player.joinedAt || Date.now()).slice(-8);
 
+    const pAvatarForPost = player.avatar || (store.personas?.[0]?.avatar?.startsWith?.('http') ? store.personas[0].avatar : null);
     const optimisticPost = {
       id: 'optimistic_' + Date.now(),
-      author_name: pName, author_level: player.level,
+      author_id: pId, author_name: pName, author_level: player.level, author_avatar: pAvatarForPost,
       content: text, tag: '分享', likes: 0, comments: 0,
       created_at: new Date().toISOString(),
     };
@@ -883,13 +896,14 @@ window.transActions = {
 
     // 插入云端（不发 id，让 DB 生成 UUID）
     const { data, error } = await supabase.from('posts').insert({
-      author_id:    pId,
-      author_name:  pName,
-      author_level: player.level,
-      content:      text,
-      tag:          '分享',
-      likes:        0,
-      comments:     0,
+      author_id:     pId,
+      author_name:   pName,
+      author_level:  player.level,
+      author_avatar: pAvatarForPost,
+      content:       text,
+      tag:           '分享',
+      likes:         0,
+      comments:      0,
     }).select().single();
 
     if (error) {
