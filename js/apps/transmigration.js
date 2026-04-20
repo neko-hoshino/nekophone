@@ -1819,6 +1819,11 @@ window.transActions = {
   },
 
   openMission(id) {
+    initData();
+    if (store.transData.savedDungeon || window.transState.activeDungeon) {
+      window.actions.showToast('已有副本进行中，请先完成或放弃当前副本');
+      return;
+    }
     window.transState.missionModal    = id;
     window.transState.missionModalChars = [];
     window.transState.missionScript   = null;
@@ -1896,7 +1901,7 @@ window.transActions = {
       persona,
     };
     window.transState.activeDungeon   = dungeon;
-    store.transData.savedDungeon      = JSON.parse(JSON.stringify(dungeon));
+    store.transData.savedDungeon      = dungeon;
     window.transState.missionModal    = null;
     window.transState.missionScript   = null;
     window.transState.missionModalChars = [];
@@ -2104,6 +2109,11 @@ window.transActions = {
 
   // ── 自定义副本 & 文游 ──────────────────────────────────────────
   openCustomModal() {
+    initData();
+    if (store.transData.savedDungeon || window.transState.activeDungeon) {
+      window.actions.showToast('已有副本进行中，请先完成或放弃当前副本');
+      return;
+    }
     window.transState.customModal  = true;
     window.transState.customScript = null;
     window.transState.customForm   = { world: '', name: '', briefing: '', target: '', selectedChars: [], difficulty: 2 };
@@ -2211,7 +2221,7 @@ window.transActions = {
       persona,
     };
     window.transState.activeDungeon    = dungeon;
-    store.transData.savedDungeon       = JSON.parse(JSON.stringify(dungeon));
+    store.transData.savedDungeon       = dungeon;
     window.transState.customModal      = false;
     window.transState.customScript     = null;
     window.transState.customForm       = { world: '', name: '', briefing: '', target: '', selectedChars: [] };
@@ -2263,7 +2273,7 @@ window.transActions = {
       if (idx >= 0) inv.splice(idx, 1);
     }
     dungeon.log.push({ type: 'system', text: `🎁 使用道具【${item.name}】：${item.desc}` });
-    store.transData.savedDungeon = JSON.parse(JSON.stringify(dungeon));
+    store.transData.savedDungeon = dungeon;
     window.actions.showToast(`已使用 ${item.name}`);
     window.render();
     scrollDungeonLog();
@@ -2272,13 +2282,13 @@ window.transActions = {
   exitDungeon() {
     const dungeon = window.transState.activeDungeon;
     if (!dungeon) return;
-    // 保存副本进度到 IndexedDB（下次进入自动恢复）
+    // 🌟 直接保留引用，进行中的回合完成后仍能更新同一对象
     initData();
-    store.transData.savedDungeon      = JSON.parse(JSON.stringify(dungeon));
+    store.transData.savedDungeon      = dungeon;
     window.transState.activeDungeon   = null;
     window.transState.dungeonInvOpen  = false;
     window.transState.dungeonAffOpen  = false;
-    window.transState.generatingTurn  = false;
+    // generatingTurn 不重置——若有回合在生成，完成后 finally 会更新 savedDungeon
     window.transState.tab             = 'mission';
     window.actions.showToast('副本已暂存，可随时继续');
     window.render();
@@ -2287,6 +2297,8 @@ window.transActions = {
   abandonDungeon() {
     if (!confirm('确认放弃副本？所有进度将清除，无法恢复。')) return;
     initData();
+    const dungeon = window.transState.activeDungeon || store.transData.savedDungeon;
+    if (dungeon) dungeon._abandoned = true;   // 防止 in-flight 回合完成后复活副本
     store.transData.savedDungeon      = null;
     store.transData.player.activeWorldId = null;
     window.transState.activeDungeon   = null;
@@ -2581,10 +2593,10 @@ async function _processDungeonTurn(actionText) {
     dungeon.choices = ['重试本回合', '尝试其他行动', '观察四周'];
   } finally {
     window.transState.generatingTurn = false;
-    // 每回合自动存档
-    if (dungeon && !dungeon.completed) {
+    // 每回合自动存档（仅当副本未被放弃时）
+    if (dungeon && !dungeon.completed && !dungeon._abandoned) {
       initData();
-      store.transData.savedDungeon = JSON.parse(JSON.stringify(dungeon));
+      store.transData.savedDungeon = dungeon;   // 🌟 保留引用，保证退出/重进时数据一致
     }
     window.render();
     scrollDungeonLog();
