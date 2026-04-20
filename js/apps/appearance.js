@@ -23,7 +23,7 @@ const iconList = [
   { id: 'mc-icon-phone', name: '桌面 - 查手机', icon: 'smartphone' },
   { id: 'mc-icon-ao3', name: '桌面 - AO3', icon: 'feather' },
   { id: 'mc-icon-darkroom', name: '桌面 - 小黑屋', icon: 'lock' },
-  { id: 'mc-icon-transmigrate', name: '桌面 - 快穿系统', icon: 'zap' },
+  { id: 'mc-icon-transmigrate', name: '桌面 - Nexus', icon: 'zap' },
   { id: 'mc-icon-jubensha', name: '桌面 - 占位(剧本杀)', icon: 'clapperboard' },
   { id: 'mc-icon-worldbook', name: 'Dock栏 - 世界书', icon: 'book-open' },
   { id: 'mc-icon-memory', name: 'Dock栏 - 记忆库', icon: 'brain' },

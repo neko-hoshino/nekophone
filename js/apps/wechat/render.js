@@ -333,7 +333,7 @@ export function renderWeChatApp(store) {
               <div class="flex justify-between items-center border-t border-gray-100 pt-4">
                 <div class="flex flex-col">
                   <span class="text-[15px] font-medium text-gray-800">随机剧情</span>
-                  <span class="text-[10px] text-gray-400 mt-0.5">获取回复时有概率触发随机事件（微型20%·短线15%·长线8%）</span>
+                  <span class="text-[10px] text-gray-400 mt-0.5">获取回复时有概率触发（微型20%·短线15%·长线8%）</span>
                 </div>
                 <input type="checkbox" id="set-random-plot" ${chatData.randomPlotEnabled ? 'checked' : ''} class="ios-switch" />
               </div>
