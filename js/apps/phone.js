@@ -1464,7 +1464,9 @@ export function renderPhoneApp(store) {
    - 重点：每个 fakeChat 必须包含一个 messages 数组（长度8-12条的完整对话）。
    - messages 包含：sender(发送者名字。如果是群聊，请务必给出不同群友的名字，如"大刘","老王"；单聊写对方名字即可), text(内容), isChar(true代表角色本人发的话，false代表对方发的话), type("text")。
    - 内容极大概率暴露出他不为人知的一面。
-2. 【fakeMoments】: 生成2-3条其他人发的朋友圈。包含: senderName, text, time, likes, comments。
+2. 【fakeMoments】: 生成2-3条其他人发的朋友圈。包含: senderName, text, time, hoursAgo, likes, comments。
+   - hoursAgo: 数字(整数或小数)。代表该动态距离"现在"过去了多少小时。例: 0.5=半小时前, 3=3小时前, 24=昨天同时刻, 72=3天前。这个字段用于排序，务必给出。
+   - time: 与 hoursAgo 对应的人类可读字符串，格式形如"3小时前" / "昨天 23:14" / "3天前 14:30"。
 3. 【realMomentInteractions】: 针对以下TA发过的真实朋友圈，生成TA好友的点赞和评论。
 真实朋友圈列表：
 ${realMomentsContext || '暂无真实朋友圈。'}
@@ -1482,7 +1484,7 @@ ${realMomentsContext || '暂无真实朋友圈。'}
       ]
     }
   ],
-  "fakeMoments": [{"id": "fm1", "senderName": "...", "text": "...", "time": "...", "likes": ["..."], "comments": [{"senderName": "...", "text": "..."}]}],
+  "fakeMoments": [{"id": "fm1", "senderName": "...", "text": "...", "hoursAgo": 3, "time": "3小时前", "likes": ["..."], "comments": [{"senderName": "...", "text": "..."}]}],
   "realMomentInteractions": [{"likes": ["..."], "comments": [{"senderName": "...", "text": "..."}]}]
 }`;
 
@@ -3007,7 +3009,6 @@ const messagesHtml = displayMsgs.map((msg) => {
                         pageContent = `<div class="flex-1 overflow-y-auto bg-white hide-scrollbar">${realChatHtml}${fakeChatsHtml}</div>`;
                     } 
                     else if (state.wechatTab === 'moments') {
-                        // 1. 组装带 AI 评论的真实朋友圈
                         const _fmtMomentTime = (ts) => {
                             if (!ts) return '刚刚';
                             const now = new Date(), t = new Date(ts);
@@ -3018,10 +3019,62 @@ const messagesHtml = displayMsgs.map((msg) => {
                             if (diffDays === 2) return `2天前 ${timeStr}`;
                             return `${t.getMonth()+1}月${t.getDate()}日 ${timeStr}`;
                         };
+                        // 将 AI 生成的"时间字符串"解析成时间戳 (仅兜底旧缓存数据)
+                        const _parseMomentTime = (str) => {
+                            if (!str) return 0;
+                            const now = Date.now();
+                            const s = String(str).replace(/[\(\)（）]/g, '').trim();
+                            if (/刚刚|just now|now/i.test(s)) return now;
+                            let m;
+                            if ((m = s.match(/(\d+)\s*分钟前/))) return now - parseInt(m[1]) * 60000;
+                            if ((m = s.match(/(\d+)\s*小时前/))) return now - parseInt(m[1]) * 3600000;
+                            if ((m = s.match(/前天(?:\s*(\d{1,2}):(\d{2}))?/))) {
+                                const d = new Date(); d.setDate(d.getDate() - 2);
+                                if (m[1]) d.setHours(parseInt(m[1]), parseInt(m[2]), 0, 0);
+                                return d.getTime();
+                            }
+                            if ((m = s.match(/昨天(?:\s*(\d{1,2}):(\d{2}))?/))) {
+                                const d = new Date(); d.setDate(d.getDate() - 1);
+                                if (m[1]) d.setHours(parseInt(m[1]), parseInt(m[2]), 0, 0);
+                                return d.getTime();
+                            }
+                            if ((m = s.match(/今天(?:\s*(\d{1,2}):(\d{2}))?/))) {
+                                const d = new Date();
+                                if (m[1]) d.setHours(parseInt(m[1]), parseInt(m[2]), 0, 0);
+                                return d.getTime();
+                            }
+                            if ((m = s.match(/(\d+)\s*天前(?:\s*(\d{1,2}):(\d{2}))?/))) {
+                                const d = new Date(); d.setDate(d.getDate() - parseInt(m[1]));
+                                if (m[2]) d.setHours(parseInt(m[2]), parseInt(m[3]), 0, 0);
+                                return d.getTime();
+                            }
+                            if ((m = s.match(/(\d+)月(\d+)日(?:\s*(\d{1,2}):(\d{2}))?/))) {
+                                const d = new Date();
+                                d.setMonth(parseInt(m[1]) - 1, parseInt(m[2]));
+                                if (m[3]) d.setHours(parseInt(m[3]), parseInt(m[4]), 0, 0);
+                                else d.setHours(12, 0, 0, 0);
+                                if (d.getTime() > now) d.setFullYear(d.getFullYear() - 1);
+                                return d.getTime();
+                            }
+                            if ((m = s.match(/^(\d{1,2}):(\d{2})/))) {
+                                const d = new Date();
+                                d.setHours(parseInt(m[1]), parseInt(m[2]), 0, 0);
+                                return d.getTime();
+                            }
+                            return 0;
+                        };
+                        // 假动态时间戳：优先用 AI 给的 hoursAgo (数字)，否则解析 time 字符串
+                        const _fakeMomentTs = (m) => {
+                            if (typeof m.hoursAgo === 'number' && !isNaN(m.hoursAgo)) {
+                                return Date.now() - m.hoursAgo * 3600000;
+                            }
+                            return _parseMomentTime(m.time);
+                        };
+
+                        // 1. 组装带 AI 评论的真实朋友圈 (携带时间戳)
                         const realMoments = (store.moments || []).filter(m => m.senderId === targetCharId).slice(-3);
-                        const realMomentsHtml = realMoments.map((m, idx) => {
+                        const realEntries = realMoments.map((m, idx) => {
                             const interactions = wcData.realMomentInteractions?.[idx] || { likes: [], comments: [] };
-                            // 合并 AI 生成的互动 + 真实的 user 评论与 char 回复
                             let allLikes = [...(interactions.likes || [])];
                             let allComments = [...(interactions.comments || [])];
                             if (m.comments && m.comments.length > 0) {
@@ -3038,23 +3091,25 @@ const messagesHtml = displayMsgs.map((msg) => {
                                 if (hasComments) interactHtml += allComments.map(c => `<div class="py-0.5 leading-relaxed break-words"><span class="text-[#576b95] font-medium">${c.senderName}</span>${c.replyTo ? ` 回复 <span class="text-[#576b95] font-medium">${c.replyTo}</span>` : ''}<span class="text-gray-800">：${c.text}</span></div>`).join('');
                                 interactHtml += '</div>';
                             }
-                            return `
+                            const ts = Number(m.timestamp || m.id) || 0;
+                            const html = `
                             <div class="flex items-start p-4 border-b border-gray-100/60 bg-white">
                                 <div class="w-10 h-10 rounded-[8px] overflow-hidden bg-gray-100 flex-shrink-0 mr-3 shadow-sm border border-gray-100"><img src="${char.avatar}" class="w-full h-full object-cover"></div>
                                 <div class="flex-1 min-w-0">
                                     <span class="text-[#576b95] font-medium text-[15px] mb-1 block">${char.name}</span>
                                     <span class="text-gray-800 text-[15px] leading-relaxed break-words whitespace-pre-wrap">${m.text || m.virtualImageText || '[分享了图片]'}</span>
                                     <div class="flex items-center justify-between mt-3 relative">
-                                        <div class="text-[12px] text-gray-400">${_fmtMomentTime(m.timestamp || m.id)}</div>
+                                        <div class="text-[12px] text-gray-400">${_fmtMomentTime(ts)}</div>
                                         <div class="bg-gray-100 rounded-[4px] px-2 py-0.5"><i data-lucide="more-horizontal" class="text-[#576b95] w-4 h-4"></i></div>
                                     </div>
                                     ${interactHtml}
                                 </div>
                             </div>`;
-                        }).join('');
+                            return { ts, html };
+                        });
 
-                        // 2. 组装 AI 生成的假朋友圈
-                        const fakeMomentsHtml = wcData.fakeMoments.map(m => {
+                        // 2. 组装 AI 生成的假朋友圈 (携带解析后的时间戳)
+                        const fakeEntries = (wcData.fakeMoments || []).map(m => {
                             const hasLikes = m.likes && m.likes.length > 0;
                             const hasComments = m.comments && m.comments.length > 0;
                             let interactHtml = '';
@@ -3064,20 +3119,28 @@ const messagesHtml = displayMsgs.map((msg) => {
                                 if (hasComments) interactHtml += m.comments.map(c => `<div class="py-0.5 leading-relaxed break-words"><span class="text-[#576b95] font-medium">${c.senderName}：</span><span class="text-gray-800">${c.text}</span></div>`).join('');
                                 interactHtml += '</div>';
                             }
-                            return `
+                            const ts = _fakeMomentTs(m);
+                            const displayTime = ts ? _fmtMomentTime(ts) : (m.time || '');
+                            const html = `
                             <div class="flex items-start p-4 border-b border-gray-100/60 bg-white">
                                 <div class="w-10 h-10 rounded-[8px] overflow-hidden bg-gradient-to-br from-green-100 to-teal-100 text-teal-500 font-bold flex flex-shrink-0 items-center justify-center mr-3 shadow-sm border border-gray-100">${m.senderName.substring(0,1)}</div>
                                 <div class="flex-1 min-w-0">
                                     <span class="text-[#576b95] font-medium text-[15px] mb-1 block">${m.senderName}</span>
                                     <span class="text-gray-800 text-[15px] leading-relaxed break-words whitespace-pre-wrap">${m.text}</span>
                                     <div class="flex items-center justify-between mt-3 relative">
-                                        <div class="text-[12px] text-gray-400">${m.time}</div>
+                                        <div class="text-[12px] text-gray-400">${displayTime}</div>
                                         <div class="bg-gray-100 rounded-[4px] px-2 py-0.5"><i data-lucide="more-horizontal" class="text-[#576b95] w-4 h-4"></i></div>
                                     </div>
                                     ${interactHtml}
                                 </div>
                             </div>`;
-                        }).join('');
+                            return { ts, html };
+                        });
+
+                        // 3. 合并 + 按时间戳降序（新 → 旧）
+                        const mergedHtml = [...realEntries, ...fakeEntries]
+                            .sort((a, b) => b.ts - a.ts)
+                            .map(e => e.html).join('');
 
                         pageContent = `
                             <div class="flex-1 overflow-y-auto bg-white hide-scrollbar pb-10">
@@ -3089,7 +3152,7 @@ const messagesHtml = displayMsgs.map((msg) => {
                                     </div>
                                 </div>
                                 <div class="h-10 bg-white"></div>
-                                <div class="flex flex-col">${realMomentsHtml}${fakeMomentsHtml}</div>
+                                <div class="flex flex-col">${mergedHtml}</div>
                             </div>
                         `;
                     }

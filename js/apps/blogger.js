@@ -952,9 +952,9 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
         openLiveVote: async () => {
             const state = window.bloggerState;
             const live = state.live;
-            if (live.isVotingLoading) return; 
+            if (live.isVotingLoading) return;
             if (!store.apiConfig?.apiKey) return window.actions?.showToast('需配置API');
-            
+
             const acc = store.syncAccounts.find(a => a.id === state.currentAccountId);
             const char = store.contacts.find(c => c.id === acc.charId);
             const chat = store.chats.find(c => c.charId === acc.charId);
@@ -963,7 +963,40 @@ ${chatObj.messages.map(m => `[${m.sender}]: ${m.text}`).join('\n')}
 
             live.isVotingLoading = true; window.render();
             try {
-                const task = `博主发起了互动投票：“想看主播干什么？”。结合平台风格和账号定位，生成3个极具看点、抓马或高甜的选项，要符合直播场景好执行，并随机分配投票百分比(总和100)。输出 JSON 格式：{"options": [{"text": "选项1", "percent": 30}, {"text": "选项2", "percent": 45}, {"text": "选项3", "percent": 25}]}`;
+                // 🌟 带上直播间上下文，确保投票选项与当前互动气氛贴合
+                const recentHistory = live.messages
+                    .filter(m => ['user', 'partner', 'opponent', 'fan', 'gift', 'system', 'vote'].includes(m.type))
+                    .slice(-8)
+                    .map(m => m.type === 'gift'
+                        ? `[${m.author} 送出 ${m.giftName}]`
+                        : `[${m.author}${m.type === 'partner' ? '(伴侣)' : m.type === 'opponent' ? '(PK对手)' : m.type === 'user' ? '(用户)' : m.type === 'fan' ? '(粉丝)' : m.type === 'system' ? '(系统)' : m.type === 'vote' ? '(往期投票)' : ''}]: ${m.content}`)
+                    .join('\n') || '（直播刚开始，暂无互动记录）';
+
+                const voteAddon = live.lastVoteResult ? `\n【上一轮投票结果】：${live.lastVoteResult}` : '';
+                const pkAddon = live.view === 'pk'
+                    ? `\n【PK连麦中】：正与主播【${live.pk.opponent.name}】PK，当前胜率${live.pk.score}%——选项可围绕压制对手、秀恩爱反击等方向展开。`
+                    : '';
+                const taskAddon = live.task?.status === 'progress'
+                    ? `\n【当前互动任务】：${live.task.title}——选项可配合推进此任务。`
+                    : '';
+                const prStatus = acc.studioData?.pr?.status === 'active'
+                    ? `\n【紧急：公关危机】传闻：${acc.studioData.pr.desc}；真相：${acc.studioData.pr.truth}——选项应偏向澄清、转移视线或博取同情。`
+                    : '';
+
+                const task = `直播间发起互动投票："想看主播干什么？"
+
+【近期直播间互动记录】
+${recentHistory}
+${voteAddon}${pkAddon}${taskAddon}${prStatus}
+
+请基于上述互动记录和当前氛围，生成3个投票选项。要求：
+1. 紧扣当前聊天话题和气氛，不要抛出与情境无关的选项；
+2. 若气氛偏甜宠则偏撒糖向，若有冲突则偏抓马向，若在PK则偏攻击/反击向；
+3. 选项要直播现场好执行（30秒内可做完），具有看点；
+4. 随机分配投票百分比（总和=100）。
+
+严格输出 JSON：{"options": [{"text": "选项1", "percent": 30}, {"text": "选项2", "percent": 45}, {"text": "选项3", "percent": 25}]}`;
+
                 const promptStr = await buildBloggerPrompt(acc, char, chat, boundP, { task });
                 const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
                 const json = JSON.parse((await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
