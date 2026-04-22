@@ -1935,7 +1935,10 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
   },
   sendMessage: async () => {
     const isOffline = wxState.view === 'offlineStory';
-    const isCall = wxState.view === 'call';
+    // 🌟 关键修复：即使通话被最小化（view 已切到 chatRoom），只要 store.activeCall 还在，
+    // 就必须当成通话中处理，否则 LLM 会收到超能力列表，AI 会在通话里乱发语音/表情/外卖。
+    const isOngoingCall = store.activeCall && store.activeCall.charId === wxState.activeChatId;
+    const isCall = wxState.view === 'call' || isOngoingCall;
     const input = document.getElementById(isOffline ? 'offline-input' : 'wx-input');
     const text = input?.value.trim();
     if (!text) return;
@@ -2004,7 +2007,8 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
       }
       // =========================================================
       // 🌟 发送消息逻辑：线上暂存并重置闹钟，线下和电话立刻回复！
-      if (wxState.view !== 'chatRoom') {
+      // 🌟 关键修复：通话被最小化时 view 会变回 chatRoom，必须用 isCall 兜底，否则用户的话会被塞进云端排队，而不是立刻回复。
+      if (isOffline || isCall) {
           if (chat.isGroup) {
               const directorId = chat.memberIds[Math.floor(Math.random() * chat.memberIds.length)];
               setTimeout(() => window.wxActions.getReply(false, directorId, null, null, chat.charId), 500);
@@ -2343,7 +2347,9 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
     }
     // 🌟 修复5：通过 explicitIsOffline 强制读取维度坐标，防止线下和线上跨次元串台
     const isOffline = explicitIsOffline !== null ? explicitIsOffline : (wxState.view === 'offlineStory' && isActive);
-    const isCall = wxState.view === 'call' && isActive && !chat.isGroup;
+    // 🌟 关键修复：通话最小化后 view 会切回 chatRoom，必须同时认 store.activeCall，否则 LLM 会收到超能力列表。
+    const isOngoingCall = store.activeCall && store.activeCall.charId === chatId;
+    const isCall = ((wxState.view === 'call' && isActive) || isOngoingCall) && !chat.isGroup;
 
     const validMsgs = chat.messages.filter(m => !m.isHidden && !(m.msgType || '').includes('system'));
     

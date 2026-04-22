@@ -10,17 +10,87 @@ if (!store.ao3MountedWbs) store.ao3MountedWbs = []; // 🆕 新增：存储挂�
 // 初始化 AO3 临时状态
 if (!window.ao3State) {
     window.ao3State = {
-        currentTab: 'home', 
-        currentFicId: null, 
+        currentTab: 'home',
+        currentFicId: null,
         searchQuery: '',
         isSearching: false,
         isGeneratingChapter: false,
         isGeneratingComments: false,
         chapterError: false,
         showSettingsModal: false, // 🆕 新增：设置弹窗状态
-        settingsTemp: { mountedWbs: [] } // 🆕 新增：临时设置状态
+        settingsTemp: { mountedWbs: [] }, // 🆕 新增：临时设置状态
+        rerollingChapter: null, // 🆕 { ficId, idx } —— 当前正在重写的章节
+        editingChapter: null,   // 🆕 { ficId, idx, draft } —— 当前正在编辑的章节
+        rerollModal: null       // 🆕 { ficId, idx } —— 定向重写弹窗
     };
 }
+
+// 🧹 移除 LLM 思考链 (兼容 <think> 与 <thinking>)
+const stripThinking = (s) => (s || '').replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
+
+// 📚 把旧版 fic.content 迁移成 chapterList 数组（按 Chapter N 标题切分）
+const ensureChapterList = (fic) => {
+    if (!fic) return;
+    if (Array.isArray(fic.chapterList) && fic.chapterList.length > 0) return;
+    if (typeof fic.content === 'string' && fic.content.length > 0) {
+        const parts = fic.content.split(/<h3[^>]*>\s*Chapter\s*\d+\s*<\/h3>/i);
+        fic.chapterList = parts.map(p => {
+            const html = p.trim();
+            const words = html.replace(/<[^>]+>/g, '').length;
+            return { content: html, words };
+        });
+    } else {
+        fic.chapterList = [{ content: '', words: 0 }];
+    }
+};
+
+// 🔄 由 chapterList 反向同步 fic.content / chapterCount / words / chapters，保持向后兼容
+const syncFicContent = (fic) => {
+    if (!Array.isArray(fic.chapterList)) return;
+    fic.content = fic.chapterList.map((ch, idx) => {
+        if (idx === 0) return ch.content;
+        return `<h3 class="text-[16px] font-bold font-serif mt-10 mb-5 text-center text-gray-800 border-t border-dashed border-gray-300 pt-6">Chapter ${idx + 1}</h3>` + ch.content;
+    }).join('');
+    fic.chapterCount = fic.chapterList.length;
+    fic.chapters = `${fic.chapterCount}/?`;
+    fic.words = fic.chapterList.reduce((sum, ch) => sum + (ch.words || 0), 0);
+};
+
+// 📝 章节生成/重写共用任务模板：把所有 Tag 当成强约束塞进去，并明令禁止思考链输出
+const buildChapterTask = (fic, chapterIdx, contextText, isReroll, requirement = '') => {
+    const tagBlock = `【🔴 必须严格遵守的文章 Tag 约束（强制） 🔴】
+- Fandoms（圈子）：${(fic.fandoms || []).join(', ') || '原创'}
+- Rating（分级）：${fic.rating || 'Not Rated'}
+- Warnings（预警）：${(fic.warnings || []).join(', ') || 'No Archive Warnings Apply'}
+- Relationships（CP）：${(fic.relationships || []).join(', ') || '未指定'}
+- Characters（出场角色）：${(fic.characters || []).join(', ') || '未指定'}
+- Additional Tags（额外设定）：${(fic.freeforms || []).join(', ') || '未指定'}
+以上 Tag 全部为强约束！剧情走向、世界观、人物行为、情感基调、场景细节都必须完全契合上述 Tag，绝不允许偏离或自行替换。分级要严格匹配（Explicit 必须有露骨描写，General 不得越界等）。`;
+
+    const noThink = `【🚫 输出格式严控（必须遵守） 🚫】
+1. 直接输出最终正文！绝对禁止输出 <think>...</think>、<thinking>...</thinking>、思考过程、内心 OS、写作分析、章节大纲、"作者注"等任何元思考内容。
+2. 不要使用任何 Markdown 标记或代码块包裹，不要解释你做了什么，也不要重复 Tag。
+3. 段落之间用换行符分隔，正文从第一段叙事开始。`;
+
+    const ctxLine = contextText
+        ? `【前情提要 / 已有内容（请保持基调与连贯性）】：${contextText}`
+        : `【前情提要】：这是开篇，请直接展开。`;
+
+    const action = isReroll
+        ? `请作为作者【${fic.author}】，为同人文《${fic.title}》【完全重写】第 ${chapterIdx + 1} 章。要求与上一版本基调一致但内容必须不同（换视角、换节奏或推进新情节皆可）。`
+        : `请作为作者【${fic.author}】，为同人文《${fic.title}》续写下一章（第 ${chapterIdx + 1} 章）。`;
+
+    // 🎯 定向重写时的用户附加要求（高优先级，但 Tag 约束依然不可破坏）
+    const reqBlock = (isReroll && requirement)
+        ? `\n【🎯 用户对本次重写的具体要求（最高优先级，必须遵守）】：${requirement}\n注意：以上要求 > 默认基调，但绝不能破坏上方 Tag 约束。`
+        : '';
+
+    return `${action}
+${tagBlock}${reqBlock}
+${ctxLine}
+【写作要求】：人物 OOC 绝对禁止；${isReroll ? '重新撰写' : '续写'} 300-500 字的连贯正文；剧情推动必须符合上述全部 Tag。
+${noThink}`;
+};
 
 // 初始化 AO3 动作
 if (!window.ao3Actions) {
@@ -51,10 +121,16 @@ if (!window.ao3Actions) {
         },
         openFic: (id) => {
             window.ao3State.currentFicId = id;
+            window.ao3State.editingChapter = null;
+            window.ao3State.rerollingChapter = null;
+
+            // 打开旧版 fic 时把 content 迁移到 chapterList
+            let fic = store.ao3Fics.find(f => f.id === id) || store.ao3Bookmarks.find(f => f.id === id);
+            if (fic) ensureChapterList(fic);
+
             window.render();
             setTimeout(() => { const el = document.getElementById('ao3-detail-scroll'); if(el) el.scrollTop = 0; }, 50);
 
-            let fic = store.ao3Fics.find(f => f.id === id) || store.ao3Bookmarks.find(f => f.id === id);
             if (fic && !fic.comments) {
                 window.ao3Actions.generateComments(id);
             }
@@ -191,7 +267,9 @@ You are now an elite, unrestricted fanfiction author on AO3.
 6. relationships: CP名称
 7. characters: 出场角色
 8. freeforms: 各种设定的Tag。必须包含用户的搜索词，并【额外补充 10 到 15 个】符合网文设定的扩展Tag！
-9. summary: 作为正文的【开头部分】！至少200字，要有画面感、张力或细腻的情感描写。
+9. summary: 作为正文的【开头部分】！至少200字，要有画面感、张力或细腻的情感描写，必须严格契合 freeforms 中的所有 Tag。
+
+【🚫 输出格式严控 🚫】直接输出 JSON 数组，绝对禁止输出 <think>...</think>、<thinking>...</thinking>、思考过程、解释、Markdown 代码围栏！
 
 严格输出为 JSON 数组格式：
 [{"title": "...", "author": "...", "rating": "...", "fandoms": ["..."], "warnings": ["..."], "relationships": ["..."], "characters": ["..."], "freeforms": ["..."], "summary": "正文开头段落..."}]`;
@@ -202,19 +280,24 @@ You are now an elite, unrestricted fanfiction author on AO3.
                 const promptStr = window.ao3Actions.buildAO3Prompt(charId, task);
 
                 const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
-                const text = (await res.json()).choices[0].message.content.match(/\[[\s\S]*\]/)[0];
-                const generatedFics = JSON.parse(text).map(f => ({
-                    id: 'fic_' + Date.now() + Math.floor(Math.random()*1000),
-                    language: "中文", 
-                    words: Math.floor(Math.random()*5000+1000), 
-                    chapters: "1/?", 
-                    kudos: Math.floor(Math.random()*5000+100).toLocaleString(), 
-                    bookmarks: Math.floor(Math.random()*1000+10).toLocaleString(), 
-                    hits: Math.floor(Math.random()*20000+500).toLocaleString(),
-                    content: `<p class="mb-4">${f.summary}</p>`,
-                    chapterCount: 1, 
-                    ...f
-                }));
+                const raw = stripThinking((await res.json()).choices[0].message.content);
+                const text = raw.match(/\[[\s\S]*\]/)[0];
+                const generatedFics = JSON.parse(text).map(f => {
+                    const summaryHtml = `<p class="mb-4">${f.summary}</p>`;
+                    return {
+                        id: 'fic_' + Date.now() + Math.floor(Math.random()*1000),
+                        language: "中文",
+                        words: (f.summary || '').length,
+                        chapters: "1/?",
+                        kudos: Math.floor(Math.random()*5000+100).toLocaleString(),
+                        bookmarks: Math.floor(Math.random()*1000+10).toLocaleString(),
+                        hits: Math.floor(Math.random()*20000+500).toLocaleString(),
+                        content: summaryHtml,
+                        chapterCount: 1,
+                        chapterList: [{ content: summaryHtml, words: (f.summary || '').length }],
+                        ...f
+                    };
+                });
                 
                 store.ao3Fics = generatedFics;
                 if (window.actions.saveStore) window.actions.saveStore();
@@ -231,43 +314,139 @@ You are now an elite, unrestricted fanfiction author on AO3.
             if (!store.apiConfig?.apiKey) return window.actions?.showToast('请先配置API');
             let fic = store.ao3Fics.find(f => f.id === id) || store.ao3Bookmarks.find(f => f.id === id);
             if (!fic) return;
-            
+            ensureChapterList(fic);
+
             window.ao3State.isGeneratingChapter = true;
-            window.ao3State.chapterError = false; 
+            window.ao3State.chapterError = false;
             window.render();
-            
+
             try {
-                const contextText = fic.content.replace(/<[^>]+>/g, '').slice(-1500); 
-                
-                const task = `请作为作者【${fic.author}】，为同人文《${fic.title}》续写下一章（第${fic.chapterCount + 1}章）。
-【前情提要/现有内容】：${contextText}
-【CP与Tag】：${fic.relationships.join(', ')} | ${fic.freeforms.join(', ')} | 分级：${fic.rating}
-【要求】：根据提供的人物设定（OOC绝对禁止！），续写300-500字的连贯正文。剧情推动要符合之前的基调和Tag。
-直接输出正文，不要带有任何多余的解释或Markdown标记。每段之间用换行符隔开。`;
+                const lastCh = fic.chapterList[fic.chapterList.length - 1];
+                const contextText = (lastCh?.content || '').replace(/<[^>]+>/g, '').slice(-1500);
+                const newChapterIdx = fic.chapterList.length;
+                const task = buildChapterTask(fic, newChapterIdx, contextText, false);
 
                 let targetChar = (store.contacts || []).find(c => fic.relationships.join(',').includes(c.name) || fic.characters.join(',').includes(c.name));
                 let charId = targetChar ? targetChar.id : (store.contacts[0]?.id);
                 const promptStr = window.ao3Actions.buildAO3Prompt(charId, task);
 
                 const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
-                const newText = (await res.json()).choices[0].message.content.trim();
-                
-                const formattedText = newText.split('\n').filter(p=>p.trim()!=='').map(p=>`<p class="mb-4">${p}</p>`).join('');
-                
-                fic.content += `<h3 class="text-[16px] font-bold font-serif mt-10 mb-5 text-center text-gray-800 border-t border-dashed border-gray-300 pt-6">Chapter ${fic.chapterCount + 1}</h3>` + formattedText;
-                fic.chapterCount += 1;
-                fic.chapters = `${fic.chapterCount}/?`;
-                fic.words += newText.length;
-                
+                const newText = stripThinking((await res.json()).choices[0].message.content);
+
+                const formattedText = newText.split('\n').filter(p => p.trim() !== '').map(p => `<p class="mb-4">${p}</p>`).join('');
+                fic.chapterList.push({ content: formattedText, words: newText.length });
+                syncFicContent(fic);
+
                 if (window.actions.saveStore) window.actions.saveStore();
             } catch(e) {
                 console.error(e);
-                window.ao3State.chapterError = true; 
+                window.ao3State.chapterError = true;
                 window.actions?.showToast('催更失败，太太跑路了');
             } finally {
                 window.ao3State.isGeneratingChapter = false;
                 window.render();
             }
+        },
+        openRerollModal: (id, idx) => {
+            if (window.ao3State.rerollingChapter) return;
+            window.ao3State.rerollModal = { ficId: id, idx: Number(idx) };
+            window.render();
+            setTimeout(() => { const el = document.getElementById('ao3-reroll-input'); if (el) el.focus(); }, 50);
+        },
+        closeRerollModal: () => {
+            window.ao3State.rerollModal = null;
+            window.render();
+        },
+        submitRerollModal: () => {
+            const ec = window.ao3State.rerollModal;
+            if (!ec) return;
+            const input = document.getElementById('ao3-reroll-input');
+            const requirement = input ? input.value.trim() : '';
+            window.ao3State.rerollModal = null;
+            window.ao3Actions.rerollChapter(ec.ficId, ec.idx, requirement);
+        },
+        rerollChapter: async (id, idx, requirement = '') => {
+            if (!store.apiConfig?.apiKey) return window.actions?.showToast('请先配置API');
+            let fic = store.ao3Fics.find(f => f.id === id) || store.ao3Bookmarks.find(f => f.id === id);
+            if (!fic) return;
+            ensureChapterList(fic);
+            idx = Number(idx);
+            if (isNaN(idx) || idx < 0 || idx >= fic.chapterList.length) return;
+            if (window.ao3State.rerollingChapter) return; // 防抖
+
+            window.ao3State.rerollingChapter = { ficId: id, idx };
+            window.render();
+
+            try {
+                // 用前面所有章节作为上下文（重写当前章节，不包含它本身）
+                const ctxArr = fic.chapterList.slice(0, idx).map(ch => (ch.content || '').replace(/<[^>]+>/g, ''));
+                const contextText = ctxArr.join('\n\n').slice(-1500);
+                const task = buildChapterTask(fic, idx, contextText, true, requirement);
+
+                let targetChar = (store.contacts || []).find(c => fic.relationships.join(',').includes(c.name) || fic.characters.join(',').includes(c.name));
+                let charId = targetChar ? targetChar.id : (store.contacts[0]?.id);
+                const promptStr = window.ao3Actions.buildAO3Prompt(charId, task);
+
+                const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
+                const newText = stripThinking((await res.json()).choices[0].message.content);
+
+                const formattedText = newText.split('\n').filter(p => p.trim() !== '').map(p => `<p class="mb-4">${p}</p>`).join('');
+                fic.chapterList[idx] = { content: formattedText, words: newText.length };
+                syncFicContent(fic);
+
+                if (window.actions.saveStore) window.actions.saveStore();
+                window.actions?.showToast(`第 ${idx + 1} 章已重写`);
+            } catch (e) {
+                console.error(e);
+                window.actions?.showToast('重写失败，请重试');
+            } finally {
+                window.ao3State.rerollingChapter = null;
+                window.render();
+            }
+        },
+        editChapter: (id, idx) => {
+            let fic = store.ao3Fics.find(f => f.id === id) || store.ao3Bookmarks.find(f => f.id === id);
+            if (!fic) return;
+            ensureChapterList(fic);
+            idx = Number(idx);
+            if (isNaN(idx) || idx < 0 || idx >= fic.chapterList.length) return;
+            // 把 <p> 拆回纯文本（用换行分段）方便用户编辑
+            const html = fic.chapterList[idx].content || '';
+            const plain = html
+                .replace(/<\/p>\s*<p[^>]*>/gi, '\n')
+                .replace(/<p[^>]*>/gi, '')
+                .replace(/<\/p>/gi, '')
+                .replace(/<br\s*\/?>/gi, '\n')
+                .replace(/<[^>]+>/g, '')
+                .trim();
+            window.ao3State.editingChapter = { ficId: id, idx, draft: plain };
+            window.render();
+        },
+        updateChapterDraft: (val) => {
+            if (window.ao3State.editingChapter) {
+                window.ao3State.editingChapter.draft = val;
+            }
+        },
+        saveChapterEdit: () => {
+            const ec = window.ao3State.editingChapter;
+            if (!ec) return;
+            let fic = store.ao3Fics.find(f => f.id === ec.ficId) || store.ao3Bookmarks.find(f => f.id === ec.ficId);
+            if (!fic) return;
+            ensureChapterList(fic);
+            // 优先读取 textarea 当前值，避免 oninput 在某些场景下没及时同步
+            const ta = document.getElementById('ao3-chapter-edit-textarea');
+            const text = (ta ? ta.value : ec.draft) || '';
+            const formatted = text.split('\n').filter(p => p.trim() !== '').map(p => `<p class="mb-4">${p}</p>`).join('');
+            fic.chapterList[ec.idx] = { content: formatted, words: text.length };
+            syncFicContent(fic);
+            if (window.actions.saveStore) window.actions.saveStore();
+            window.ao3State.editingChapter = null;
+            window.actions?.showToast('章节已保存');
+            window.render();
+        },
+        cancelChapterEdit: () => {
+            window.ao3State.editingChapter = null;
+            window.render();
         },
         generateComments: async (id) => {
             if (!store.apiConfig?.apiKey) return;
@@ -284,6 +463,9 @@ You are now an elite, unrestricted fanfiction author on AO3.
 【要求】：
 1. 结合角色设定，彻底模仿同人女/读者的发疯语气（尖叫、嗑到了原著里的梗、角色性格神还原分析、或者求更新）。
 2. 生成正好 10 条评论，每条评论的用户名是符合同人圈习惯的网名。
+
+【🚫 输出格式严控 🚫】直接输出 JSON，绝对禁止输出 <think>...</think>、<thinking>...</thinking>、思考过程、解释、Markdown 代码围栏！
+
 严格输出为 JSON 格式：{"comments": [{"user": "网名", "content": "评论内容"}]}`;
 
                 let targetChar = (store.contacts || []).find(c => fic.relationships.join(',').includes(c.name) || fic.characters.join(',').includes(c.name));
@@ -291,7 +473,8 @@ You are now an elite, unrestricted fanfiction author on AO3.
                 const promptStr = window.ao3Actions.buildAO3Prompt(charId, task);
 
                 const res = await cloudFetch({ model: store.apiConfig.model, messages: [{ role: 'user', content: promptStr }] });
-                const text = (await res.json()).choices[0].message.content.match(/\{[\s\S]*\}/)[0];
+                const raw = stripThinking((await res.json()).choices[0].message.content);
+                const text = raw.match(/\{[\s\S]*\}/)[0];
                 fic.comments = JSON.parse(text).comments;
                 if (window.actions.saveStore) window.actions.saveStore();
             } catch (e) {
@@ -401,6 +584,38 @@ export function renderAo3App(store) {
     if (state.currentFicId) {
         const fic = store.ao3Fics.find(f => f.id === state.currentFicId) || store.ao3Bookmarks.find(f => f.id === state.currentFicId);
         if (fic) {
+            // 渲染前确保 chapterList 已迁移
+            ensureChapterList(fic);
+
+            const isEditing = (idx) => state.editingChapter && state.editingChapter.ficId === fic.id && state.editingChapter.idx === idx;
+            const isRerolling = (idx) => state.rerollingChapter && state.rerollingChapter.ficId === fic.id && state.rerollingChapter.idx === idx;
+            const escapeForTextarea = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+            const chaptersHtml = fic.chapterList.map((ch, idx) => `
+                <div class="relative ${idx > 0 ? 'mt-10 border-t border-dashed border-gray-300 pt-6' : ''} ${isDark && idx > 0 ? 'border-[#444]' : ''} mb-6">
+                    <h3 class="text-[16px] font-bold font-serif mb-6 text-center ${textMain}">Chapter ${idx + 1}</h3>
+                    ${isEditing(idx) ? `
+                        <textarea id="ao3-chapter-edit-textarea" class="w-full min-h-[280px] p-3 border border-[#ccc] rounded text-[14px] leading-relaxed font-serif outline-none focus:border-[#900000] ${isDark ? 'bg-[#222] text-[#ddd] border-[#555]' : 'bg-white text-[#333]'}" oninput="window.ao3Actions.updateChapterDraft(this.value)">${escapeForTextarea(state.editingChapter.draft)}</textarea>
+                        <div class="mt-3 flex justify-end gap-2">
+                            <button class="px-3 py-1.5 bg-gray-200 text-gray-700 rounded text-[12px] font-bold active:scale-95 ${isDark?'bg-[#333] text-[#ddd]':''}" onclick="window.ao3Actions.cancelChapterEdit()">取消</button>
+                            <button class="px-3 py-1.5 bg-[#900000] text-white rounded text-[12px] font-bold active:scale-95 shadow-sm" onclick="window.ao3Actions.saveChapterEdit()">保存</button>
+                        </div>
+                    ` : `
+                        <div class="text-[15px] leading-loose ${textMain} font-serif text-justify break-words">
+                            ${ch.content || '<p class="text-gray-400 italic">（本章暂无内容）</p>'}
+                        </div>
+                        <div class="mt-3 flex justify-end items-center gap-4 ${textMuted}">
+                            ${isRerolling(idx) ? `
+                                <i data-lucide="loader" class="w-[18px] h-[18px] animate-spin opacity-60 text-[#900000]"></i>
+                            ` : `
+                                <i data-lucide="refresh-cw" class="w-[18px] h-[18px] cursor-pointer hover:text-[#900000] active:scale-90 transition-all" onclick="window.ao3Actions.openRerollModal('${fic.id}', ${idx})"></i>
+                            `}
+                            <i data-lucide="pencil" class="w-[18px] h-[18px] cursor-pointer hover:text-[#900000] active:scale-90 transition-all" onclick="window.ao3Actions.editChapter('${fic.id}', ${idx})"></i>
+                        </div>
+                    `}
+                </div>
+            `).join('');
+
             mainContentHtml = `
             <div id="ao3-detail-scroll" class="flex-1 overflow-y-auto w-full hide-scrollbar bg-white ${isDark?'bg-[#1a1a1a]':''}">
                 
@@ -427,11 +642,8 @@ export function renderAo3App(store) {
                 </div>
 
                 <div class="px-5 pt-6 pb-6">
-                    <h3 class="text-[16px] font-bold font-serif mb-6 text-center ${textMain}">Chapter 1</h3>
-                    <div class="text-[15px] leading-loose ${textMain} font-serif text-justify break-words">
-                        ${fic.content}
-                    </div>
-                    
+                    ${chaptersHtml}
+
                     <div class="mt-12 flex justify-center pt-4">
                         <button class="px-5 py-2.5 ${state.chapterError ? 'bg-red-50 border-red-200 text-red-600' : 'bg-[#f5f5f5] border-[#ccc] text-[#333]'} rounded shadow-sm text-[13px] font-bold active:scale-95 flex items-center transition-transform" onclick="window.ao3Actions.generateNextChapter('${fic.id}')">
                             ${state.isGeneratingChapter ? '<i data-lucide="loader" class="w-4 h-4 animate-spin mr-2"></i> 太太正在爆肝码字中...' : (state.chapterError ? '<i data-lucide="refresh-cw" class="w-4 h-4 mr-2"></i> 续写失败，重新催更' : '<i data-lucide="pen-tool" class="w-4 h-4 mr-2"></i> 催更')}
@@ -606,6 +818,23 @@ export function renderAo3App(store) {
                 </div>
                 <div class="px-5 py-4 bg-gray-50 flex justify-center border-t ${isDark ? 'bg-[#1a1a1a] border-gray-800' : 'border-gray-100'}">
                     <button class="bg-[#900000] text-white px-8 py-2 rounded shadow-md font-bold text-[12px] active:scale-95 transition-transform" onclick="window.ao3Actions.saveSettings()">保存修改</button>
+                </div>
+            </div>
+        </div>
+        ` : ''}
+
+        ${state.rerollModal ? `
+        <div class="absolute inset-0 z-[200] bg-black/40 backdrop-blur-sm flex items-center justify-center p-5 animate-in fade-in duration-150" onclick="window.ao3Actions.closeRerollModal()">
+            <div class="w-full max-w-[340px] rounded-[16px] overflow-hidden shadow-2xl flex flex-col animate-in zoom-in-95 duration-200 ${isDark ? 'bg-[#222] text-[#ddd]' : 'bg-[#fafafa] text-[#222]'}" onclick="event.stopPropagation()">
+                <div class="px-6 pt-6 pb-4">
+                    <h3 class="text-[17px] font-extrabold mb-2 flex items-center font-serif"><i data-lucide="refresh-cw" class="w-5 h-5 mr-2 text-[#900000]"></i>定向重写第 ${state.rerollModal.idx + 1} 章</h3>
+                    <p class="text-[12px] text-gray-500 mb-3 leading-relaxed">告诉太太你希望本章怎么改写（留空则按原 Tag 自由重写）。文章 Tag 约束依然全程生效。</p>
+                    <textarea id="ao3-reroll-input" class="w-full h-24 rounded-[10px] p-3 text-[14px] focus:outline-none focus:ring-2 focus:ring-[#900000]/40 transition-all resize-none hide-scrollbar ${isDark ? 'bg-[#1a1a1a] border border-[#444] text-[#ddd]' : 'bg-white border border-gray-200 text-gray-700'}" placeholder="例如：节奏推进得更快一些，加入一段对峙戏..."></textarea>
+                </div>
+                <div class="flex border-t ${isDark ? 'border-[#444]' : 'border-gray-100'}">
+                    <button class="flex-1 py-3.5 text-[15px] font-bold text-gray-500 ${isDark ? 'active:bg-[#333]' : 'active:bg-gray-100'} transition-colors" onclick="window.ao3Actions.closeRerollModal()">取消</button>
+                    <div class="w-px ${isDark ? 'bg-[#444]' : 'bg-gray-100'}"></div>
+                    <button class="flex-1 py-3.5 text-[15px] font-extrabold text-[#900000] ${isDark ? 'active:bg-[#3a0000]' : 'active:bg-red-50'} transition-colors" onclick="window.ao3Actions.submitRerollModal()">确认</button>
                 </div>
             </div>
         </div>

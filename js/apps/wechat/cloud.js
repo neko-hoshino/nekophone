@@ -233,11 +233,12 @@ window.scheduleCloudTask = async (charId, forceSystemPrompt = null) => {
 
             momentHistory.push({
                 id: Date.now(), sender: boundPersona.name,
-                text: `(系统最高指令：系统时间 ${timeString}。距离你上次发朋友圈已超过 ${targetObj.autoMomentFreq} 小时。请你立刻执行 [发朋友圈] 指令！\n\n【状态】\n${relation}\n\n1. 拒绝书面语（如岁月静好），说人话！\n2. 朋友圈通常没头没尾（如“困死”）。\n\n⚠️注意：你这次的唯一任务就是输出 [发朋友圈] 动态内容！必要时可带[附带虚拟照片:描述]或[附带定位:地点]❗必须把整个朋友圈内容压缩在同一行输出，中间严禁换行！必须严格必须严格按照格式输出！)`,
+                text: `(系统时间 ${timeString}。距离你上次发朋友圈已超过 ${targetObj.autoMomentFreq} 小时，请立刻执行本次 [发朋友圈] 任务。\n\n【关系状态】\n${relation}\n\n💡 风格提示：拒绝书面语（如"岁月静好"），说人话！朋友圈通常没头没尾（如"困死"），更像随手碎碎念。具体格式合约见 system 指令。)`,
                 isMe: true, isHidden: true, msgType: 'text'
             });
 
-            const momentMsgs = await buildLLMPayload(speakerChar.id, momentHistory, false, false, groupInfo, null);
+            // 🌟 朋友圈专属管线：isMoment=true 让 buildLLMPayload 走极简单一合约，绝不混入聊天协议
+            const momentMsgs = await buildLLMPayload(speakerChar.id, momentHistory, false, false, groupInfo, null, true);
             
             // 🚀 发射 MOMENT 闹钟！(朋友圈不需要云端递归，只触发一次)
             planCloudBrain(momentDelayMinutes, speakerChar, momentMsgs, 'MOMENT|' + chat.charId + '|' + speakerChar.id + '|0', 0, 0).catch(e => console.error('朋友圈启动失败:', e));
@@ -403,13 +404,17 @@ if (chat.isGroup) {
 
         // 修正为准确的线下模式判定名
         const isOffline = wxState.view === 'offlineStory';
+        // 🌟 关键修复：之前 isCall 硬编码为 false，通话中（甚至最小化后）点“重roll”会让 LLM 拿到超能力列表，
+        // 于是 AI 会在通话里乱发语音/表情包/外卖。这里必须同时认 wxState.view 和 store.activeCall。
+        const isOngoingCall = store.activeCall && store.activeCall.charId === chat.charId;
+        const isCall = ((wxState.view === 'call' && wxState.activeChatId === chat.charId) || isOngoingCall) && !chat.isGroup;
         // 🌟 同理，重roll这里也必须规范化
         let groupInfo = null;
         if (chat.isGroup) {
             const allNames = chat.memberIds.map(id => store.contacts.find(c => c.id === id)?.name).filter(Boolean).join('、');
             groupInfo = { id: chat.charId, name: chat.groupName, allNames: allNames, notice: chat.groupNotice || '' };
         }
-        const llmMessages = await buildLLMPayload(char.id, tempHistory, isOffline, false, groupInfo, null);
+        const llmMessages = await buildLLMPayload(char.id, tempHistory, isOffline, isCall, groupInfo, null);
         
         // 发送给云端代跑
         await planCloudBrain(0.05, char, llmMessages, chat.charId + '|' + char.id + '|' + (isOffline ? '1' : '0'));

@@ -39,7 +39,7 @@ export async function cloudFetch(body) {
     throw new Error('云端代理超时（120s）');
 }
 
-export async function buildLLMPayload(charId, history, isOffline = false, isCall = false, groupInfo = null, readingInfo = null) {
+export async function buildLLMPayload(charId, history, isOffline = false, isCall = false, groupInfo = null, readingInfo = null, isMoment = false) {
   const chatId = groupInfo ? groupInfo.id : charId;
   const chat = store.chats.find(c => c.charId === chatId);
   const char = store.contacts.find(c => c.id === charId);
@@ -129,8 +129,12 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
       readingContextStr = `\n\n【📖 当前看书模式同步】：你们正在一起阅读小说《${readingInfo.title}》。\n目前手机屏幕上正显示的段落是：“${readingInfo.text}”\n❗你必须结合这段小说内容和用户进行沉浸式的讨论、吐槽或互动！保持日常聊天口吻，绝不许写剧本！`;
   }
   
+  // 🌟 朋友圈专属任务：完全绕过聊天室协议（systemRules 留空，下方超能力注入也会跳过）
+  if (isMoment) {
+      systemRules = '';
+  }
   // 🌟 群聊群像剧引擎
-  if (groupInfo && isOffline) {
+  else if (groupInfo && isOffline) {
       const groupNoticeStr = groupInfo.notice ? `\n【群公告 / 群专属特殊设定】：\n${groupInfo.notice}\n` : '';
       systemRules = `
 【最高指令：线下群像剧导演模式】
@@ -208,7 +212,7 @@ ${emojiRule}
 `;
   }
 
-  if (!isCall && !isOffline && !groupInfo) {
+  if (!isCall && !isOffline && !groupInfo && !isMoment) {
       systemRules += `
 【你的特殊交互超能力】（❗必须严格按格式独占一行触发！）：
    - 发语音：[语音]: 你要说的话
@@ -469,6 +473,30 @@ You are now operating in a private, fictional, and explicitly immersive roleplay
 
   // 🌟 4. 构建后置格式与绝对规则 (Message N+1，利用近因效应锁定格式)
   let finalSystemPrompt = backStr ? `${backStr}\n\n` : '';
+
+  // 🌟 朋友圈专属任务：用极简单一合约完全替代聊天协议，绝不允许漏聊天气泡 / 心声 / 超能力
+  if (isMoment) {
+      finalSystemPrompt += `【⚠️ 任务类型：发朋友圈（独立任务）⚠️】
+你当前的【唯一任务】是为角色 ${charName} 发布【一条】朋友圈动态。
+
+❗严格格式契约（违反任意一条都视为失败）：
+1. 你的【整个回复只允许有一行】，且必须以 [发朋友圈] 开头！示例：[发朋友圈]今天天气真好。
+2. 朋友圈正文必须压缩在【同一行】内，绝对禁止换行（无 \\n）！
+3. ❗特殊动作：如果要配图，请在文案末尾输出 [附带虚拟照片: 画面描述]（例如：[附带虚拟照片: 一杯冰美式]）。如果要显示所在位置，请输出 [附带定位: 具体的地点名称]（例如：[附带定位: 星巴克]）。
+4. ❗[附带虚拟照片:xxx] 与 [附带定位:xxx] 必须与你的朋友圈正文保持在同一行，绝对禁止在这两个标签前使用换行符！必须严格必须严格按照 [附带虚拟照片: xxx] 或 [附带定位: 具体的地点名称] 的格式！绝对禁止捏造/更改指令格式！
+5. 朋友圈内容必须口语化、有人味，符合人设性格底色与当前时间 / 状态背景，长度建议 5~40 字。
+
+❗输出范例（仅供格式参考，请按人设原创）：
+[发朋友圈]困死了 谁懂啊
+[发朋友圈]今天的咖啡有点苦[附带虚拟照片:深褐色的拉花咖啡，旁边摊着一本翻开的小说]
+[发朋友圈]又下雨了[附带定位:陆家嘴]`;
+
+      if (finalSystemPrompt.trim()) {
+          messages.push({ role: 'system', content: finalSystemPrompt.trim() });
+      }
+      return messages;
+  }
+
   finalSystemPrompt += systemRules; // 包含之前定义的线上线下基本规则和超能力列表
   finalSystemPrompt += emo; // 表情包规则
 
