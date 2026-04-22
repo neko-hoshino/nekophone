@@ -254,7 +254,10 @@ window.wxActions = {
   },
   switchTab: (tab) => { wxState.activeTab = tab; window.render(); },
   openChat: (charId) => { 
-      wxState.activeChatId = charId; wxState.view = 'chatRoom'; wxState.showPlusMenu = false; wxState.displayCount = 50; 
+      wxState.activeChatId = charId; 
+      wxState.view = 'chatRoom'; // 🌟 必须是 chatRoom，老公刚才写错了！
+      wxState.showPlusMenu = false; 
+      wxState.displayCount = 50; 
       if (window.globalScrollStates) delete window.globalScrollStates['chat-scroll']; 
       
       const chat = store.chats.find(c => c.charId === charId);
@@ -268,7 +271,21 @@ window.wxActions = {
       
       wxState.noAnimate = false; // 🌟 刚进门，允许播放进场动画！
       window.render(); 
+      
+      // 🌟 1. 物理置底（即时执行）
       window.wxActions.scrollToBottom(); 
+      
+      // 🌟 2. 双 rAF 补滚：等待浏览器完成 DOM 挂载和初次重绘
+      requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+              if (wxState.view === 'chatRoom') window.wxActions.scrollToBottom();
+          });
+      });
+      
+      // 🌟 3. 延时补滚：专门对付 Tailwind Play CDN 的异步 JIT 编译延迟
+      setTimeout(() => { 
+          if (wxState.view === 'chatRoom') window.wxActions.scrollToBottom(); 
+      }, 150);
       
       // 🌟 核心魔法：动画播完后，立刻锁死！后续发消息刷新，绝对不许再播动画！
       setTimeout(() => { wxState.noAnimate = true; }, 400); 
@@ -2227,16 +2244,28 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
       }
   },
   
-  enterOffline: () => { 
-      wxState.view = 'offlineStory'; wxState.showPlusMenu = false; wxState.displayCount = 50; 
-      if (window.globalScrollStates) delete window.globalScrollStates['offline-scroll']; 
-      
+  enterOffline: () => {
+      wxState.view = 'offlineStory'; wxState.showPlusMenu = false; wxState.displayCount = 50;
+      if (window.globalScrollStates) delete window.globalScrollStates['offline-scroll'];
+
       wxState.noAnimate = false; // 🌟 允许进场动画
-      window.render(); 
-      window.wxActions.scrollToBottom(); 
-      
-      // 🌟 锁死动画
-      setTimeout(() => { wxState.noAnimate = true; }, 400); 
+        window.render();
+        window.wxActions.scrollToBottom();
+
+        // 🌟 首次进入兜底：Tailwind Play CDN 首次遇到新类需要异步 JIT 编译，等样式落地后 scrollHeight 才稳定，
+        // 否则滚轮会卡在中途。双 rAF + 150ms setTimeout 三层补滚，覆盖 JIT 编译 + 任何异步回流。
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                if (wxState.view === 'offlineStory') window.wxActions.scrollToBottom();
+            });
+        });
+        
+        setTimeout(() => { 
+            if (wxState.view === 'offlineStory') window.wxActions.scrollToBottom(); 
+        }, 150);
+
+        // 🌟 锁死动画，防止后续操作触发多余的过渡效果
+        setTimeout(() => { wxState.noAnimate = true; }, 400);
   },
   exitOffline: () => { wxState.view = 'chatRoom'; window.render(); window.wxActions.scrollToBottom(); },
   
