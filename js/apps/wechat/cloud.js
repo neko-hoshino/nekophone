@@ -66,8 +66,11 @@ window.scheduleCloudTask = async (charId, forceSystemPrompt = null) => {
 
     const targetObj = chat.isGroup ? chat : speakerChar;
 
+    // 🌟 拉黑追命：单聊被拉黑时强行进入主动搭话分支，无视 autoMsgEnabled 开关
+    const isBlockedPester = !chat.isGroup && speakerChar.isBlocked;
+
     // 🌟 核心拦截升级：如果有 forceSystemPrompt，就算开关没开也强行唤醒！
-    if (!targetObj.autoMsgEnabled && (!targetObj.autoMomentFreq || targetObj.autoMomentFreq === 0) && !forceSystemPrompt) return;
+    if (!targetObj.autoMsgEnabled && (!targetObj.autoMomentFreq || targetObj.autoMomentFreq === 0) && !forceSystemPrompt && !isBlockedPester) return;
 
     try {
         const { buildLLMPayload } = await import('../../utils/llm.js');
@@ -119,8 +122,9 @@ window.scheduleCloudTask = async (charId, forceSystemPrompt = null) => {
         // =================================================================
         // 🧵 线程 A：主动搭话 (以最新消息为基准 + 防连发 + 支持云端递归)
         // =================================================================
-        if (targetObj.autoMsgEnabled) {
-    let chatDelayMin = targetObj.autoMsgInterval || 30; 
+        if (targetObj.autoMsgEnabled || isBlockedPester) {
+    // 拉黑时锁死 5 分钟一轮（首发 + 递归），离线兜底也能持续求饶
+    let chatDelayMin = isBlockedPester ? 5 : (targetObj.autoMsgInterval || 30);
     // 1. 获取最新一条消息的时间戳（排除隐藏系统消息，但包括线下和通话）
     const validMsgs = baseHistory.filter(m => !m.isHidden);
     const lastMsgTime = validMsgs.length > 0 ? validMsgs[validMsgs.length - 1].id : nowTime;
