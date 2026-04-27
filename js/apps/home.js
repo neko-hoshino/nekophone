@@ -134,14 +134,32 @@ if (!window.homeActions) {
 
     updateAvatar: (e) => {
       const file = e.target.files[0]; if(!file) return;
-      window.actions.compressImage(file, (base64) => { store.personas[0].avatar = base64; window.homeActions.doRender(); });
+      window.actions.compressImage(file, async (base64) => {
+        try {
+          window.actions.showToast('上传中…');
+          const url = await window.uploadMediaToCloud(base64, 'webp', 'user_avatar');
+          store.personas[0].avatar = url; window.homeActions.doRender();
+        } catch (err) {
+          console.error('[uploadMediaToCloud] home avatar', err);
+          window.actions.showToast('上传失败，请重试');
+        }
+      });
       e.target.value = '';
     },
     updateName: (val) => { store.personas[0].name = val; window.homeActions.doRender(); },
-    
+
     uploadPolaroid: (e) => {
         const file = e.target.files[0]; if(!file) return;
-        window.actions.compressImage(file, (base64) => { store.homePolaroidImg = base64; window.homeActions.doRender(); });
+        window.actions.compressImage(file, async (base64) => {
+          try {
+            window.actions.showToast('上传中…');
+            const url = await window.uploadMediaToCloud(base64, 'webp', 'home_polaroid');
+            store.homePolaroidImg = url; window.homeActions.doRender();
+          } catch (err) {
+            console.error('[uploadMediaToCloud] polaroid', err);
+            window.actions.showToast('上传失败，请重试');
+          }
+        });
         e.target.value = '';
     },
 
@@ -288,27 +306,35 @@ if (!window.homeActions) {
 
     uploadBgAudio: (e) => {
         const file = e.target.files[0]; if (!file) return;
-        if (file.size > 15 * 1024 * 1024) return window.actions.showToast('音频过大！请选择 15MB 以内'); 
+        if (file.size > 15 * 1024 * 1024) return window.actions.showToast('音频过大！请选择 15MB 以内');
         window.actions.showToast('正在解析，请稍候...');
         const reader = new FileReader();
-        reader.onload = (event) => {
+        reader.onload = async (event) => {
             const resultStr = event.target.result;
             if (!resultStr) return window.actions.showToast('读取失败');
-            store.customAudio = store.customAudio || [];
-            store.customAudio.push({ name: file.name.replace(/\.[^/.]+$/, ""), artist: '本地导入', src: resultStr, lyrics: window.homeState.tempLyrics });
-            if (window.actions.saveStore) window.actions.saveStore(); 
-            
-            window.actions.showToast('本地音乐导入成功！');
-            window.audioPlaylist = store.customAudio;
-            window.audioState.currentIndex = store.customAudio.length - 1; 
-            window.audioPlayer.loadAndPlay();
-            window.homeState.showAddAudioModal = false; 
-            window.homeActions.triggerReaction(); 
-            window.homeActions.doRender();
+            try {
+                window.actions.showToast('上传中…');
+                const ext = (file.name.split('.').pop() || 'mp3').toLowerCase();
+                const url = await window.uploadMediaToCloud(resultStr, ext); // 多曲目共存，无 fixedKey
+                store.customAudio = store.customAudio || [];
+                store.customAudio.push({ name: file.name.replace(/\.[^/.]+$/, ""), artist: '本地导入', src: url, lyrics: window.homeState.tempLyrics });
+                if (window.actions.saveStore) window.actions.saveStore();
+
+                window.actions.showToast('本地音乐导入成功！');
+                window.audioPlaylist = store.customAudio;
+                window.audioState.currentIndex = store.customAudio.length - 1;
+                window.audioPlayer.loadAndPlay();
+                window.homeState.showAddAudioModal = false;
+                window.homeActions.triggerReaction();
+                window.homeActions.doRender();
+            } catch (err) {
+                console.error('[uploadMediaToCloud] bg audio', err);
+                window.actions.showToast('上传失败，请重试');
+            }
         };
         reader.readAsDataURL(file); e.target.value = '';
     },
-    
+
     playTrackFromList: (idx) => {
         window.audioState.currentIndex = idx;
         window.audioPlayer.loadAndPlay();
@@ -318,11 +344,14 @@ if (!window.homeActions) {
     deleteTrackFromList: (idx, e) => {
         e.stopPropagation();
         if (!confirm('确定删除这首音乐吗？')) return;
+        // 🌟 云端 GC：清理被删曲目的云端文件
+        const removed = store.customAudio?.[idx];
+        if (removed?.src) window.deleteMediaFromCloud(removed.src);
         store.customAudio.splice(idx, 1);
-        if (window.actions.saveStore) window.actions.saveStore(); 
-        
+        if (window.actions.saveStore) window.actions.saveStore();
+
         window.audioPlaylist = store.customAudio;
-        if (window.audioPlaylist.length === 0) { window.audioState.isPlaying = false; window.audioPlayer.loadAndPlay(); } 
+        if (window.audioPlaylist.length === 0) { window.audioState.isPlaying = false; window.audioPlayer.loadAndPlay(); }
         else { if (window.audioState.currentIndex >= window.audioPlaylist.length) window.audioState.currentIndex = 0; window.audioPlayer.loadAndPlay(); }
         window.homeActions.doRender();
     },

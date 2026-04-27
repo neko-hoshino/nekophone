@@ -15,6 +15,19 @@ import { renderAo3App } from './apps/ao3.js';
 import { renderDarkroomApp } from './apps/darkroom.js';
 import { renderTransmigrationApp } from './apps/transmigration.js';
 
+// ================= 🌟 召唤 Supabase 数据库接线员 =================
+// 直接通过 ESM 引入官方客户端
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm';
+
+// 填入你的 API URL
+const supabaseUrl = 'https://lbvdrqefnwqyvthpjocm.supabase.co'; 
+// 填入你的 Anon Key（千万别填 Secret Key！）
+const supabaseKey = 'sb_publishable_3YUfNGRez8K78PeNh3GVpA_nz-hT_xL'; 
+
+// 将 supabase 挂载到全局 window 对象上
+window.supabase = createClient(supabaseUrl, supabaseKey);
+// ===============================================================
+
 // 1. 获取/生成设备唯一标识
 function getDeviceId() {
     let id = localStorage.getItem('neko_device_id');
@@ -238,6 +251,179 @@ window.actions.notify = (title, text, avatarUrl) => {
   setTimeout(() => banner.classList.remove('-translate-y-[200%]'), 50);
   setTimeout(() => banner.classList.add('-translate-y-[200%]'), 4000);
 };
+
+// ================= 🌟 万能云端上传器 V2.0 (带智能覆盖排雷功能) =================
+window.uploadMediaToCloud = async function(fileData, fileExt = 'png', fixedKey = null) {
+    // 如果已经是 http 开头的链接，或者为空，直接放行
+    if (!fileData || (typeof fileData === 'string' && fileData.startsWith('http'))) {
+        return fileData;
+    }
+
+    try {
+        const deviceId = localStorage.getItem('neko_device_id') || 'unknown';
+        let fileName = '';
+
+        // 🌟 核心魔法：如果有专属坑位名，就固定文件名用于覆盖；否则随机生成
+        if (fixedKey) {
+            fileName = `media/trv_${deviceId}_${fixedKey}.${fileExt}`;
+        } else {
+            const uniqueId = Math.random().toString(36).substring(7);
+            fileName = `media/trv_${deviceId}_${Date.now()}_${uniqueId}.${fileExt}`;
+        }
+
+        // 🌟 智能 contentType：图片 / 音频 / json 分别派发
+        const audioExts = new Set(['mp3', 'wav', 'm4a', 'aac', 'ogg', 'mpeg', 'mp4']);
+        const ext = (fileExt || '').toLowerCase();
+        let contentType;
+        if (ext === 'json') contentType = 'application/json';
+        else if (audioExts.has(ext)) contentType = `audio/${ext === 'mp3' ? 'mpeg' : ext}`;
+        else contentType = `image/${ext}`;
+
+        // 呼叫咱们 VPS 上的搬运工接口
+        const response = await fetch('https://neko-hoshino.duckdns.org/api/upload-r2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                fileName: fileName,
+                fileData: fileData,
+                contentType: contentType
+            })
+        });
+
+        const result = await response.json();
+        if (result.success) {
+            // 🌟 防缓存魔法：如果是覆盖上传，浏览器往往会显示本地旧缓存，所以要加个时间戳骗过浏览器
+            const finalUrl = fixedKey ? `${result.url.split('?')[0]}?t=${Date.now()}` : result.url;
+            console.log('✅ 上传云端成功:', finalUrl);
+            return finalUrl; 
+        } else {
+            throw new Error(result.error);
+        }
+    } catch (e) {
+        console.error('❌ 云端上传失败, 退回原格式:', e);
+        return fileData; 
+    }
+};
+// ===============================================================
+// ================= 🌟 云端垃圾粉碎机 =================
+window.deleteMediaFromCloud = async function(fileUrl) {
+    // 智能拦截：如果是空、或者不是咱们云端网盘里的链接、或者是默认的系统图标，直接忽略
+    if (!fileUrl || typeof fileUrl !== 'string' || !fileUrl.includes('pub-0e37c842dc044e1ba26eb187300cb843.r2.dev')) {
+        return; 
+    }
+
+    try {
+        // 呼叫 VPS 焚化炉接口
+        fetch('https://neko-hoshino.duckdns.org/api/delete-r2', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileUrl: fileUrl })
+        });
+        // 这里不需要 await 等待结果，直接让它在后台默默去删就行，不卡顿玩家的操作
+        console.log('🗑️ 已发送清理指令:', fileUrl);
+    } catch (e) {
+        console.error('❌ 发送清理指令失败:', e);
+    }
+};
+// ===============================================================
+
+// ================= 🌟 整体 JSON 云端备份引擎 =================
+// 1. 【云端备份】把整个 store 变成文件扔进 R2，并把地址存入 Supabase
+window.backupToCloud = async function(silent = false) { // 🌟 加上 silent 参数
+    try {
+        if (!silent) window.actions.showToast('正在瘦身并打包存档...'); // 🌟 非静音才弹窗
+        const deviceId = localStorage.getItem('neko_device_id');
+        
+        const backupData = JSON.parse(JSON.stringify(store));
+        backupData.currentApp = null; 
+        
+        // 使用 'backup_main' 坑位名，完美覆盖旧文件！
+        const uploadRes = await window.uploadMediaToCloud(JSON.stringify(backupData), 'json', `backup_main`);
+        
+        if (!uploadRes || !uploadRes.startsWith('http')) throw new Error('上传云端失败');
+
+        const { error } = await supabase.from('user_backups').upsert({
+            device_id: deviceId,
+            backup_url: uploadRes,
+            updated_at: new Date().toISOString()
+        }, { onConflict: 'device_id' });
+
+        if (error) throw error;
+        
+        if (!silent) window.actions.showToast('✅ 存档已同步至云端');
+        console.log('☁️ [云端] 自动备份完成');
+    } catch (e) {
+        console.error('备份失败:', e);
+        if (!silent) window.actions.showToast('❌ 备份失败: ' + e.message);
+    }
+};
+
+// 2. 【云端恢复】从 Supabase 拿链接，去 R2 下文件，然后覆盖本地
+window.restoreFromCloud = async function() {
+    try {
+        const deviceId = localStorage.getItem('neko_device_id');
+        window.actions.showToast('正在从云端找回记忆...');
+
+        // 1. 去 Supabase 查：我的备份在哪？
+        const { data, error } = await supabase
+            .from('user_backups')
+            .select('backup_url')
+            .eq('device_id', deviceId)
+            .single();
+
+        if (error || !data) throw new Error('云端没找到你的存档记录');
+
+        // 2. 拿着链接去 R2 下载 JSON 文件 (加个时间戳绕过浏览器缓存)
+        const backupUrl = data.backup_url.includes('?') ? data.backup_url : `${data.backup_url}?t=${Date.now()}`;
+        const res = await fetch(backupUrl);
+        const cloudStore = await res.json();
+
+        if (cloudStore && cloudStore.contacts) {
+            // 3. 覆盖本地数据并重启应用
+            Object.assign(store, cloudStore);
+            if (window.DB) await window.DB.set(store);
+            window.actions.showToast('✅ 记忆已完全恢复！');
+            setTimeout(() => location.reload(), 1500); // 刷新页面以应用新存档
+        }
+    } catch (e) {
+        console.error('同步失败:', e);
+        window.actions.showToast('❌ 同步失败: ' + e.message);
+    }
+};
+// ================= 🌟 全自动影子备份引擎 =================
+window.startAutoBackup = function() {
+    // 1. 锁屏/切出网页时，立刻触发一次静默备份
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            console.log('☁️ [云端] 玩家切出网页，触发静默备份...');
+            window.backupToCloud(true); // true 表示静音模式
+        }
+    });
+
+    // 2. 每隔 15 分钟，自动兜底备份一次
+    setInterval(() => {
+        console.log('☁️ [云端] 触发 15 分钟定时备份...');
+        window.backupToCloud(true); 
+    }, 15 * 60 * 1000);
+};
+// ===============================================================
+// ================= 🌟 AI 专属的视觉恢复魔法 =================
+window.urlToBase64ForAI = async function(url) {
+    if (!url || !url.startsWith('http')) return url; // 如果本来就不是链接，直接返回
+    try {
+        const response = await fetch(url);
+        const blob = await response.blob();
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result); // 瞬间变成 Base64 给 AI 吃
+            reader.readAsDataURL(blob);
+        });
+    } catch (e) {
+        console.error("❌ 为 AI 获取图片失败:", e);
+        return null;
+    }
+};
+// ===============================================================
 
 window.render = render; 
 
@@ -511,14 +697,14 @@ function render() {
       #phone-container > div:not(#mc-chat-screen):not(#mc-status-bar):not(#trans-app-screen) {
          background-color: rgba(255, 255, 255, 0.3) !important; 
          background-image: none !important;
-         backdrop-filter: blur(10px) !important; 
-         -webkit-backdrop-filter: blur(10px) !important;
+         backdrop-filter: blur(0px) !important; 
+         -webkit-backdrop-filter: blur(0px) !important;
       }
       #phone-container > div:not(#mc-chat-screen) .bg-white {
-         background-color: rgba(255, 255, 255, 0.5) !important;
+         background-color: rgba(255, 255, 255, 0.8) !important;
          backdrop-filter: blur(15px) !important;
          -webkit-backdrop-filter: blur(15px) !important;
-         border-color: rgba(255, 255, 255, 0.5) !important;
+         border-color: rgba(255, 255, 255, 0.8) !important;
       }
       #phone-container > div:not(#mc-chat-screen) .bg-\\[\\#f3f3f3\\], 
       #phone-container > div:not(#mc-chat-screen) .bg-\\[\\#f6f7f9\\],
@@ -773,6 +959,14 @@ function render() {
                   <button class="w-full bg-indigo-50/70 text-indigo-700 border border-indigo-200/50 rounded-lg py-2 text-[11px] font-bold active:bg-indigo-100/80 transition-colors flex items-center justify-center shadow-sm backdrop-blur-md" onclick="event.stopPropagation(); window.settingsActions.exportData()">
                       <i data-lucide="download-cloud" class="w-3.5 h-3.5 mr-1.5"></i>导出数据备份
                   </button>
+
+<button class="w-full bg-indigo-50/70 text-indigo-700 border border-indigo-200/50 rounded-lg py-2 text-[11px] font-bold active:bg-indigo-100/80 transition-colors flex items-center justify-center shadow-sm backdrop-blur-md mb-2" onclick="window.backupToCloud()">
+    <i data-lucide="cloud-upload" class="w-3.5 h-3.5 mr-1.5"></i>同步存档至云端
+</button>
+
+<button class="w-full bg-indigo-50/70 text-indigo-700 border border-indigo-200/50 rounded-lg py-2 text-[11px] font-bold active:bg-indigo-100/80 transition-colors flex items-center justify-center shadow-sm backdrop-blur-md" onclick="window.restoreFromCloud()">
+    <i data-lucide="cloud-download" class="w-3.5 h-3.5 mr-1.5"></i>从云端恢复存档
+</button>
               </div>
           `;
       } else {
@@ -839,6 +1033,10 @@ async function initApp() {
        store.currentApp = null;
     }
     window.render();
+    
+    // 🌟 引擎点火：在系统初始化完成后，启动全自动备份！
+    window.startAutoBackup(); 
+
   } catch (e) {
     console.log('数据加载失败', e);
     window.render();

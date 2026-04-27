@@ -610,6 +610,11 @@ ${combos}
         
         deletePost: (postId) => {
             if (confirm("确定要删除这条帖子吗？")) {
+                // 🌟 云端 GC：清理帖子真实图片
+                const target = store.forumPosts.find(p => p.id === postId);
+                (target?.mediaList || []).forEach(item => {
+                    if (item?.type === 'real_image' && item.url) window.deleteMediaFromCloud(item.url);
+                });
                 store.forumPosts = store.forumPosts.filter(p => p.id !== postId);
                 const bIdx = store.forumBookmarks.indexOf(postId);
                 if (bIdx > -1) store.forumBookmarks.splice(bIdx, 1);
@@ -630,6 +635,12 @@ ${combos}
         deleteForum: (forumId) => {
             if (forumId === 'default') return window.actions?.showToast('默认频道不可删除');
             if (confirm("确定要删除这个频道吗？所有数据都将被永久清空！")) {
+                // 🌟 云端 GC：批量清理频道下所有帖子的真实图片
+                store.forumPosts.filter(p => p.forumId === forumId).forEach(p => {
+                    (p.mediaList || []).forEach(item => {
+                        if (item?.type === 'real_image' && item.url) window.deleteMediaFromCloud(item.url);
+                    });
+                });
                 store.forums = store.forums.filter(f => f.id !== forumId);
                 store.forumPosts = store.forumPosts.filter(p => p.forumId !== forumId);
                 const validIds = store.forumPosts.map(p => p.id);
@@ -830,7 +841,21 @@ ${combos}
         closePostModal: () => { window.forumState.showPostModal = false; window.render(); },
         uploadRealImages: (e) => {
             const files = Array.from(e.target.files); if (!files.length) return;
-            if (window.actions?.compressImage) { files.forEach(file => { window.actions.compressImage(file, (base64) => { window.forumState.draft.mediaList.push({ type: 'real_image', url: base64 }); window.render(); }, true); }); }
+            if (window.actions?.compressImage) {
+                files.forEach(file => {
+                    window.actions.compressImage(file, async (base64) => {
+                        try {
+                            window.actions?.showToast('上传中…');
+                            const url = await window.uploadMediaToCloud(base64, 'webp');
+                            window.forumState.draft.mediaList.push({ type: 'real_image', url });
+                            window.render();
+                        } catch (err) {
+                            console.error('[uploadMediaToCloud] forum image', err);
+                            window.actions?.showToast('上传失败，请重试');
+                        }
+                    }, true);
+                });
+            }
         },
         addVirtualMedia: (type) => { window.forumState.draft.mediaList.push({ type: type, desc: '' }); window.render(); },
         updateVirtualMediaDesc: (idx, val) => { window.forumState.draft.mediaList[idx].desc = val; },

@@ -132,10 +132,13 @@ window.wxActions = {
           wxState.playingAudio = new Audio();
       }
 
-      // 【情况 A】有现成音频
-      if (msg.audioUrl) {
-          wxState.playingAudio.src = msg.audioUrl;
-          wxState.playingMsgId = String(msgId); 
+      // 【情况 A】有现成可播 URL —— 优先用会话缓存的 blob（最快），其次用云端 URL
+      const cachedBlob = wxState.voiceBlobCache?.[msgId];
+      const persistedUrl = (msg.audioUrl && !msg.audioUrl.startsWith('blob:')) ? msg.audioUrl : null;
+      const readyUrl = cachedBlob || persistedUrl;
+      if (readyUrl) {
+          wxState.playingAudio.src = readyUrl;
+          wxState.playingMsgId = String(msgId);
           window.render(); // 更新小喇叭动画
           restoreScroll();
           wxState.playingAudio.play().catch(e => window.actions.showToast('播放被拦截，请重试'));
@@ -149,17 +152,23 @@ window.wxActions = {
 
       // 注释掉了烦人的 Toast 提示，以免每次点开新语音都弹窗
       // window.actions.showToast('正在请求语音...');
-      
-      fetchMinimaxVoice(msg.text, charObj.minimaxVoiceId).then(url => {
+
+      // 🌟 后台云上传完成回调：把云端 URL 写入 msg.audioUrl 实现跨刷新持久
+      const onCloudReady = (cloudUrl) => {
+          msg.audioUrl = cloudUrl;
+          window.render(); // 触发 DB.set 持久化
+      };
+      fetchMinimaxVoice(msg.text, charObj.minimaxVoiceId, onCloudReady).then(url => {
           if (!msg.showText) return; // 极限防抖
 
           if (url) {
-              msg.audioUrl = url; 
-              if (typeof saveToLocalStorage === 'function') saveToLocalStorage(); 
-              
+              // 🌟 blob URL 只放会话内缓存，绝不写进 msg.audioUrl —— 避免刷新后变成死链
+              wxState.voiceBlobCache = wxState.voiceBlobCache || {};
+              wxState.voiceBlobCache[msgId] = url;
+
               wxState.playingAudio.src = url;
-              wxState.playingMsgId = String(msgId); 
-              window.render(); 
+              wxState.playingMsgId = String(msgId);
+              window.render();
               restoreScroll();
               wxState.playingAudio.play().catch(e => window.actions.showToast('播放失败'));
               wxState.playingAudio.onended = () => { wxState.playingMsgId = null; window.render(); restoreScroll();};
@@ -172,6 +181,11 @@ window.wxActions = {
     if(!confirm('⚠️ 确定要清空当前窗口的聊天记录吗？此操作不会删除角色或其记忆设定。')) return;
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     if(chat) {
+        // 🌟 云端 GC：清理消息中的真实照片 / 语音音频
+        (chat.messages || []).forEach(m => {
+          if (m?.msgType === 'real_image' && m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+          if (m?.msgType === 'voice' && m.audioUrl) window.deleteMediaFromCloud(m.audioUrl);
+        });
         chat.messages = [];
         chat.lastSummarizedIndex = 0;
         chat.lastSummarizedUserCount = 0;   // 新增
@@ -209,7 +223,14 @@ window.wxActions = {
       if (!chat) return;
       const isGroup = chat.isGroup;
       if (!confirm(`🚨 确定要${isGroup ? '解散群聊' : '删除该聊天'}吗？此操作仅清除聊天记录并从列表移除，不会删除角色或记忆！`)) return;
-      
+
+      // 🌟 云端 GC：清理 chat 自身字段 + 消息中的真实照片 / 语音音频
+      [chat.bgImage, chat.offlineBg, chat.myAvatar, chat.groupAvatar, chat.myVideoAvatar, chat.charVideoAvatar]
+        .forEach(u => u && window.deleteMediaFromCloud(u));
+      (chat.messages || []).forEach(m => {
+        if (m?.msgType === 'real_image' && m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+        if (m?.msgType === 'voice' && m.audioUrl) window.deleteMediaFromCloud(m.audioUrl);
+      });
       store.chats = store.chats.filter(c => c.charId !== wxState.activeChatId);
       window.actions.showToast(isGroup ? '群聊已解散' : '聊天已删除');
       
@@ -603,10 +624,10 @@ window.wxActions = {
     });
     event.target.value = '';
   },
-  saveContact: () => {
+  saveContact: async () => {
     const name = document.getElementById('edit-char-name').value.trim();
     if (!name) return window.actions.showToast('名字不能为空哦！');
-    
+
     const contactData = {
       name: name,
       prompt: document.getElementById('edit-char-prompt').value.trim(),
@@ -617,19 +638,31 @@ window.wxActions = {
       groupId: document.getElementById('edit-char-group').value
     };
 
+    const targetCharId = wxState.editingContactId || ('char_' + Date.now());
+    let avatarUrl = null;
+    if (wxState.tempAvatar && wxState.tempAvatar.startsWith('data:')) {
+      try {
+        window.actions.showToast('头像上传中…');
+        avatarUrl = await window.uploadMediaToCloud(wxState.tempAvatar, 'webp', `char_avatar_${targetCharId}`);
+      } catch (e) {
+        console.error('[uploadMediaToCloud] save contact avatar', e);
+        window.actions.showToast('头像上传失败，请重试');
+        return;
+      }
+    }
+
     if (wxState.editingContactId) {
       // 存在则是编辑
       const char = store.contacts.find(c => c.id === wxState.editingContactId);
       if (char) {
         Object.assign(char, contactData);
-        if (wxState.tempAvatar) char.avatar = wxState.tempAvatar; // 只有换了才更新
+        if (avatarUrl) char.avatar = avatarUrl; // 只有换了才更新
       }
     } else {
       // 🌟 新建角色：只加通讯录，绝不自动创建聊天室！
-      const newId = 'char_' + Date.now();
-      contactData.id = newId;
-      contactData.avatar = wxState.tempAvatar;
-      contactData.videoAvatar = contactData.avatar;
+      contactData.id = targetCharId;
+      contactData.avatar = avatarUrl;
+      contactData.videoAvatar = avatarUrl;
       contactData.autoMsgEnabled = false;
       contactData.autoMsgInterval = 5;
       store.contacts.push(contactData);
@@ -640,8 +673,27 @@ window.wxActions = {
   deleteContact: () => {
     if (!wxState.editingContactId) return;
     if (!confirm('确定要删除这个角色吗？相关的聊天记录也会被彻底清除！')) return;
-    store.contacts = store.contacts.filter(c => c.id !== wxState.editingContactId);
-    store.chats = store.chats.filter(c => c.charId !== wxState.editingContactId);
+    const charId = wxState.editingContactId;
+    const char = store.contacts.find(c => c.id === charId);
+    const chat = store.chats.find(c => c.charId === charId);
+    // 🌟 云端 GC：清理角色资源
+    if (char) {
+      [char.avatar, char.videoAvatar, char.drBg, char.bgImage, char.offlineBg]
+        .forEach(u => u && window.deleteMediaFromCloud(u));
+    }
+    if (chat) {
+      [chat.bgImage, chat.offlineBg, chat.myAvatar, chat.groupAvatar, chat.myVideoAvatar, chat.charVideoAvatar]
+        .forEach(u => u && window.deleteMediaFromCloud(u));
+      (chat.messages || []).forEach(m => {
+        if (m?.msgType === 'real_image' && m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+        if (m?.msgType === 'voice' && m.audioUrl) window.deleteMediaFromCloud(m.audioUrl);
+      });
+    }
+    if (store.coupleSpacesData?.[charId]?.hundredBg) {
+      window.deleteMediaFromCloud(store.coupleSpacesData[charId].hundredBg);
+    }
+    store.contacts = store.contacts.filter(c => c.id !== charId);
+    store.chats = store.chats.filter(c => c.charId !== charId);
     window.actions.showToast('角色已删除');
     window.wxActions.closeSubView();
   },
@@ -757,6 +809,10 @@ window.wxActions = {
   deleteMessage: (msgId) => {
     saveScroll();
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    // 🌟 云端 GC：若被删消息是真实照片或语音，清理云端文件
+    const target = chat.messages.find(m => m.id === msgId);
+    if (target?.msgType === 'real_image' && target.imageUrl) window.deleteMediaFromCloud(target.imageUrl);
+    if (target?.msgType === 'voice' && target.audioUrl) window.deleteMediaFromCloud(target.audioUrl);
     chat.messages = chat.messages.filter(m => m.id !== msgId);
     wxState.activeMenuMsgId = null; 
     window.render();
@@ -802,7 +858,20 @@ window.wxActions = {
        if (chat) {
            const msg = chat.messages.find(m => m.id === wxState.editMsgData.id);
            if (msg) {
-               // 🌟 核心魔法：识别标准格式，强行转变气泡的物理性质！
+               // 🌟 云端 GC：编辑会改变 msgType / text，旧的 audioUrl（语音）和 imageUrl（真实照片）会变成孤儿
+               if (msg.msgType === 'voice' && msg.audioUrl) {
+                 window.deleteMediaFromCloud(msg.audioUrl);
+                 msg.audioUrl = null;
+               }
+               if (msg.msgType === 'real_image' && msg.imageUrl) {
+                 window.deleteMediaFromCloud(msg.imageUrl);
+                 msg.imageUrl = null;
+               }
+               // 🌟 同步清掉会话内 blob 缓存，避免下次点击播放旧音频
+               if (wxState.voiceBlobCache?.[msg.id]) {
+                 try { URL.revokeObjectURL(wxState.voiceBlobCache[msg.id]); } catch(e) {}
+                 delete wxState.voiceBlobCache[msg.id];
+               }
                // 🌟 核心魔法：识别标准格式，强行转变气泡的物理性质！
                if (/^\[.*?虚拟照片.*?\][:：]?\s*(.*)$/.test(newText)) {
                    msg.msgType = 'virtual_image';
@@ -949,6 +1018,12 @@ window.wxActions = {
     if (wxState.selectedMsgIds.length === 0) return window.actions.showToast('请至少选择一项');
     saveScroll();
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+    // 🌟 云端 GC：清理选中的真实照片 / 语音音频
+    chat.messages.forEach(m => {
+      if (!wxState.selectedMsgIds.includes(m.id)) return;
+      if (m.msgType === 'real_image' && m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+      if (m.msgType === 'voice' && m.audioUrl) window.deleteMediaFromCloud(m.audioUrl);
+    });
     chat.messages = chat.messages.filter(m => !wxState.selectedMsgIds.includes(m.id));
     wxState.isMultiSelecting = false;
     wxState.selectedMsgIds = [];
@@ -1139,7 +1214,28 @@ window.wxActions = {
             return `[${window.formatFullTimeForAI(m.timestamp, m.time)}] ${senderName}: ${content}`;
         }).join('\n');
         
-        const promptStr = `【任务】请提取并总结以下对话记录。\n要求：${wxState.extractMemoryConfig.type === 'core' ? '总结出这段对话中体现的【核心人物关系】或【不可磨灭的重大背景状态】。' : '客观地总结刚刚这段剧情中【发生了什么事】。'}\n直接输出总结内容，不加引号，不带“总结”、“这段对话”等废话，务必控制在50字以内。\n(注：用户的名字是 ${myName})\n\n【对话记录】\n${logText}`;
+        const isCore = wxState.extractMemoryConfig.type === 'core';
+        const promptStr = `【任务】请从以下对话记录中，为【${char.name}】提炼一段长期保存的${isCore ? '❤️核心' : '🧩碎片'}记忆。
+
+❗【人称视角铁律】（必须严格遵守！）：
+你必须以【${char.name}】的第一人称视角来记录！用"我"指代${char.name}自己，用"你"指代用户（${myName}）。绝不要写成"${char.name}做了什么"这种第三人称旁白！
+
+【内容要求】
+${isCore
+    ? '只总结对话中体现的【影响深远的重大设定】或【核心人物关系的根本性改变】，例如：表白/确立关系、决裂分手、身世揭晓、关键承诺、共同的重大经历。这是会影响后续所有互动的"地基"，不是普通的日常情节。'
+    : '客观简练地总结这段剧情中【具体发生了什么事】或【触发了什么情绪转折】，要带上场景与细节，让人一看就能想起当时的画面。不要写空泛的概括。'}
+
+【输出格式铁律】
+- 直接输出总结正文一句话，不加引号、不加标题、不要"总结："/"这段对话"等任何废话
+- 严格控制在50字以内
+- 第一人称口吻，自然真实
+
+【示例】${isCore
+    ? '我和你在天台上互相表白，我们正式在一起了。'
+    : '你今天加班到很晚情绪很差，我给你点了一份热汤面，你说很暖。'}
+
+【对话记录】
+${logText}`;
       const res = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
           method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
           body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: promptStr }], temperature: 0.3 })
@@ -1156,7 +1252,19 @@ window.wxActions = {
       
       // 如果是碎片记忆，让 AI 再干点活：自动提炼关键词！
       if (wxState.extractMemoryConfig.type === 'fragment') {
-         const kwPrompt = `请从以下总结中提取2-3个核心名词作为触发关键词，用英文逗号分隔，绝不输出其他多余废话，不要输出多余符号。禁止使用人名作为关键词！\n${wxState.extractMemoryContent}`;
+         const kwPrompt = `请从以下记忆中提取2-3个【触发关键词】，用英文逗号分隔。
+
+❗【关键词铁律】（必须严格遵守！）：
+1. 必须是日常微信聊天中最容易出现的【2字或3字的高频口语词汇】（如：做饭、吵架、电影、散步、晚安、加班、生病、下雨）。
+2. 绝对禁止使用四字成语、长句或书面语总结。
+3. 绝对禁止出现任何具体名字或人称代词（禁用：${myName}、${char.name}、我、你、他、她、TA）。
+4. 思考方式："当用户在微信里随手打出哪两三个字时，【${char.name}】就该立刻回想起这段记忆？"
+
+【输出格式】
+只输出关键词本身，用英文逗号分隔，不加引号、不加任何多余符号或解释。
+
+【记忆内容】
+${wxState.extractMemoryContent}`;
          const resKw = await fetch(`${store.apiConfig.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
             method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${store.apiConfig.apiKey}` },
             body: JSON.stringify({ model: store.apiConfig.model, messages: [{ role: 'system', content: kwPrompt }], temperature: 0.3 })
@@ -1311,15 +1419,29 @@ window.wxActions = {
   // ================= 朋友圈核心引擎 (含 AI 交互) =================
   handleMomentBgUpload: (event) => {
     const file = event.target.files[0]; if (!file) return;
-    window.actions.compressImage(file, (base64) => {
-       store.momentBg = base64; window.render(); 
+    window.actions.compressImage(file, async (base64) => {
+       try {
+         window.actions.showToast('上传中…');
+         const url = await window.uploadMediaToCloud(base64, 'webp', 'wechat_moment_bg');
+         store.momentBg = url; window.render();
+       } catch (e) {
+         console.error('[uploadMediaToCloud] moment bg', e);
+         window.actions.showToast('上传失败，请重试');
+       }
     });
     event.target.value = '';
   },
   handleMomentImageUpload: (event) => {
     const file = event.target.files[0]; if (!file) return;
-    window.actions.compressImage(file, (base64) => {
-       wxState.tempMomentImage = base64; window.render(); 
+    window.actions.compressImage(file, async (base64) => {
+       try {
+         window.actions.showToast('上传中…');
+         const url = await window.uploadMediaToCloud(base64, 'webp');
+         wxState.tempMomentImage = url; window.render();
+       } catch (e) {
+         console.error('[uploadMediaToCloud] moment image', e);
+         window.actions.showToast('上传失败，请重试');
+       }
     });
     event.target.value = '';
   },
@@ -1614,7 +1736,15 @@ ${relation}
        }
     }
   },
-  deleteMoment: (id) => { if(confirm('确定删除这条动态吗？')) { saveScroll(); store.moments = store.moments.filter(x => x.id !== id); window.render(); restoreScroll(); } },
+  deleteMoment: (id) => {
+    if (!confirm('确定删除这条动态吗？')) return;
+    saveScroll();
+    // 🌟 云端 GC：清理朋友圈附图
+    const target = store.moments.find(x => x.id === id);
+    if (target?.imageUrl) window.deleteMediaFromCloud(target.imageUrl);
+    store.moments = store.moments.filter(x => x.id !== id);
+    window.render(); restoreScroll();
+  },
   handleCommentClick: (mId, cId) => {
     saveScroll();
     const m = store.moments.find(x => x.id === mId); const c = m.comments.find(x => x.id === cId);
@@ -1632,8 +1762,15 @@ ${relation}
   updateMyName: (name) => { store.personas[0].name = name; window.render(); },
   handleMyAvatarUploadMain: (event) => {
     const file = event.target.files[0]; if (!file) return;
-    window.actions.compressImage(file, (base64) => {
-      store.personas[0].avatar = base64; window.render();
+    window.actions.compressImage(file, async (base64) => {
+      try {
+        window.actions.showToast('上传中…');
+        const url = await window.uploadMediaToCloud(base64, 'webp', 'user_avatar');
+        store.personas[0].avatar = url; window.render();
+      } catch (e) {
+        console.error('[uploadMediaToCloud] my avatar', e);
+        window.actions.showToast('上传失败，请重试');
+      }
     });
     event.target.value = '';
   },
@@ -1666,18 +1803,32 @@ ${relation}
     });
     event.target.value = '';
   },
-  savePersona: () => {
+  savePersona: async () => {
     // 🌟 修复：如果留空，默认使用主身份的真名，而不是“新身份”
     const name = document.getElementById('edit-persona-name').value.trim() || store.personas[0].name;
     const promptStr = document.getElementById('edit-persona-prompt').value.trim();
+
+    const targetPersonaId = wxState.editingPersonaId || ('p_' + Date.now());
+    let avatarUrl = null;
+    if (wxState.tempPersonaAvatar && wxState.tempPersonaAvatar.startsWith('data:')) {
+      try {
+        window.actions.showToast('头像上传中…');
+        avatarUrl = await window.uploadMediaToCloud(wxState.tempPersonaAvatar, 'webp', `persona_avatar_${targetPersonaId}`);
+      } catch (e) {
+        console.error('[uploadMediaToCloud] save persona avatar', e);
+        window.actions.showToast('头像上传失败，请重试');
+        return;
+      }
+    }
+
     if (wxState.editingPersonaId) {
       const p = store.personas.find(p => p.id === wxState.editingPersonaId);
-      if (p) { 
-        p.name = name; p.prompt = promptStr; 
-        if (wxState.tempPersonaAvatar) p.avatar = wxState.tempPersonaAvatar;
+      if (p) {
+        p.name = name; p.prompt = promptStr;
+        if (avatarUrl) p.avatar = avatarUrl;
       }
-    } else { 
-      store.personas.push({ id: 'p_' + Date.now(), name, prompt: promptStr, avatar: wxState.tempPersonaAvatar }); 
+    } else {
+      store.personas.push({ id: targetPersonaId, name, prompt: promptStr, avatar: avatarUrl });
     }
     window.actions.showToast('身份保存成功'); wxState.view = 'personaManage'; window.render(); restoreScroll();
   },
@@ -1685,8 +1836,12 @@ ${relation}
   deletePersona: (id) => {
     if (id === store.personas[0].id) return window.actions.showToast('默认主身份不能删除哦！');
     if (!confirm('确定删除该身份吗？之前绑定了此身份的角色，将自动恢复成主身份。')) return;
-      
+
     saveScroll();
+    // 🌟 云端 GC：清理马甲头像 + 视频头像
+    const target = store.personas.find(p => p.id === id);
+    if (target?.avatar) window.deleteMediaFromCloud(target.avatar);
+    if (target?.videoAvatar) window.deleteMediaFromCloud(target.videoAvatar);
     // 1. 删除马甲
     store.personas = store.personas.filter(p => p.id !== id);
     // 2. 遍历通讯录和聊天室，把绑定了这个马甲的人打回原形
@@ -1701,21 +1856,57 @@ ${relation}
   // 表情包库动作
   addEmojiLib: () => { store.emojiLibs = store.emojiLibs || []; store.emojiLibs.push({ id: 'el_' + Date.now(), name: '新表情包库', emojis: [] }); window.render(); },
   renameEmojiLib: (id, name) => { const lib = store.emojiLibs.find(l => l.id === id); if (lib) lib.name = name; },
-  deleteEmojiLib: (id) => { store.emojiLibs = store.emojiLibs.filter(l => l.id !== id); window.render(); },
+  deleteEmojiLib: (id) => {
+    // 🌟 云端 GC：删整个表情包库前，把每个表情的云端文件清掉
+    const target = store.emojiLibs.find(l => l.id === id);
+    (target?.emojis || []).forEach(e => {
+      const u = typeof e === 'string' ? e : e?.url;
+      if (u) window.deleteMediaFromCloud(u);
+    });
+    store.emojiLibs = store.emojiLibs.filter(l => l.id !== id);
+    window.render();
+  },
   openEmojiEdit: (id) => { saveScroll(); wxState.editingEmojiLibId = id; wxState.view = 'emojiEdit'; window.render(); },
-  addEmojiUrl: () => {
-    const url = prompt("请输入表情包图片 URL 链接："); if (!url) return;
+  addEmojiUrl: async () => {
+    const input = prompt("请输入表情包图片 URL 链接（也支持粘贴 data: 开头的 Base64）："); if (!input) return;
     const lib = store.emojiLibs.find(l => l.id === wxState.editingEmojiLibId);
-    if (lib) { lib.emojis.push(url); window.render(); }
+    if (!lib) return;
+
+    let finalUrl = input.trim();
+    // 🌟 如果用户粘的是 Base64 data URL，立刻上传到云端
+    if (finalUrl.startsWith('data:')) {
+      try {
+        window.actions.showToast('上传中…');
+        const m = finalUrl.match(/^data:image\/([\w-]+)/);
+        const ext = (m?.[1] || 'webp').toLowerCase();
+        const url = await window.uploadMediaToCloud(finalUrl, ext === 'jpeg' ? 'jpg' : ext); // 无 fixedKey
+        if (url && url.startsWith('http')) {
+          finalUrl = url;
+        } else {
+          return window.actions.showToast('上传失败，请重试');
+        }
+      } catch (e) {
+        console.error('[uploadMediaToCloud] add emoji url', e);
+        return window.actions.showToast('上传失败，请重试');
+      }
+    }
+    lib.emojis.push(finalUrl);
+    window.render();
   },
   deleteEmojiUrl: (index) => {
     const lib = store.emojiLibs.find(l => l.id === wxState.editingEmojiLibId);
-    if (lib) { lib.emojis.splice(index, 1); window.render(); }
+    if (!lib) return;
+    // 🌟 云端 GC
+    const removed = lib.emojis[index];
+    const u = typeof removed === 'string' ? removed : removed?.url;
+    if (u) window.deleteMediaFromCloud(u);
+    lib.emojis.splice(index, 1);
+    window.render();
   },
   uploadEmojiJson: (event) => {
     const file = event.target.files[0]; if (!file) return;
     const r = new FileReader();
-    r.onload = (e) => {
+    r.onload = async (e) => {
       try {
         let data = JSON.parse(e.target.result); store.emojiLibs = store.emojiLibs || [];
         let emojisToAdd = [];
@@ -1733,15 +1924,34 @@ ${relation}
               else if (typeof data[key] === 'string') emojisToAdd.push({ url: data[key], name: key });
            }
         }
-        
+
         // 过滤掉不合法的图
         emojisToAdd = emojisToAdd.filter(u => typeof u.url === 'string' && (u.url.startsWith('http') || u.url.startsWith('data:')));
 
-        if (emojisToAdd.length > 0) {
-           store.emojiLibs.push({ id: 'el_' + Date.now(), name: libName, emojis: emojisToAdd });
-           window.actions.showToast(`成功导入 ${emojisToAdd.length} 个表情！`); window.render();
-        } else { window.actions.showToast('未在文件中找到有效的图片链接！'); }
-      } catch (err) { window.actions.showToast('JSON 格式错误，请检查文件！'); }
+        if (emojisToAdd.length === 0) return window.actions.showToast('未在文件中找到有效的图片链接！');
+
+        // 🌟 把含 Base64 的条目顺序上传到云端
+        const base64Entries = emojisToAdd.filter(em => em.url.startsWith('data:'));
+        if (base64Entries.length > 0) {
+          let done = 0, failed = 0;
+          for (const em of base64Entries) {
+            const m = em.url.match(/^data:image\/([\w-]+)/);
+            let ext = (m?.[1] || 'webp').toLowerCase();
+            if (ext === 'jpeg') ext = 'jpg';
+            try {
+              const url = await window.uploadMediaToCloud(em.url, ext);
+              if (url && url.startsWith('http')) { em.url = url; done++; } else { failed++; }
+            } catch (err) {
+              console.error('[uploadMediaToCloud] emoji json', err);
+              failed++;
+            }
+            window.actions.showToast(`上传表情中… ✓${done} ✗${failed} / 共${base64Entries.length}`);
+          }
+        }
+
+        store.emojiLibs.push({ id: 'el_' + Date.now(), name: libName, emojis: emojisToAdd });
+        window.actions.showToast(`成功导入 ${emojisToAdd.length} 个表情！`); window.render();
+      } catch (err) { console.error(err); window.actions.showToast('JSON 格式错误或上传异常！'); }
     };
     r.readAsText(file); event.target.value = '';
   },
@@ -1780,7 +1990,10 @@ ${relation}
   clearSettingMyAvatar: () => {
       saveScroll();
       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
-      if (chat) chat.myAvatar = null;
+      if (chat) {
+        if (chat.myAvatar) window.deleteMediaFromCloud(chat.myAvatar); // 🌟 云端 GC
+        chat.myAvatar = null;
+      }
       window.actions.showToast('已恢复为身份默认头像');
       window.render();
       restoreScroll();
@@ -1788,18 +2001,33 @@ ${relation}
   
   handleSettingImageUpload: (event, targetType) => {
     const file = event.target.files[0]; if (!file) return;
-    window.actions.compressImage(file, (base64) => {
-      const char = store.contacts.find(c => c.id === wxState.activeChatId);
-      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
-      
-      if (targetType === 'myAvatar') {
-         chat.myAvatar = base64; // 🌟 独立情头：只修改当前聊天室专属头像，绝对不污染全局马甲！
+    window.actions.compressImage(file, async (base64) => {
+      try {
+        window.actions.showToast('上传中…');
+        const chatId = wxState.activeChatId;
+        const keyMap = {
+          myAvatar: `chat_my_avatar_${chatId}`,
+          charAvatar: `char_avatar_${chatId}`,
+          groupAvatar: `group_avatar_${chatId}`,
+          myVideo: `chat_my_video_${chatId}`,
+          charVideo: `char_video_${chatId}`,
+        };
+        const url = await window.uploadMediaToCloud(base64, 'webp', keyMap[targetType]);
+        const char = store.contacts.find(c => c.id === chatId);
+        const chat = store.chats.find(c => c.charId === chatId);
+
+        if (targetType === 'myAvatar') {
+           chat.myAvatar = url; // 🌟 独立情头：只修改当前聊天室专属头像，绝对不污染全局马甲！
+        }
+        if (targetType === 'charAvatar') char.avatar = url;
+        if (targetType === 'groupAvatar') chat.groupAvatar = url;
+        if (targetType === 'myVideo') chat.myVideoAvatar = url;
+        if (targetType === 'charVideo') chat.charVideoAvatar = url;
+        window.actions.showToast('图片已加载！'); window.render();
+      } catch (e) {
+        console.error('[uploadMediaToCloud] setting image', e);
+        window.actions.showToast('上传失败，请重试');
       }
-      if (targetType === 'charAvatar') char.avatar = base64;
-      if (targetType === 'groupAvatar') chat.groupAvatar = base64;
-      if (targetType === 'myVideo') chat.myVideoAvatar = base64; 
-      if (targetType === 'charVideo') chat.charVideoAvatar = base64; 
-      window.actions.showToast('图片已加载！'); window.render();
     });
     event.target.value = '';
   },
@@ -1807,7 +2035,8 @@ ${relation}
       saveScroll();
       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
       const targetObj = chat.isGroup ? chat : store.contacts.find(c => c.id === wxState.activeChatId);
-      targetObj.bgImage = null; 
+      if (targetObj.bgImage) window.deleteMediaFromCloud(targetObj.bgImage); // 🌟 云端 GC
+      targetObj.bgImage = null;
       window.actions.showToast('该专属背景已清除！');
       window.render();
       restoreScroll();
@@ -1815,12 +2044,21 @@ ${relation}
   handleSettingBgUpload: (event) => {
     saveScroll();
     const file = event.target.files[0]; if (!file) { restoreScroll(); return; }
-    window.actions.compressImage(file, (base64) => {
-      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
-      const targetObj = chat.isGroup ? chat : store.contacts.find(c => c.id === wxState.activeChatId);
-      targetObj.bgImage = base64; 
-      window.actions.showToast('专属背景图已加载！记得点保存~');
-      window.render(); restoreScroll();
+    window.actions.compressImage(file, async (base64) => {
+      try {
+        window.actions.showToast('上传中…');
+        const chatId = wxState.activeChatId;
+        const url = await window.uploadMediaToCloud(base64, 'webp', `chat_bg_${chatId}`);
+        const chat = store.chats.find(c => c.charId === chatId);
+        const targetObj = chat.isGroup ? chat : store.contacts.find(c => c.id === chatId);
+        targetObj.bgImage = url;
+        window.actions.showToast('专属背景图已加载！记得点保存~');
+        window.render(); restoreScroll();
+      } catch (e) {
+        console.error('[uploadMediaToCloud] setting bg', e);
+        window.actions.showToast('上传失败，请重试');
+        restoreScroll();
+      }
     });
     event.target.value = '';
   },
@@ -2047,16 +2285,23 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
 
   handleImageUpload: (event) => {
     const file = event.target.files[0]; if (!file) return;
-    window.actions.compressImage(file, (base64) => {
-      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
-      // 🌟 获取正确的马甲名字
-        // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
-      const charObj = store.contacts.find(c => c.id === chat.charId);
-      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
-        const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
-      if (chat) {
-        chat.messages.push({ id: Date.now(), sender: boundPersona.name, text: '发送了一张真实照片', imageUrl: base64, isMe: true, source: 'wechat', isOffline: false, msgType: 'real_image', time: getNowTime() });
-        wxState.showPlusMenu = false; window.render(); window.wxActions.scrollToBottom();
+    window.actions.compressImage(file, async (base64) => {
+      try {
+        window.actions.showToast('上传中…');
+        const url = await window.uploadMediaToCloud(base64, 'webp');
+        const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+        // 🌟 获取正确的马甲名字
+          // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
+        const charObj = store.contacts.find(c => c.id === chat.charId);
+        const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+          const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
+        if (chat) {
+          chat.messages.push({ id: Date.now(), sender: boundPersona.name, text: '发送了一张真实照片', imageUrl: url, isMe: true, source: 'wechat', isOffline: false, msgType: 'real_image', time: getNowTime() });
+          wxState.showPlusMenu = false; window.render(); window.wxActions.scrollToBottom();
+        }
+      } catch (e) {
+        console.error('[uploadMediaToCloud] image message', e);
+        window.actions.showToast('上传失败，请重试');
       }
     });
     event.target.value = '';
@@ -2308,18 +2553,27 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
   // 🌟 线下模式专属进阶设置
   handleOfflineBgUpload: (event) => {
       const file = event.target.files[0]; if (!file) return;
-      window.actions.compressImage(file, (base64) => {
-          const chat = store.chats.find(c => c.charId === wxState.activeChatId);
-          const targetObj = chat.isGroup ? chat : store.contacts.find(c => c.id === wxState.activeChatId);
-          targetObj.offlineBg = base64;
-          window.actions.showToast('线下专属背景已加载！');
-          window.render();
+      window.actions.compressImage(file, async (base64) => {
+          try {
+              window.actions.showToast('上传中…');
+              const chatId = wxState.activeChatId;
+              const url = await window.uploadMediaToCloud(base64, 'webp', `chat_offline_bg_${chatId}`);
+              const chat = store.chats.find(c => c.charId === chatId);
+              const targetObj = chat.isGroup ? chat : store.contacts.find(c => c.id === chatId);
+              targetObj.offlineBg = url;
+              window.actions.showToast('线下专属背景已加载！');
+              window.render();
+          } catch (e) {
+              console.error('[uploadMediaToCloud] offline bg', e);
+              window.actions.showToast('上传失败，请重试');
+          }
       });
       event.target.value = '';
   },
   clearOfflineBg: () => {
       const chat = store.chats.find(c => c.charId === wxState.activeChatId);
       const targetObj = chat.isGroup ? chat : store.contacts.find(c => c.id === wxState.activeChatId);
+      if (targetObj.offlineBg) window.deleteMediaFromCloud(targetObj.offlineBg); // 🌟 云端 GC
       targetObj.offlineBg = null;
       window.actions.showToast('已清除背景');
       window.render();

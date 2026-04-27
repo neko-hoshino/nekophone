@@ -49,6 +49,8 @@ export const wxState = {
   newChatStep: 'chooseType',
   newGroupData: { members: [], name: '', personaId: null },
   revealingMsgIds: new Set(),
+  // 🌟 会话内 blob URL 缓存：msgId -> blob URL。绝不持久化，刷新后清空让消息回退到 Minimax 重生成。
+  voiceBlobCache: {},
 };
 wxState.ringtone.loop = true;
 window.wxState = wxState; // 🌟 把微信内部状态暴露给全局，方便外部读取

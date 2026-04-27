@@ -509,16 +509,25 @@ You are now operating in a private, fictional, and explicitly immersive roleplay
         },
         handleDrBgUpload: (e) => {
             const file = e.target.files[0]; if (!file) return;
-            window.actions.compressImage(file, (base64) => {
-                const char = store.contacts.find(c => c.id === window.drState.selectedCharId);
-                char.drBg = base64;
-                if (window.actions?.saveStore) window.actions.saveStore();
-                window.render();
+            window.actions.compressImage(file, async (base64) => {
+                try {
+                    window.actions.showToast('上传中…');
+                    const charId = window.drState.selectedCharId;
+                    const url = await window.uploadMediaToCloud(base64, 'webp', `darkroom_bg_${charId}`);
+                    const char = store.contacts.find(c => c.id === charId);
+                    char.drBg = url;
+                    if (window.actions?.saveStore) window.actions.saveStore();
+                    window.render();
+                } catch (err) {
+                    console.error('[uploadMediaToCloud] darkroom bg', err);
+                    window.actions.showToast('上传失败，请重试');
+                }
             }, false);
             e.target.value = '';
         },
         clearDrBg: () => {
             const char = store.contacts.find(c => c.id === window.drState.selectedCharId);
+            if (char?.drBg) window.deleteMediaFromCloud(char.drBg); // 🌟 云端 GC
             char.drBg = null;
             if (window.actions?.saveStore) window.actions.saveStore();
             window.render();

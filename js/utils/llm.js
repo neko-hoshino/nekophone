@@ -126,7 +126,7 @@ export async function buildLLMPayload(charId, history, isOffline = false, isCall
   // 🌟 核心：注入正在阅读的小说内容！
   let readingContextStr = '';
   if (readingInfo) {
-      readingContextStr = `\n\n【📖 当前看书模式同步】：你们正在一起阅读小说《${readingInfo.title}》。\n目前手机屏幕上正显示的段落是：“${readingInfo.text}”\n❗你必须结合这段小说内容和用户进行沉浸式的讨论、吐槽或互动！保持日常聊天口吻，绝不许写剧本！`;
+      readingContextStr = `\n\n【当前看书模式同步】：你们正在一起阅读小说《${readingInfo.title}》。\n目前手机屏幕上正显示的段落是：“${readingInfo.text}”\n❗你必须结合这段小说内容和用户进行沉浸式的讨论、吐槽或互动！保持日常聊天口吻，绝不许写剧本！`;
   }
   
   // 🌟 朋友圈专属任务：完全绕过聊天室协议（systemRules 留空，下方超能力注入也会跳过）

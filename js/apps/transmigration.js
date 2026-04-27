@@ -8,6 +8,30 @@ import { cloudFetch } from '../utils/llm.js';
 const SUPABASE_ANON_KEY = 'sb_publishable_3YUfNGRez8K78PeNh3GVpA_nz-hT_xL';
 const supabase = createClient('https://neko-hoshino.duckdns.org/supabase', SUPABASE_ANON_KEY);
 
+// 🌟 论坛专属头像上传引擎
+async function _uploadAvatarToCloud(base64Str, playerId) {
+  if (!base64Str || !base64Str.startsWith('data:')) return base64Str; 
+  
+  try {
+    const res = await fetch(base64Str);
+    const blob = await res.blob();
+    const ext = blob.type.split('/')[1] || 'png';
+    
+    // 🌟 重新用回固定文件名：一人一张图，绝不多占 1KB 空间
+    const fileName = `avatars/${playerId}_avatar.${ext}`;
+
+    // 🌟 重新开启 { upsert: true }！因为 server.js 已经允许这个标签了
+    const { data, error } = await supabase.storage.from('neko_media').upload(fileName, blob, { upsert: true });
+    if (error) throw error;
+
+    const publicUrl = supabase.storage.from('neko_media').getPublicUrl(fileName).data.publicUrl;
+    return `${publicUrl}?t=${Date.now()}`; 
+  } catch (e) {
+    console.error('论坛头像上云失败:', e);
+    return base64Str;
+  }
+}
+
 // ─── 全局状态 ─────────────────────────────────────────────────────
 window.transState = {
   tab: 'terminal',
@@ -225,12 +249,30 @@ async function syncPlayerToCloud(immediate = false) {
       const defaultPersona = store.personas?.[0] || {};
       const pName   = player.name || defaultPersona.name || '旅行者';
       const pId     = 'TRV-' + String(player.joinedAt).slice(-8);
-      const pAvatar = player.avatar || (defaultPersona.avatar?.startsWith?.('http') ? defaultPersona.avatar : null);
+      
+      // 🌟 1. 抓取真实的原始头像（不管是超长的 Base64 还是短链接）
+      let rawAvatar = player.avatar || defaultPersona.avatar || null;
+      let pAvatar = rawAvatar;
 
+      // 🌟 2. 拦截发射！如果拿到头像，立刻呼叫云端压缩发射器
+      if (rawAvatar) {
+          // 如果已经是链接，_uploadAvatarToCloud 会直接原样返回，不费流量；
+          // 如果是 Base64，它会上传到网盘，并返回一个干净清爽的 https:// 短链接！
+          pAvatar = await _uploadAvatarToCloud(rawAvatar, pId);
+          
+          // 🌟 3. 极速瘦身：把得到的短链接，反向写回本地数据，替换掉占内存的 Base64
+          if (player.avatar) store.transData.player.avatar = pAvatar;
+          if (defaultPersona.avatar && rawAvatar === defaultPersona.avatar) {
+              store.personas[0].avatar = pAvatar; 
+          }
+          if (typeof saveToLocalStorage === 'function') saveToLocalStorage();
+      }
+
+      // 🌟 4. 把彻底瘦身后的玩家信息，同步到 Supabase 的 Database
       const { error } = await supabase.from('players').upsert({
         id:         pId,
         name:       pName,
-        avatar:     pAvatar,
+        avatar:     pAvatar, // 现在这里绝对不可能是 Base64 乱码了，百分百是短链接！
         level:      player.level,
         points:     player.points,
         worlds:     player.completedWorlds,
@@ -243,10 +285,11 @@ async function syncPlayerToCloud(immediate = false) {
     }
   };
 
+  // 根据传入的参数决定是立刻同步，还是防抖排队
   if (immediate) {
     await doSync();
   } else {
-    _syncTimer = setTimeout(doSync, 1500);
+    _syncTimer = setTimeout(doSync, 2000); 
   }
 }
 
@@ -2070,11 +2113,19 @@ window.transActions = {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = ev => {
-      store.transData.player.avatar = ev.target.result;
-      window.actions.showToast('头像已更新');
-      syncPlayerToCloud();
-      window.render();
+    reader.onload = async ev => {
+      try {
+        window.actions.showToast('上传中…');
+        const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+        const url = await window.uploadMediaToCloud(ev.target.result, ext, 'trans_player_avatar');
+        store.transData.player.avatar = url;
+        window.actions.showToast('头像已更新');
+        syncPlayerToCloud();
+        window.render();
+      } catch (err) {
+        console.error('[uploadMediaToCloud] transmigration avatar', err);
+        window.actions.showToast('上传失败，请重试');
+      }
     };
     reader.readAsDataURL(file);
   },

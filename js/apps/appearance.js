@@ -17,14 +17,14 @@ const apState = { view: 'main' };
 const iconList = [
   { id: 'mc-icon-wechat', name: '桌面 - 微信', icon: 'message-circle' },
   { id: 'mc-icon-forum', name: '桌面 - 论坛', icon: 'messages-square' },
-  { id: 'mc-icon-sync', name: '桌面 - Sync (博主)', icon: 'infinity' },
+  { id: 'mc-icon-sync', name: '桌面 - Sync', icon: 'infinity' },
   { id: 'mc-icon-diary', name: '桌面 - 情侣空间', icon: 'book-heart' },
   { id: 'mc-icon-shop', name: '桌面 - 购物', icon: 'shopping-bag' },
   { id: 'mc-icon-phone', name: '桌面 - 查手机', icon: 'smartphone' },
   { id: 'mc-icon-ao3', name: '桌面 - AO3', icon: 'feather' },
   { id: 'mc-icon-darkroom', name: '桌面 - 小黑屋', icon: 'lock' },
   { id: 'mc-icon-transmigrate', name: '桌面 - Nexus', icon: 'zap' },
-  { id: 'mc-icon-jubensha', name: '桌面 - 占位(剧本杀)', icon: 'clapperboard' },
+  { id: 'mc-icon-jubensha', name: '桌面 - 占位', icon: 'clapperboard' },
   { id: 'mc-icon-worldbook', name: 'Dock栏 - 世界书', icon: 'book-open' },
   { id: 'mc-icon-memory', name: 'Dock栏 - 记忆库', icon: 'brain' },
   { id: 'mc-icon-appearance', name: 'Dock栏 - 外观', icon: 'palette' },
@@ -35,7 +35,7 @@ const iconList = [
 const buttonList = [
   { id: 'mc-btn-back', name: '顶栏 - 左上返回键', icon: 'chevron-left' },
   { id: 'mc-btn-more', name: '顶栏 - 右上菜单键', icon: 'more-horizontal' },
-  { id: 'mc-btn-ai', name: '底栏 - AI回复(星芒)', icon: 'sparkles' },
+  { id: 'mc-btn-ai', name: '底栏 - AI回复', icon: 'sparkles' },
   { id: 'mc-btn-voice', name: '底栏 - 语音', icon: 'mic' },
   { id: 'mc-btn-image', name: '底栏 - 相片', icon: 'image' },
   { id: 'mc-btn-camera', name: '底栏 - 拍照', icon: 'camera' },
@@ -79,14 +79,26 @@ if (!window.apActions) {
       store.appearance.sysFontSize = val;
       window.actions.showToast('字号已保存');
     },
-    clearData: (key) => { store.appearance[key] = null; window.actions.showToast('已恢复默认'); window.render(); },
+    clearData: (key) => {
+      const old = store.appearance[key];
+      if (old) window.deleteMediaFromCloud(old); // 🌟 云端 GC
+      store.appearance[key] = null;
+      window.actions.showToast('已恢复默认'); window.render();
+    },
     
     handleImageUpload: (key, event) => {
       const file = event.target.files[0]; if (!file) return;
-      window.actions.compressImage(file, (base64) => {
-         store.appearance[key] = base64;
-         window.actions.showToast('图片已极速加载！'); 
-         window.render();
+      window.actions.compressImage(file, async (base64) => {
+         try {
+           window.actions.showToast('上传中…');
+           const url = await window.uploadMediaToCloud(base64, 'webp', `appearance_${key}`);
+           store.appearance[key] = url;
+           window.actions.showToast('图片已极速加载！');
+           window.render();
+         } catch (err) {
+           console.error('[uploadMediaToCloud] appearance image', err);
+           window.actions.showToast('上传失败，请重试');
+         }
       });
       event.target.value = '';
     },
@@ -96,16 +108,24 @@ if (!window.apActions) {
       const reader = new FileReader();
       reader.onload = (e) => {
         const img = new Image();
-        img.onload = () => {
+        img.onload = async () => {
           const canvas = document.createElement('canvas');
           let w = img.width, h = img.height, max = 256;
           if (w > h && w > max) { h *= max/w; w = max; }
           else if (h > max) { w *= max/h; h = max; }
           canvas.width = w; canvas.height = h;
           canvas.getContext('2d').drawImage(img, 0, 0, w, h);
-          store.appearance[dictKey] = store.appearance[dictKey] || {};
-          store.appearance[dictKey][itemId] = canvas.toDataURL('image/png');
-          window.actions.showToast('组件已极速替换！'); window.render();
+          const dataUrl = canvas.toDataURL('image/png');
+          try {
+            window.actions.showToast('上传中…');
+            const url = await window.uploadMediaToCloud(dataUrl, 'png', `appearance_${dictKey}_${itemId}`);
+            store.appearance[dictKey] = store.appearance[dictKey] || {};
+            store.appearance[dictKey][itemId] = url;
+            window.actions.showToast('组件已极速替换！'); window.render();
+          } catch (err) {
+            console.error('[uploadMediaToCloud] appearance item', err);
+            window.actions.showToast('上传失败，请重试');
+          }
         };
         img.src = e.target.result;
       };
@@ -145,7 +165,19 @@ if (!window.apActions) {
       const file = event.target.files[0]; if (!file) return;
       if (file.size > 2 * 1024 * 1024) return window.actions.showToast('音效文件不能超过 2MB 哦！');
       const reader = new FileReader();
-      reader.onload = (e) => { store.appearance[key] = e.target.result; window.actions.showToast('音效设置成功！'); window.render(); };
+      reader.onload = async (e) => {
+        try {
+          window.actions.showToast('上传中…');
+          const ext = (file.name.split('.').pop() || 'mp3').toLowerCase();
+          const url = await window.uploadMediaToCloud(e.target.result, ext, `appearance_${key}`);
+          store.appearance[key] = url;
+          window.actions.showToast('音效设置成功！');
+          window.render();
+        } catch (err) {
+          console.error('[uploadMediaToCloud] appearance audio', err);
+          window.actions.showToast('上传失败，请重试');
+        }
+      };
       reader.readAsDataURL(file); event.target.value = '';
     }
   };

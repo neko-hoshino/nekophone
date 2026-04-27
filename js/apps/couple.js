@@ -1131,10 +1131,26 @@ if (!window.cpActions) {
   handleHundredBgUpload: (charId, event) => {
       const file = event.target.files[0]; if (!file) return;
       const reader = new FileReader();
-      reader.onload = (e) => { store.coupleSpacesData[charId].hundredBg = e.target.result; window.render(); };
+      reader.onload = async (e) => {
+        try {
+          window.actions.showToast('上传中…');
+          const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+          const url = await window.uploadMediaToCloud(e.target.result, ext, `couple_hundred_bg_${charId}`);
+          store.coupleSpacesData[charId].hundredBg = url;
+          window.render();
+        } catch (err) {
+          console.error('[uploadMediaToCloud] couple hundred bg', err);
+          window.actions.showToast('上传失败，请重试');
+        }
+      };
       reader.readAsDataURL(file);
   },
-  clearHundredBg: (charId) => { store.coupleSpacesData[charId].hundredBg = ''; window.render(); },
+  clearHundredBg: (charId) => {
+      const old = store.coupleSpacesData[charId]?.hundredBg;
+      if (old) window.deleteMediaFromCloud(old); // 🌟 云端 GC
+      store.coupleSpacesData[charId].hundredBg = '';
+      window.render();
+  },
   // ==========================================
   // 🌟 真心话大冒险核心引擎
   // ==========================================

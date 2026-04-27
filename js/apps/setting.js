@@ -66,6 +66,10 @@ window.settingsActions = {
       store.memories = (store.memories || []).filter(m => validCharIds.includes(m.charId));
       const threeDaysAgo = Date.now() - 3 * 24 * 60 * 60 * 1000;
       const oldMomentsCount = (store.moments || []).length;
+      // 🌟 云端 GC：被滤掉的过期朋友圈附图也要清理
+      (store.moments || []).filter(m => m.id < threeDaysAgo).forEach(m => {
+        if (m?.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+      });
       store.moments = (store.moments || []).filter(m => m.id >= threeDaysAgo);
       const deletedCount = oldMomentsCount - store.moments.length;
       if (deletedCount > 0) console.log(`[系统] 已物理销毁 ${deletedCount} 条过期朋友圈数据`);
@@ -120,6 +124,227 @@ window.settingsActions = {
       const savedMb = ((beforeSize - afterSize) / 1024 / 1024).toFixed(2);
       window.actions.showToast(`瘦身完成！共为您清理出 ${savedMb} MB 空间！`);
       window.render();
+  },
+
+  // 🌟 临时一次性工具：把历史 Base64 图片/音频迁移到云端 URL
+  migrateBase64ToCloud: async () => {
+      if (!confirm('⚠️ 这将把历史 Base64 图片/音频上传到云端，并把本地数据替换为云端 URL。\n\n• 进行中请勿关闭页面\n• 需要保持网络稳定\n• 可中断后再次运行（已迁移项会自动跳过）\n\n开始吗？')) return;
+
+      // ============ 1. 收集所有需要迁移的字段 ============
+      const tasks = [];
+      const enqueue = (obj, key, fixedKey = null) => {
+          const v = obj?.[key];
+          if (typeof v === 'string' && v.startsWith('data:')) {
+              tasks.push({ obj, key, fixedKey });
+          }
+      };
+
+      // 全局单槽
+      enqueue(store, 'momentBg', 'wechat_moment_bg');
+      enqueue(store, 'homePolaroidImg', 'home_polaroid');
+
+      // 主身份与马甲（avatar + videoAvatar）
+      if (store.personas?.[0]) {
+          enqueue(store.personas[0], 'avatar', 'user_avatar');
+          enqueue(store.personas[0], 'videoAvatar', 'user_videoAvatar');
+      }
+      for (let i = 1; i < (store.personas?.length || 0); i++) {
+          const p = store.personas[i];
+          if (!p) continue;
+          enqueue(p, 'avatar', `persona_avatar_${p.id}`);
+          enqueue(p, 'videoAvatar', `persona_videoAvatar_${p.id}`);
+      }
+
+      // 角色（含单聊背景挂在 char 上的字段）
+      (store.contacts || []).forEach(c => {
+          if (!c) return;
+          enqueue(c, 'avatar', `char_avatar_${c.id}`);
+          enqueue(c, 'videoAvatar', `char_videoAvatar_${c.id}`);
+          enqueue(c, 'drBg', `darkroom_bg_${c.id}`);
+          enqueue(c, 'bgImage', `chat_bg_${c.id}`);
+          enqueue(c, 'offlineBg', `chat_offline_bg_${c.id}`);
+      });
+
+      // 聊天室
+      (store.chats || []).forEach(chat => {
+          if (!chat) return;
+          if (chat.isGroup) {
+              enqueue(chat, 'bgImage', `chat_bg_${chat.charId}`);
+              enqueue(chat, 'offlineBg', `chat_offline_bg_${chat.charId}`);
+          }
+          enqueue(chat, 'myAvatar', `chat_my_avatar_${chat.charId}`);
+          enqueue(chat, 'groupAvatar', `group_avatar_${chat.charId}`);
+          enqueue(chat, 'myVideoAvatar', `chat_my_video_${chat.charId}`);
+          enqueue(chat, 'charVideoAvatar', `char_video_${chat.charId}`);
+          (chat.messages || []).forEach(m => {
+              if (!m) return;
+              if (m.msgType === 'real_image') enqueue(m, 'imageUrl');
+              if (m.msgType === 'voice') enqueue(m, 'audioUrl');
+              if (m.msgType === 'emoji') enqueue(m, 'imageUrl'); // 表情包消息：data: 时也要迁移
+          });
+      });
+
+      // 情侣百日
+      Object.keys(store.coupleSpacesData || {}).forEach(cid => {
+          enqueue(store.coupleSpacesData[cid], 'hundredBg', `couple_hundred_bg_${cid}`);
+      });
+
+      // 朋友圈
+      (store.moments || []).forEach(m => enqueue(m, 'imageUrl'));
+
+      // 论坛帖子（含 mediaList 真实图片 + 帖子作者头像）
+      (store.forumPosts || []).forEach(post => {
+          if (!post) return;
+          enqueue(post, 'avatar'); // AI 帖子作者头像（每帖独立，无 fixedKey）
+          (post.mediaList || []).forEach(item => {
+              if (item?.type === 'real_image') enqueue(item, 'url');
+          });
+      });
+
+      // 论坛个人资料
+      if (store.forumProfile) {
+          enqueue(store.forumProfile, 'avatar', 'forum_profile_avatar');
+          enqueue(store.forumProfile, 'bgUrl', 'forum_profile_bg');
+      }
+
+      // 表情包库（每个 emoji 可能是字符串或 {url, name}）
+      (store.emojiLibs || []).forEach(lib => {
+          if (!lib?.emojis) return;
+          lib.emojis.forEach((emoji, idx) => {
+              if (typeof emoji === 'string') {
+                  enqueue(lib.emojis, idx); // 数组下标当 key
+              } else if (emoji && typeof emoji === 'object') {
+                  enqueue(emoji, 'url');
+              }
+          });
+      });
+
+      // 同步账户头像
+      (store.syncAccounts || []).forEach(sync => {
+          if (sync) enqueue(sync, 'avatar', `sync_avatar_${sync.id}`);
+      });
+
+      // 外观
+      if (store.appearance) {
+          ['wallpaper', 'topBarBg', 'bottomBarBg', 'interfaceBg', 'newMsgSound', 'callSound'].forEach(k => {
+              enqueue(store.appearance, k, `appearance_${k}`);
+          });
+          ['customIcons', 'customButtons'].forEach(dictKey => {
+              const dict = store.appearance[dictKey];
+              if (dict && typeof dict === 'object') {
+                  Object.keys(dict).forEach(itemId => {
+                      enqueue(dict, itemId, `appearance_${dictKey}_${itemId}`);
+                  });
+              }
+          });
+      }
+
+      // 自定义 BGM
+      (store.customAudio || []).forEach(track => enqueue(track, 'src'));
+
+      // 穿越玩家
+      if (store.transData?.player) enqueue(store.transData.player, 'avatar', 'trans_player_avatar');
+
+      if (tasks.length === 0) {
+          return window.actions.showToast('已经全部是云端 URL，没什么要迁移的~');
+      }
+
+      if (!confirm(`扫描到 ${tasks.length} 个 Base64 字段需要迁移。预计耗时约 ${Math.ceil(tasks.length * 2 / 60)} 分钟。\n\n确定要开始吗？`)) return;
+
+      // ============ 2. 顺序上传 + 进度反馈 + 定期 checkpoint ============
+      let done = 0, failed = 0;
+      const checkpoint = async () => {
+          if (window.DB) {
+              try { await window.DB.set(JSON.parse(JSON.stringify(store))); } catch(e) {}
+          }
+      };
+
+      for (let i = 0; i < tasks.length; i++) {
+          const { obj, key, fixedKey } = tasks[i];
+          const data = obj[key];
+          if (!data || !data.startsWith('data:')) { done++; continue; } // 防御：可能在循环中已被同一 fixedKey 写过
+
+          // 从 data URL 提取扩展名
+          const m = data.match(/^data:(image|audio)\/([\w-]+)/);
+          let ext = m?.[2]?.toLowerCase() || 'webp';
+          if (ext === 'jpeg') ext = 'jpg';
+
+          try {
+              const url = await window.uploadMediaToCloud(data, ext, fixedKey);
+              if (url && typeof url === 'string' && url.startsWith('http')) {
+                  obj[key] = url;
+                  done++;
+              } else {
+                  failed++;
+              }
+          } catch (e) {
+              console.error('[migrate] upload failed', key, e);
+              failed++;
+          }
+          window.actions.showToast(`迁移中… ✓${done} ✗${failed} / 共${tasks.length}`);
+
+          // 每 10 个 checkpoint 一次，避免中途意外丢进度
+          if ((i + 1) % 10 === 0) await checkpoint();
+      }
+
+      await checkpoint();
+
+      // ============ 3. 全 store 深扫兜底：清除任何遗漏的 data: 字符串 ============
+      // 长度阈值 500 防止误伤角色提示词里 "data:image/png;base64,xxx" 的字面引用
+      let sweepDone = 0, sweepWiped = 0, sweepCount = 0;
+      const isHeavyDataUrl = (v) =>
+          typeof v === 'string' && v.length > 500 && /^data:[\w/+.\-]+;base64,/.test(v);
+      const extFromDataUrl = (v) => {
+          const m = v.match(/^data:([\w/+.\-]+);base64,/);
+          if (!m) return 'bin';
+          let ext = (m[1].split('/')[1] || '').split('+')[0].split(';')[0].toLowerCase();
+          if (ext === 'jpeg') ext = 'jpg';
+          if (ext === 'mpeg') ext = 'mp3';
+          return ext || 'bin';
+      };
+      const sweepValue = async (parent, key, v) => {
+          sweepCount++;
+          try {
+              const url = await window.uploadMediaToCloud(v, extFromDataUrl(v));
+              if (url && typeof url === 'string' && url.startsWith('http')) {
+                  parent[key] = url; sweepDone++;
+              } else {
+                  parent[key] = ''; sweepWiped++;
+              }
+          } catch (e) {
+              console.error('[migrate-sweep] upload failed', e);
+              parent[key] = ''; sweepWiped++;
+          }
+          window.actions.showToast(`深扫中… ✓${sweepDone} 清${sweepWiped} / ${sweepCount}`);
+          if (sweepCount % 10 === 0) await checkpoint();
+      };
+      const seenNodes = new WeakSet();
+      const sweep = async (node) => {
+          if (!node || typeof node !== 'object' || seenNodes.has(node)) return;
+          seenNodes.add(node);
+          if (Array.isArray(node)) {
+              for (let i = 0; i < node.length; i++) {
+                  const v = node[i];
+                  if (isHeavyDataUrl(v)) await sweepValue(node, i, v);
+                  else if (v && typeof v === 'object') await sweep(v);
+              }
+          } else {
+              for (const k of Object.keys(node)) {
+                  const v = node[k];
+                  if (isHeavyDataUrl(v)) await sweepValue(node, k, v);
+                  else if (v && typeof v === 'object') await sweep(v);
+              }
+          }
+      };
+      await sweep(store);
+      await checkpoint();
+
+      window.render();
+      const sweepMsg = sweepCount > 0 ? `\n深扫兜底：补传 ${sweepDone} / 清空 ${sweepWiped}` : '';
+      window.actions.showToast(
+          `✅ 迁移完成！成功 ${done} / 失败 ${failed}${sweepMsg}` +
+          (failed > 0 ? '\n可再次点击重试失败项' : '')
+      );
   },
   importData: (event) => {
     const file = event.target.files[0]; if(!file) return;
@@ -499,6 +724,7 @@ export function renderSettingsApp(store) {
            </div>
            <p class="text-[11px] text-gray-400 font-bold leading-relaxed">已接入底层海量数据库，支持 1000MB+ 存储。若读取变慢可点击瘦身。</p>
            <button onclick="window.settingsActions.optimizeStorage()" class="w-full bg-blue-50 text-blue-500 font-bold py-2.5 rounded-xl active:bg-blue-100 transition-colors text-[13px] flex items-center justify-center border border-blue-100"><i data-lucide="zap" class="w-4 h-4 mr-1"></i>深度压缩并清理无用数据</button>
+           <button onclick="window.settingsActions.migrateBase64ToCloud()" class="w-full bg-amber-50 text-amber-600 font-bold py-2.5 rounded-xl active:bg-amber-100 transition-colors text-[13px] flex items-center justify-center border border-amber-200"><i data-lucide="cloud-upload" class="w-4 h-4 mr-1"></i>一键迁移历史 Base64 至云端 (临时)</button>
            <div class="mt-8 mb-6 flex flex-col space-y-3 px-1 animate-in slide-in-from-bottom-2 duration-500">
           <button onclick="window.settingsActions.factoryReset()" class="w-full bg-red-50 text-red-500 font-bold py-2.5 rounded-xl active:bg-red-100 transition-colors text-[13px] flex items-center justify-center border border-red-100">
              <i data-lucide="alert-triangle" class="w-4 h-4 mr-2"></i>清除所有数据 (恢复出厂设置)
