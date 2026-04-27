@@ -68,13 +68,15 @@ export function renderWeChatApp(store) {
     let v = val || defaultVal || '';
     if (v.length > 100 && !v.startsWith('http') && !v.startsWith('data:')) v = 'data:image/jpeg;base64,' + v;
     if (v.includes('http') || v.startsWith('data:')) {
-      // 🌟 开启异步解码和懒加载，杜绝滑动和渲染时的卡顿！
-      return `<img src="${v}" class="w-full h-full object-cover ${isBg ? 'opacity-40' : ''}" />`;
+      // 🌟 cache 优先：命中 Base64 无 flicker，缺失走原 URL
+      const src = window.getCachedImageSrc ? window.getCachedImageSrc(v) : v;
+      return `<img src="${src}" class="w-full h-full object-cover ${isBg ? 'opacity-40' : ''}" />`;
     }
-    
+
     // 如果是真实的图片（带链接或 Base64）
     if (v.includes('http') || v.startsWith('data:')) {
-      return `<img src="${v}" class="w-full h-full object-cover ${isBg ? '' : 'rounded-full'}" />`;
+      const src = window.getCachedImageSrc ? window.getCachedImageSrc(v) : v;
+      return `<img src="${src}" class="w-full h-full object-cover ${isBg ? '' : 'rounded-full'}" />`;
     }
     
     // 如果是 Emoji 或普通文字（加入 overflow-hidden 防止任何意外溢出）
@@ -771,7 +773,7 @@ export function renderWeChatApp(store) {
             </div>
             
             <div class="bg-white rounded-[12px] p-4 shadow-sm border border-gray-100 space-y-3">
-               <span class="text-[15px] font-medium text-gray-800 block">详细设定 (Prompt)</span>
+               <span class="text-[15px] font-medium text-gray-800 block">人设</span>
                <textarea id="edit-persona-prompt" rows="6" class="w-full bg-gray-50 rounded-lg p-3 outline-none text-[14px] resize-none text-gray-700 leading-relaxed hide-scrollbar" placeholder="输入该身份的背景、特殊习惯、当前状态等。AI 会根据此设定对待你...">${pData.prompt || ''}</textarea>
             </div>
 
@@ -837,7 +839,7 @@ export function renderWeChatApp(store) {
                 return `
                 <div class="flex flex-col items-center">
                   <div class="relative aspect-square w-full bg-gray-100 rounded-[12px] border border-gray-200 flex items-center justify-center overflow-hidden shadow-sm group">
-                    <img src="${ep.url}" class="w-full h-full object-cover" />
+                    <img src="${window.getCachedImageSrc(ep.url)}" class="w-full h-full object-cover" />
                     <div class="absolute top-1 right-1 bg-black/60 rounded-full p-1 cursor-pointer active:scale-90 shadow-md transition-transform hover:bg-red-500" onclick="window.wxActions.deleteEmojiUrl(${idx})"><i data-lucide="x" class="text-white w-3 h-3"></i></div>
                   </div>
                   <span class="text-[10px] text-gray-500 mt-1.5 truncate w-full text-center font-medium">${shortName}</span>
@@ -864,7 +866,7 @@ export function renderWeChatApp(store) {
             <div class="mt-4 flex flex-wrap gap-3">
                ${wxState.tempMomentImage ? `
                  <div class="w-24 h-24 bg-gray-100 rounded-[8px] overflow-hidden relative shadow-sm">
-                   <img src="${wxState.tempMomentImage}" class="w-full h-full object-cover" />
+                   <img src="${window.getCachedImageSrc(wxState.tempMomentImage)}" class="w-full h-full object-cover" />
                    <div class="absolute top-1 right-1 bg-black/50 rounded-full p-1 cursor-pointer active:scale-90" onclick="window.wxActions.clearTempMomentImage()"><i data-lucide="x" class="text-white w-3 h-3"></i></div>
                  </div>
                ` : wxState.tempMomentVirtual !== null && wxState.tempMomentVirtual !== undefined ? `
@@ -992,7 +994,7 @@ export function renderWeChatApp(store) {
     const bgUrl = targetObj?.offlineBg || store.bgImage || '';
 
     return `
-      <div class="mc-offline-container absolute inset-0 w-full h-full flex flex-col font-serif z-[60] ${wxState.noAnimate ? '' : 'animate-in slide-in-from-bottom-4 duration-300'}" style="background: ${bgUrl ? `url('${bgUrl}') center/cover no-repeat` : '#fcfcfc'} !important;">
+      <div class="mc-offline-container absolute inset-0 w-full h-full flex flex-col font-serif z-[60] ${wxState.noAnimate ? '' : 'animate-in slide-in-from-bottom-4 duration-300'}" style="background: ${bgUrl ? `url('${window.getCachedImageSrc(bgUrl)}') center/cover no-repeat` : '#fcfcfc'} !important;">
         
         <style>
           .mc-offline-dialogue { color: ${targetObj?.offlineDialogueColor || '#d4b856'}; font-family: inherit; }
@@ -1136,7 +1138,7 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
                       <div class="flex items-center justify-between bg-white border border-gray-100 p-3 rounded-xl shadow-sm">
                          <div class="flex items-center space-x-3">
                             <div class="w-10 h-10 rounded-lg bg-gray-50 border border-gray-200 overflow-hidden flex items-center justify-center relative cursor-pointer" onclick="document.getElementById('offline-bg-upload').click()">
-                               ${targetObj.offlineBg ? `<img src="${targetObj.offlineBg}" class="w-full h-full object-cover">` : `<i data-lucide="plus" class="text-gray-400"></i>`}
+                               ${targetObj.offlineBg ? `<img src="${window.getCachedImageSrc(targetObj.offlineBg)}" class="w-full h-full object-cover">` : `<i data-lucide="plus" class="text-gray-400"></i>`}
                             </div>
                             <span class="text-[12px] font-bold text-gray-600">${targetObj.offlineBg ? '已设置专属背景' : '默认纯色背景'}</span>
                          </div>
@@ -1441,9 +1443,11 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
         contentHtml = msg.isMe ? safeText.replace(/\n/g, '<br>') : safeText;
       } else if (msg.msgType === 'real_image') {
         maxWidthClass = 'max-w-[40%]';
-        bubbleClass = 'mc-bubble-img bg-white p-1 rounded-xl shadow-sm border border-gray-100'; 
-        bubbleStyle = ''; 
-        contentHtml = `<img src="${msg.imageUrl}" class="w-full h-auto rounded-lg object-cover max-h-[200px] cursor-pointer" alt="照片" />`;
+        bubbleClass = 'mc-bubble-img bg-white p-1 rounded-xl shadow-sm border border-gray-100';
+        bubbleStyle = '';
+        // 🌟 缓存优先：本地 Base64 命中即时显示无 flicker，未命中走云端 URL
+        const imgSrc = (window.imageCache?.getSync?.(msg.id)) || msg.imageUrl || '';
+        contentHtml = `<img src="${imgSrc}" class="w-full h-auto rounded-lg object-cover max-h-[200px] cursor-pointer" alt="照片" />`;
       } else if (msg.msgType === 'location') {
         maxWidthClass = 'max-w-[65%]';
         bubbleClass = 'mc-bubble-location bg-white rounded-[12px] shadow-sm border border-gray-100 overflow-hidden p-0 cursor-pointer active:scale-95 transition-transform';
@@ -1494,7 +1498,7 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
         const reqState = msg.reqState || 'pending';
         contentHtml = `
           <div class="bg-white rounded-[16px] shadow-sm border border-gray-100 p-5 w-[280px] flex flex-col items-center">
-             <div class="w-12 h-12 rounded-full overflow-hidden border border-gray-100 mb-2"><img src="${char?.avatar || ''}" class="w-full h-full object-cover"></div>
+             <div class="w-12 h-12 rounded-full overflow-hidden border border-gray-100 mb-2"><img src="${window.getCachedImageSrc(char?.avatar || '')}" class="w-full h-full object-cover"></div>
              <span class="text-[15px] font-bold text-gray-800 mb-1">${char?.name || '角色'} 申请添加你为好友</span>
              ${reqState === 'pending' ? `
              <div class="flex space-x-3 w-full">
@@ -1877,7 +1881,7 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
         maxWidthClass = 'max-w-[25%]';
         bubbleClass = 'bg-transparent shadow-none'; 
         bubbleStyle = ''; 
-        contentHtml = `<img src="${msg.imageUrl}" class="w-full h-auto object-contain cursor-pointer drop-shadow-md" />`;
+        contentHtml = `<img src="${window.getCachedImageSrc(msg.imageUrl)}" class="w-full h-auto object-contain cursor-pointer drop-shadow-md" />`;
       } else {
         bubbleClass = `mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-wrap break-words text-[15px] ${msg.isMe ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`;
         bubbleStyle = '';
@@ -2034,7 +2038,7 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
         
         <style>
           ${chatData.isGroup ? (chatData.customCSS || '') : (char?.customCSS || '')}
-          ${char?.bgImage ? `:root { --chat-bg-image: url('${char.bgImage}'); }` : (store.bgImage ? `:root { --chat-bg-image: url('${store.bgImage}'); }` : '')}
+          ${char?.bgImage ? `:root { --chat-bg-image: url('${window.getCachedImageSrc(char.bgImage)}'); }` : (store.bgImage ? `:root { --chat-bg-image: url('${window.getCachedImageSrc(store.bgImage)}'); }` : '')}
           
           /* 🌟 核心性能优化 1：强制开启 iOS 原生丝滑滚动 */
           .hide-scrollbar { -webkit-overflow-scrolling: touch; }
@@ -2477,7 +2481,7 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
     if (chat.isGroup) {
         name = chat.groupName || '群聊';
         if (chat.groupAvatar) {
-        avatarHtml = `<img src="${chat.groupAvatar}" class="w-full h-full object-cover" />`;
+        avatarHtml = `<img src="${window.getCachedImageSrc(chat.groupAvatar)}" class="w-full h-full object-cover" />`;
     } else {
         avatarHtml = `<div class="w-full h-full bg-blue-50 text-blue-400 flex items-center justify-center"><i data-lucide="users" class="w-6 h-6"></i></div>`;
     }
@@ -2591,7 +2595,7 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
           <div class="flex-1 flex flex-col min-w-0">
             <span class="text-[#576b95] font-medium text-[15px] mb-1">${m.senderName}</span>
             ${m.text ? `<span class="text-gray-800 text-[15px] leading-relaxed break-words whitespace-pre-wrap">${m.text}</span>` : ''}
-            ${m.imageUrl ? `<img src="${m.imageUrl}" class="mt-2 max-w-[70%] max-h-48 object-cover rounded-[4px] border border-gray-100" />` : ''}
+            ${m.imageUrl ? `<img src="${(window.imageCache?.getSync?.(m.id)) || m.imageUrl}" class="mt-2 max-w-[70%] max-h-48 object-cover rounded-[4px] border border-gray-100" />` : ''}
             ${m.virtualImageText ? `
               <div class="mt-2 w-48 min-h-[12rem] bg-white cursor-pointer select-none rounded-[4px] shadow-sm overflow-hidden border border-gray-200 relative" onclick="const overlay = this.querySelector('.img-overlay'); overlay.classList.toggle('opacity-0'); overlay.classList.toggle('pointer-events-none');">
                 <div class="absolute inset-0 p-4 overflow-y-auto text-[13px] text-gray-700 leading-relaxed text-left bg-white hide-scrollbar">
@@ -2626,7 +2630,7 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
       <div id="moments-scroll" class="flex-1 overflow-y-auto bg-white hide-scrollbar relative pb-10" onclick="if(wxState.activeMomentMenuId) window.wxActions.toggleMomentMenu(null)">
          <input type="file" id="upload-moment-bg" accept="image/*" class="hidden" onchange="window.wxActions.handleMomentBgUpload(event)" />
          <div class="relative h-60 bg-gray-200 flex items-center justify-center overflow-visible cursor-pointer" onclick="document.getElementById('upload-moment-bg').click()">
-            <img src="${store.momentBg}" class="w-full h-full object-cover" />
+            <img src="${window.getCachedImageSrc(store.momentBg)}" class="w-full h-full object-cover" />
             <div class="absolute inset-x-0 bottom-[-20px] flex justify-end items-end px-4">
                <span class="text-white font-bold text-[20px] mr-4 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] pb-6">${my.name}</span>
                <div class="w-16 h-16 rounded-[12px] overflow-hidden border-2 border-white shadow-md bg-white flex items-center justify-center z-10">${getVidHtml(my.avatar, '')}</div>
@@ -2783,7 +2787,7 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
   return `
     <div class="w-full h-full bg-white flex flex-col relative animate-in zoom-in-95 duration-200">
       
-      <div class="backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 z-10 sticky top-0 relative transition-all" style="${store.appearance?.topBarBg ? `background: url('${store.appearance.topBarBg}') center/cover no-repeat !important; border-bottom: none !important;` : 'background-color: rgba(243, 244, 246, 0.9);'}">
+      <div class="backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between border-b border-gray-200 z-10 sticky top-0 relative transition-all" style="${store.appearance?.topBarBg ? `background: url('${window.getCachedImageSrc(store.appearance.topBarBg)}') center/cover no-repeat !important; border-bottom: none !important;` : 'background-color: rgba(243, 244, 246, 0.9);'}">
         <div class="text-gray-800 cursor-pointer w-1/4 active:opacity-50 transition-opacity" onclick="window.actions.setCurrentApp(null)">
           <i data-lucide="chevron-left" style="width: 28px; height: 28px;"></i>
         </div>
@@ -2805,7 +2809,7 @@ if (slicedOfflineMsgs.length > 0 && slicedOfflineMsgs[slicedOfflineMsgs.length -
 
       ${contentHtml}
 
-      <div class="backdrop-blur-md border-t border-gray-200 flex items-center justify-around pb-6 pt-2 z-10 transition-all" style="${store.appearance?.bottomBarBg ? `background: url('${store.appearance.bottomBarBg}') center/cover no-repeat !important; border-top: none !important;` : 'background-color: rgba(249, 250, 251, 0.9);'}">
+      <div class="backdrop-blur-md border-t border-gray-200 flex items-center justify-around pb-6 pt-2 z-10 transition-all" style="${store.appearance?.bottomBarBg ? `background: url('${window.getCachedImageSrc(store.appearance.bottomBarBg)}') center/cover no-repeat !important; border-top: none !important;` : 'background-color: rgba(249, 250, 251, 0.9);'}">
         <div onclick="window.wxActions.switchTab('chats')" class="flex flex-col items-center space-y-1 cursor-pointer w-16 ${wxState.activeTab === 'chats' ? 'text-[#07c160]' : 'text-gray-500'}">
           <i data-lucide="message-circle" class="${wxState.activeTab === 'chats' ? 'fill-current' : ''}" style="width: 24px; height: 24px;"></i>
           <span class="text-[10px] font-bold">消息</span>

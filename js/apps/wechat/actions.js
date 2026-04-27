@@ -181,9 +181,12 @@ window.wxActions = {
     if(!confirm('⚠️ 确定要清空当前窗口的聊天记录吗？此操作不会删除角色或其记忆设定。')) return;
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
     if(chat) {
-        // 🌟 云端 GC：清理消息中的真实照片 / 语音音频
+        // 🌟 云端 GC + 本地缓存清理：消息里的真实照片 / 语音音频
         (chat.messages || []).forEach(m => {
-          if (m?.msgType === 'real_image' && m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+          if (m?.msgType === 'real_image') {
+            if (m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+            if (m.id) window.imageCache?.delete(m.id);
+          }
           if (m?.msgType === 'voice' && m.audioUrl) window.deleteMediaFromCloud(m.audioUrl);
         });
         chat.messages = [];
@@ -224,11 +227,14 @@ window.wxActions = {
       const isGroup = chat.isGroup;
       if (!confirm(`🚨 确定要${isGroup ? '解散群聊' : '删除该聊天'}吗？此操作仅清除聊天记录并从列表移除，不会删除角色或记忆！`)) return;
 
-      // 🌟 云端 GC：清理 chat 自身字段 + 消息中的真实照片 / 语音音频
+      // 🌟 云端 GC + 本地缓存清理：chat 自身字段 + 消息内媒体
       [chat.bgImage, chat.offlineBg, chat.myAvatar, chat.groupAvatar, chat.myVideoAvatar, chat.charVideoAvatar]
         .forEach(u => u && window.deleteMediaFromCloud(u));
       (chat.messages || []).forEach(m => {
-        if (m?.msgType === 'real_image' && m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+        if (m?.msgType === 'real_image') {
+          if (m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+          if (m.id) window.imageCache?.delete(m.id);
+        }
         if (m?.msgType === 'voice' && m.audioUrl) window.deleteMediaFromCloud(m.audioUrl);
       });
       store.chats = store.chats.filter(c => c.charId !== wxState.activeChatId);
@@ -641,13 +647,23 @@ window.wxActions = {
     const targetCharId = wxState.editingContactId || ('char_' + Date.now());
     let avatarUrl = null;
     if (wxState.tempAvatar && wxState.tempAvatar.startsWith('data:')) {
+      const fixedKey = `char_avatar_${targetCharId}`;
+      const predicted = window.predictCloudUrl(fixedKey, 'webp');
+      // 🌟 先入缓存：保存后渲染立即用 Base64，不依赖云端
+      await window.imageCache?.set(predicted, wxState.tempAvatar);
       try {
         window.actions.showToast('头像上传中…');
-        avatarUrl = await window.uploadMediaToCloud(wxState.tempAvatar, 'webp', `char_avatar_${targetCharId}`);
+        const uploaded = await window.uploadMediaToCloud(wxState.tempAvatar, 'webp', fixedKey);
+        if (uploaded && typeof uploaded === 'string' && uploaded.startsWith('http')) {
+          avatarUrl = uploaded;
+        } else {
+          avatarUrl = predicted; // 上传失败：用预测 URL（cache 里有 Base64，渲染仍可显示），刷新后变 broken
+          window.actions.showToast('头像云端上传失败，本机仍可见');
+        }
       } catch (e) {
         console.error('[uploadMediaToCloud] save contact avatar', e);
-        window.actions.showToast('头像上传失败，请重试');
-        return;
+        avatarUrl = predicted;
+        window.actions.showToast('头像云端上传失败，本机仍可见');
       }
     }
 
@@ -685,7 +701,10 @@ window.wxActions = {
       [chat.bgImage, chat.offlineBg, chat.myAvatar, chat.groupAvatar, chat.myVideoAvatar, chat.charVideoAvatar]
         .forEach(u => u && window.deleteMediaFromCloud(u));
       (chat.messages || []).forEach(m => {
-        if (m?.msgType === 'real_image' && m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+        if (m?.msgType === 'real_image') {
+          if (m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+          if (m.id) window.imageCache?.delete(m.id);
+        }
         if (m?.msgType === 'voice' && m.audioUrl) window.deleteMediaFromCloud(m.audioUrl);
       });
     }
@@ -809,9 +828,12 @@ window.wxActions = {
   deleteMessage: (msgId) => {
     saveScroll();
     const chat = store.chats.find(c => c.charId === wxState.activeChatId);
-    // 🌟 云端 GC：若被删消息是真实照片或语音，清理云端文件
+    // 🌟 云端 GC + 本地缓存清理：被删消息若是真实照片 / 语音
     const target = chat.messages.find(m => m.id === msgId);
-    if (target?.msgType === 'real_image' && target.imageUrl) window.deleteMediaFromCloud(target.imageUrl);
+    if (target?.msgType === 'real_image') {
+      if (target.imageUrl) window.deleteMediaFromCloud(target.imageUrl);
+      window.imageCache?.delete(msgId);
+    }
     if (target?.msgType === 'voice' && target.audioUrl) window.deleteMediaFromCloud(target.audioUrl);
     chat.messages = chat.messages.filter(m => m.id !== msgId);
     wxState.activeMenuMsgId = null; 
@@ -863,8 +885,9 @@ window.wxActions = {
                  window.deleteMediaFromCloud(msg.audioUrl);
                  msg.audioUrl = null;
                }
-               if (msg.msgType === 'real_image' && msg.imageUrl) {
-                 window.deleteMediaFromCloud(msg.imageUrl);
+               if (msg.msgType === 'real_image') {
+                 if (msg.imageUrl) window.deleteMediaFromCloud(msg.imageUrl);
+                 if (msg.id) window.imageCache?.delete(msg.id);
                  msg.imageUrl = null;
                }
                // 🌟 同步清掉会话内 blob 缓存，避免下次点击播放旧音频
@@ -1021,7 +1044,10 @@ window.wxActions = {
     // 🌟 云端 GC：清理选中的真实照片 / 语音音频
     chat.messages.forEach(m => {
       if (!wxState.selectedMsgIds.includes(m.id)) return;
-      if (m.msgType === 'real_image' && m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+      if (m.msgType === 'real_image') {
+        if (m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+        if (m.id) window.imageCache?.delete(m.id);
+      }
       if (m.msgType === 'voice' && m.audioUrl) window.deleteMediaFromCloud(m.audioUrl);
     });
     chat.messages = chat.messages.filter(m => !wxState.selectedMsgIds.includes(m.id));
@@ -1420,13 +1446,24 @@ ${wxState.extractMemoryContent}`;
   handleMomentBgUpload: (event) => {
     const file = event.target.files[0]; if (!file) return;
     window.actions.compressImage(file, async (base64) => {
+       const predicted = window.predictCloudUrl('wechat_moment_bg', 'webp');
+       await window.imageCache?.set(predicted, base64);
+       const old = store.momentBg;
+       store.momentBg = predicted;
+       window.render();
        try {
-         window.actions.showToast('上传中…');
          const url = await window.uploadMediaToCloud(base64, 'webp', 'wechat_moment_bg');
-         store.momentBg = url; window.render();
+         if (url && typeof url === 'string' && url.startsWith('http')) {
+           store.momentBg = url;
+           if (window.DB) window.DB.set(JSON.parse(JSON.stringify(store))).catch(() => {});
+         } else {
+           store.momentBg = old; window.render();
+           window.actions.showToast('云端上传失败');
+         }
        } catch (e) {
          console.error('[uploadMediaToCloud] moment bg', e);
-         window.actions.showToast('上传失败，请重试');
+         store.momentBg = old; window.render();
+         window.actions.showToast('云端上传失败');
        }
     });
     event.target.value = '';
@@ -1437,7 +1474,10 @@ ${wxState.extractMemoryContent}`;
        try {
          window.actions.showToast('上传中…');
          const url = await window.uploadMediaToCloud(base64, 'webp');
-         wxState.tempMomentImage = url; window.render();
+         wxState.tempMomentImage = url;
+         // 🌟 留着 base64，submit 时塞进 cache，保证以后渲染无 flicker
+         wxState.tempMomentImageBase64 = base64;
+         window.render();
        } catch (e) {
          console.error('[uploadMediaToCloud] moment image', e);
          window.actions.showToast('上传失败，请重试');
@@ -1450,7 +1490,7 @@ ${wxState.extractMemoryContent}`;
   // 安全操作虚拟照片与本地图片的开关
   setTempMomentVirtual: () => { wxState.tempMomentVirtual = ''; window.render(); },
   clearTempMomentVirtual: () => { wxState.tempMomentVirtual = null; window.render(); },
-  clearTempMomentImage: () => { wxState.tempMomentImage = null; window.render(); },
+  clearTempMomentImage: () => { wxState.tempMomentImage = null; wxState.tempMomentImageBase64 = null; window.render(); },
   // 🌟 唤起定位输入弹窗
   setPublishLocation: () => {
       const loc = prompt('请输入所在位置 (留空则不显示)：', wxState.publishLocation || '');
@@ -1488,8 +1528,14 @@ ${wxState.extractMemoryContent}`;
     privacyGroups: pGroups
 };
     store.moments.push(newMoment);
-    
-    wxState.view = 'main'; 
+
+    // 🌟 顺手把上传时缓存的 base64 塞进 imageCache，保证未来渲染无 flicker
+    if (wxState.tempMomentImageBase64 && newMoment.imageUrl) {
+        window.imageCache?.set(newId, wxState.tempMomentImageBase64).catch(() => {});
+    }
+    wxState.tempMomentImageBase64 = null;
+
+    wxState.view = 'main';
     wxState.publishLocation = null; // 发布后清空定位缓存
     window.render(); restoreScroll();
     
@@ -1739,9 +1785,10 @@ ${relation}
   deleteMoment: (id) => {
     if (!confirm('确定删除这条动态吗？')) return;
     saveScroll();
-    // 🌟 云端 GC：清理朋友圈附图
+    // 🌟 云端 GC + 本地缓存清理：朋友圈附图
     const target = store.moments.find(x => x.id === id);
     if (target?.imageUrl) window.deleteMediaFromCloud(target.imageUrl);
+    if (target?.id) window.imageCache?.delete(target.id);
     store.moments = store.moments.filter(x => x.id !== id);
     window.render(); restoreScroll();
   },
@@ -1763,13 +1810,24 @@ ${relation}
   handleMyAvatarUploadMain: (event) => {
     const file = event.target.files[0]; if (!file) return;
     window.actions.compressImage(file, async (base64) => {
+      const predicted = window.predictCloudUrl('user_avatar', 'webp');
+      await window.imageCache?.set(predicted, base64);
+      const old = store.personas[0].avatar;
+      store.personas[0].avatar = predicted;
+      window.render();
       try {
-        window.actions.showToast('上传中…');
         const url = await window.uploadMediaToCloud(base64, 'webp', 'user_avatar');
-        store.personas[0].avatar = url; window.render();
+        if (url && typeof url === 'string' && url.startsWith('http')) {
+          store.personas[0].avatar = url;
+          if (window.DB) window.DB.set(JSON.parse(JSON.stringify(store))).catch(() => {});
+        } else {
+          store.personas[0].avatar = old; window.render();
+          window.actions.showToast('云端上传失败');
+        }
       } catch (e) {
         console.error('[uploadMediaToCloud] my avatar', e);
-        window.actions.showToast('上传失败，请重试');
+        store.personas[0].avatar = old; window.render();
+        window.actions.showToast('云端上传失败');
       }
     });
     event.target.value = '';
@@ -1811,13 +1869,22 @@ ${relation}
     const targetPersonaId = wxState.editingPersonaId || ('p_' + Date.now());
     let avatarUrl = null;
     if (wxState.tempPersonaAvatar && wxState.tempPersonaAvatar.startsWith('data:')) {
+      const fixedKey = `persona_avatar_${targetPersonaId}`;
+      const predicted = window.predictCloudUrl(fixedKey, 'webp');
+      await window.imageCache?.set(predicted, wxState.tempPersonaAvatar);
       try {
         window.actions.showToast('头像上传中…');
-        avatarUrl = await window.uploadMediaToCloud(wxState.tempPersonaAvatar, 'webp', `persona_avatar_${targetPersonaId}`);
+        const uploaded = await window.uploadMediaToCloud(wxState.tempPersonaAvatar, 'webp', fixedKey);
+        if (uploaded && typeof uploaded === 'string' && uploaded.startsWith('http')) {
+          avatarUrl = uploaded;
+        } else {
+          avatarUrl = predicted;
+          window.actions.showToast('头像云端上传失败，本机仍可见');
+        }
       } catch (e) {
         console.error('[uploadMediaToCloud] save persona avatar', e);
-        window.actions.showToast('头像上传失败，请重试');
-        return;
+        avatarUrl = predicted;
+        window.actions.showToast('头像云端上传失败，本机仍可见');
       }
     }
 
@@ -2002,31 +2069,50 @@ ${relation}
   handleSettingImageUpload: (event, targetType) => {
     const file = event.target.files[0]; if (!file) return;
     window.actions.compressImage(file, async (base64) => {
+      const chatId = wxState.activeChatId;
+      const keyMap = {
+        myAvatar: `chat_my_avatar_${chatId}`,
+        charAvatar: `char_avatar_${chatId}`,
+        groupAvatar: `group_avatar_${chatId}`,
+        myVideo: `chat_my_video_${chatId}`,
+        charVideo: `char_video_${chatId}`,
+      };
+      const fixedKey = keyMap[targetType];
+      const predicted = window.predictCloudUrl(fixedKey, 'webp');
+      await window.imageCache?.set(predicted, base64);
+      const char = store.contacts.find(c => c.id === chatId);
+      const chat = store.chats.find(c => c.charId === chatId);
+      // 立即指向预测 URL（cache 命中），渲染瞬间显示
+      const apply = (val) => {
+        if (targetType === 'myAvatar') chat.myAvatar = val;
+        if (targetType === 'charAvatar') char.avatar = val;
+        if (targetType === 'groupAvatar') chat.groupAvatar = val;
+        if (targetType === 'myVideo') chat.myVideoAvatar = val;
+        if (targetType === 'charVideo') chat.charVideoAvatar = val;
+      };
+      const get = () => {
+        if (targetType === 'myAvatar') return chat.myAvatar;
+        if (targetType === 'charAvatar') return char.avatar;
+        if (targetType === 'groupAvatar') return chat.groupAvatar;
+        if (targetType === 'myVideo') return chat.myVideoAvatar;
+        if (targetType === 'charVideo') return chat.charVideoAvatar;
+      };
+      const old = get();
+      apply(predicted);
+      window.render();
       try {
-        window.actions.showToast('上传中…');
-        const chatId = wxState.activeChatId;
-        const keyMap = {
-          myAvatar: `chat_my_avatar_${chatId}`,
-          charAvatar: `char_avatar_${chatId}`,
-          groupAvatar: `group_avatar_${chatId}`,
-          myVideo: `chat_my_video_${chatId}`,
-          charVideo: `char_video_${chatId}`,
-        };
-        const url = await window.uploadMediaToCloud(base64, 'webp', keyMap[targetType]);
-        const char = store.contacts.find(c => c.id === chatId);
-        const chat = store.chats.find(c => c.charId === chatId);
-
-        if (targetType === 'myAvatar') {
-           chat.myAvatar = url; // 🌟 独立情头：只修改当前聊天室专属头像，绝对不污染全局马甲！
+        const url = await window.uploadMediaToCloud(base64, 'webp', fixedKey);
+        if (url && typeof url === 'string' && url.startsWith('http')) {
+          apply(url);
+          if (window.DB) window.DB.set(JSON.parse(JSON.stringify(store))).catch(() => {});
+        } else {
+          apply(old); window.render();
+          window.actions.showToast('云端上传失败');
         }
-        if (targetType === 'charAvatar') char.avatar = url;
-        if (targetType === 'groupAvatar') chat.groupAvatar = url;
-        if (targetType === 'myVideo') chat.myVideoAvatar = url;
-        if (targetType === 'charVideo') chat.charVideoAvatar = url;
-        window.actions.showToast('图片已加载！'); window.render();
       } catch (e) {
         console.error('[uploadMediaToCloud] setting image', e);
-        window.actions.showToast('上传失败，请重试');
+        apply(old); window.render();
+        window.actions.showToast('云端上传失败');
       }
     });
     event.target.value = '';
@@ -2045,19 +2131,28 @@ ${relation}
     saveScroll();
     const file = event.target.files[0]; if (!file) { restoreScroll(); return; }
     window.actions.compressImage(file, async (base64) => {
+      const chatId = wxState.activeChatId;
+      const fixedKey = `chat_bg_${chatId}`;
+      const predicted = window.predictCloudUrl(fixedKey, 'webp');
+      await window.imageCache?.set(predicted, base64);
+      const chat = store.chats.find(c => c.charId === chatId);
+      const targetObj = chat.isGroup ? chat : store.contacts.find(c => c.id === chatId);
+      const old = targetObj.bgImage;
+      targetObj.bgImage = predicted;
+      window.render(); restoreScroll();
       try {
-        window.actions.showToast('上传中…');
-        const chatId = wxState.activeChatId;
-        const url = await window.uploadMediaToCloud(base64, 'webp', `chat_bg_${chatId}`);
-        const chat = store.chats.find(c => c.charId === chatId);
-        const targetObj = chat.isGroup ? chat : store.contacts.find(c => c.id === chatId);
-        targetObj.bgImage = url;
-        window.actions.showToast('专属背景图已加载！记得点保存~');
-        window.render(); restoreScroll();
+        const url = await window.uploadMediaToCloud(base64, 'webp', fixedKey);
+        if (url && typeof url === 'string' && url.startsWith('http')) {
+          targetObj.bgImage = url;
+          if (window.DB) window.DB.set(JSON.parse(JSON.stringify(store))).catch(() => {});
+        } else {
+          targetObj.bgImage = old; window.render();
+          window.actions.showToast('云端上传失败');
+        }
       } catch (e) {
         console.error('[uploadMediaToCloud] setting bg', e);
-        window.actions.showToast('上传失败，请重试');
-        restoreScroll();
+        targetObj.bgImage = old; window.render();
+        window.actions.showToast('云端上传失败');
       }
     });
     event.target.value = '';
@@ -2286,22 +2381,40 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
   handleImageUpload: (event) => {
     const file = event.target.files[0]; if (!file) return;
     window.actions.compressImage(file, async (base64) => {
+      const chat = store.chats.find(c => c.charId === wxState.activeChatId);
+      if (!chat) return;
+      const charObj = store.contacts.find(c => c.id === chat.charId);
+      const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
+      const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
+
+      // 🌟 1. 先入缓存 + 立即推消息渲染：用户瞬间看到图片，无需等上传
+      const msgId = Date.now();
+      await window.imageCache.set(msgId, base64);
+      chat.messages.push({
+        id: msgId, sender: boundPersona.name, text: '发送了一张真实照片',
+        imageUrl: null, isMe: true, source: 'wechat', isOffline: false,
+        msgType: 'real_image', time: getNowTime()
+      });
+      wxState.showPlusMenu = false;
+      window.render();
+      window.wxActions.scrollToBottom();
+
+      // 🌟 2. 后台静默上传到 R2，回填 imageUrl（不再 render，渲染已经用着 cache 里的 Base64）
       try {
-        window.actions.showToast('上传中…');
         const url = await window.uploadMediaToCloud(base64, 'webp');
-        const chat = store.chats.find(c => c.charId === wxState.activeChatId);
-        // 🌟 获取正确的马甲名字
-          // 🌟 抢救包：先找到当前聊天对象，再拿马甲，绝不报错！
-        const charObj = store.contacts.find(c => c.id === chat.charId);
-        const pId = chat.isGroup ? chat.boundPersonaId : (charObj?.boundPersonaId || store.personas[0].id);
-          const boundPersona = store.personas.find(p => p.id === pId) || store.personas[0];
-        if (chat) {
-          chat.messages.push({ id: Date.now(), sender: boundPersona.name, text: '发送了一张真实照片', imageUrl: url, isMe: true, source: 'wechat', isOffline: false, msgType: 'real_image', time: getNowTime() });
-          wxState.showPlusMenu = false; window.render(); window.wxActions.scrollToBottom();
+        if (url && typeof url === 'string' && url.startsWith('http')) {
+          const msg = chat.messages.find(m => m.id === msgId);
+          if (msg) {
+            msg.imageUrl = url;
+            // 触发一次保存（render 内会持久化 store），不重排不闪烁
+            if (window.DB) window.DB.set(JSON.parse(JSON.stringify(store))).catch(() => {});
+          }
+        } else {
+          window.actions.showToast('云端上传失败，仅本地可见，刷新后可能丢失');
         }
       } catch (e) {
         console.error('[uploadMediaToCloud] image message', e);
-        window.actions.showToast('上传失败，请重试');
+        window.actions.showToast('云端上传失败，仅本地可见，刷新后可能丢失');
       }
     });
     event.target.value = '';
@@ -2554,18 +2667,28 @@ if (oldMomentFreq > 0 && targetObj.autoMomentFreq === 0) {
   handleOfflineBgUpload: (event) => {
       const file = event.target.files[0]; if (!file) return;
       window.actions.compressImage(file, async (base64) => {
+          const chatId = wxState.activeChatId;
+          const fixedKey = `chat_offline_bg_${chatId}`;
+          const predicted = window.predictCloudUrl(fixedKey, 'webp');
+          await window.imageCache?.set(predicted, base64);
+          const chat = store.chats.find(c => c.charId === chatId);
+          const targetObj = chat.isGroup ? chat : store.contacts.find(c => c.id === chatId);
+          const old = targetObj.offlineBg;
+          targetObj.offlineBg = predicted;
+          window.render();
           try {
-              window.actions.showToast('上传中…');
-              const chatId = wxState.activeChatId;
-              const url = await window.uploadMediaToCloud(base64, 'webp', `chat_offline_bg_${chatId}`);
-              const chat = store.chats.find(c => c.charId === chatId);
-              const targetObj = chat.isGroup ? chat : store.contacts.find(c => c.id === chatId);
-              targetObj.offlineBg = url;
-              window.actions.showToast('线下专属背景已加载！');
-              window.render();
+              const url = await window.uploadMediaToCloud(base64, 'webp', fixedKey);
+              if (url && typeof url === 'string' && url.startsWith('http')) {
+                  targetObj.offlineBg = url;
+                  if (window.DB) window.DB.set(JSON.parse(JSON.stringify(store))).catch(() => {});
+              } else {
+                  targetObj.offlineBg = old; window.render();
+                  window.actions.showToast('云端上传失败');
+              }
           } catch (e) {
               console.error('[uploadMediaToCloud] offline bg', e);
-              window.actions.showToast('上传失败，请重试');
+              targetObj.offlineBg = old; window.render();
+              window.actions.showToast('云端上传失败');
           }
       });
       event.target.value = '';

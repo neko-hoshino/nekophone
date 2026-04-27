@@ -180,7 +180,7 @@ function npcAvatar(name, sizeClass = 'w-7 h-7', fontSize = '13px') {
 }
 
 function myAvatar(pAvatar, pName, sizeClass = 'w-7 h-7', fontSize = '13px') {
-  if (pAvatar) return `<img src="${pAvatar}" class="${sizeClass} rounded-full object-cover shrink-0" />`;
+  if (pAvatar) return `<img src="${window.getCachedImageSrc(pAvatar)}" class="${sizeClass} rounded-full object-cover shrink-0" />`;
   return npcAvatar(pName, sizeClass, fontSize);
 }
 
@@ -749,7 +749,7 @@ function renderCustomMissionModal() {
               ${contacts.map(c => {
                 const sel = form.selectedChars.includes(c.id);
                 const av  = c.avatar
-                  ? `<img src="${c.avatar}" class="w-5 h-5 rounded-full object-cover shrink-0" />`
+                  ? `<img src="${window.getCachedImageSrc(c.avatar)}" class="w-5 h-5 rounded-full object-cover shrink-0" />`
                   : npcAvatar(c.name, 'w-5 h-5', '9px');
                 return `
                 <button onclick="window.transActions.toggleCustomChar('${c.id}')"
@@ -1201,7 +1201,7 @@ function renderTerminal(player, pName, pAvatar, pId, title) {
         <div class="relative shrink-0 cursor-pointer group" onclick="document.getElementById('trans-avatar-upload').click()">
           <div class="rounded-xl overflow-hidden" style="width:72px;height:72px;border:2px solid rgba(88,212,245,0.5);box-shadow:0 0 12px rgba(88,212,245,0.3);">
             ${pAvatar
-              ? `<img src="${pAvatar}" class="w-full h-full object-cover" />`
+              ? `<img src="${window.getCachedImageSrc(pAvatar)}" class="w-full h-full object-cover" />`
               : `<div class="w-full h-full flex items-center justify-center text-2xl font-bold" style="background:#1c2d3d;color:#58d4f5;">${pName[0] || '?'}</div>`}
           </div>
           <div class="absolute inset-0 rounded-xl flex items-center justify-center opacity-0 group-active:opacity-100 transition-opacity" style="background:rgba(0,0,0,0.45);">
@@ -1325,7 +1325,7 @@ function renderForumDetail(pName, pAvatar, pId) {
   const postAv = isMe_post
     ? myAvatar(pAvatar, pName, 'w-8 h-8', '14px')
     : post.author_avatar
-      ? `<img src="${post.author_avatar}" class="w-8 h-8 rounded-full object-cover shrink-0" />`
+      ? `<img src="${window.getCachedImageSrc(post.author_avatar)}" class="w-8 h-8 rounded-full object-cover shrink-0" />`
       : npcAvatar(post.author_name, 'w-8 h-8', '14px');
 
   // ── 构造评论树 ──────────────────────────────────────────────────
@@ -1512,7 +1512,7 @@ function renderForum(pName, pAvatar, pId) {
           const avatarHtml = isMe
             ? myAvatar(pAvatar, pName, 'w-7 h-7')
             : p.author_avatar
-              ? `<img src="${p.author_avatar}" class="w-7 h-7 rounded-full object-cover shrink-0" />`
+              ? `<img src="${window.getCachedImageSrc(p.author_avatar)}" class="w-7 h-7 rounded-full object-cover shrink-0" />`
               : npcAvatar(p.author_name, 'w-7 h-7', '12px');
           const isMockPost = p.id.startsWith('mock-');
           const liked = state.likedPosts.has(p.id);
@@ -1619,7 +1619,7 @@ function renderRanking(player, pName, pAvatar, pId) {
   function avatarForRank(r, sizeClass, fontSize) {
     const isMe = r.id === pId;
     if (isMe) return myAvatar(pAvatar, pName, sizeClass, fontSize);
-    if (r.avatar) return `<img src="${r.avatar}" class="${sizeClass} rounded-full object-cover shrink-0" />`;
+    if (r.avatar) return `<img src="${window.getCachedImageSrc(r.avatar)}" class="${sizeClass} rounded-full object-cover shrink-0" />`;
     return npcAvatar(r.name, sizeClass, fontSize);
   }
 
@@ -1939,7 +1939,7 @@ function renderMissionModal(player) {
               ${contacts.map(c => {
                 const sel = selected.includes(c.id);
                 const av  = c.avatar
-                  ? `<img src="${c.avatar}" class="w-5 h-5 rounded-full object-cover shrink-0" />`
+                  ? `<img src="${window.getCachedImageSrc(c.avatar)}" class="w-5 h-5 rounded-full object-cover shrink-0" />`
                   : npcAvatar(c.name, 'w-5 h-5', '9px');
                 return `
                 <button onclick="window.transActions.toggleMissionChar('${c.id}')"
@@ -2114,17 +2114,29 @@ window.transActions = {
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async ev => {
+      const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+      const fixedKey = 'trans_player_avatar';
+      const predicted = window.predictCloudUrl(fixedKey, ext);
+      await window.imageCache?.set(predicted, ev.target.result);
+      const player = store.transData.player;
+      const old = player.avatar;
+      player.avatar = predicted;
+      window.render();
       try {
-        window.actions.showToast('上传中…');
-        const ext = (file.name.split('.').pop() || 'png').toLowerCase();
-        const url = await window.uploadMediaToCloud(ev.target.result, ext, 'trans_player_avatar');
-        store.transData.player.avatar = url;
-        window.actions.showToast('头像已更新');
-        syncPlayerToCloud();
-        window.render();
+        const url = await window.uploadMediaToCloud(ev.target.result, ext, fixedKey);
+        if (url && typeof url === 'string' && url.startsWith('http')) {
+          player.avatar = url;
+          syncPlayerToCloud();
+          if (window.DB) window.DB.set(JSON.parse(JSON.stringify(store))).catch(() => {});
+          window.actions.showToast('头像已更新');
+        } else {
+          player.avatar = old; window.render();
+          window.actions.showToast('云端上传失败');
+        }
       } catch (err) {
         console.error('[uploadMediaToCloud] transmigration avatar', err);
-        window.actions.showToast('上传失败，请重试');
+        player.avatar = old; window.render();
+        window.actions.showToast('云端上传失败');
       }
     };
     reader.readAsDataURL(file);

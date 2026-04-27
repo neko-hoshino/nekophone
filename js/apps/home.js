@@ -135,13 +135,24 @@ if (!window.homeActions) {
     updateAvatar: (e) => {
       const file = e.target.files[0]; if(!file) return;
       window.actions.compressImage(file, async (base64) => {
+        const predicted = window.predictCloudUrl('user_avatar', 'webp');
+        await window.imageCache?.set(predicted, base64);
+        const old = store.personas[0].avatar;
+        store.personas[0].avatar = predicted;
+        window.homeActions.doRender();
         try {
-          window.actions.showToast('上传中…');
           const url = await window.uploadMediaToCloud(base64, 'webp', 'user_avatar');
-          store.personas[0].avatar = url; window.homeActions.doRender();
+          if (url && typeof url === 'string' && url.startsWith('http')) {
+            store.personas[0].avatar = url;
+            if (window.DB) window.DB.set(JSON.parse(JSON.stringify(store))).catch(() => {});
+          } else {
+            store.personas[0].avatar = old; window.homeActions.doRender();
+            window.actions.showToast('云端上传失败');
+          }
         } catch (err) {
           console.error('[uploadMediaToCloud] home avatar', err);
-          window.actions.showToast('上传失败，请重试');
+          store.personas[0].avatar = old; window.homeActions.doRender();
+          window.actions.showToast('云端上传失败');
         }
       });
       e.target.value = '';
@@ -151,13 +162,24 @@ if (!window.homeActions) {
     uploadPolaroid: (e) => {
         const file = e.target.files[0]; if(!file) return;
         window.actions.compressImage(file, async (base64) => {
+          const predicted = window.predictCloudUrl('home_polaroid', 'webp');
+          await window.imageCache?.set(predicted, base64);
+          const old = store.homePolaroidImg;
+          store.homePolaroidImg = predicted;
+          window.homeActions.doRender();
           try {
-            window.actions.showToast('上传中…');
             const url = await window.uploadMediaToCloud(base64, 'webp', 'home_polaroid');
-            store.homePolaroidImg = url; window.homeActions.doRender();
+            if (url && typeof url === 'string' && url.startsWith('http')) {
+              store.homePolaroidImg = url;
+              if (window.DB) window.DB.set(JSON.parse(JSON.stringify(store))).catch(() => {});
+            } else {
+              store.homePolaroidImg = old; window.homeActions.doRender();
+              window.actions.showToast('云端上传失败');
+            }
           } catch (err) {
             console.error('[uploadMediaToCloud] polaroid', err);
-            window.actions.showToast('上传失败，请重试');
+            store.homePolaroidImg = old; window.homeActions.doRender();
+            window.actions.showToast('云端上传失败');
           }
         });
         e.target.value = '';
@@ -575,13 +597,13 @@ export function renderHomeApp(store) {
   const my = (store.personas && store.personas.length > 0) ? store.personas[0] : { name: '', avatar: '' };
   let avatarHtml = `<div class="w-full h-full flex items-center justify-center text-4xl">${my.avatar}</div>`;
   if (my.avatar && (my.avatar.startsWith('http') || my.avatar.startsWith('data:'))) {
-    avatarHtml = `<img src="${my.avatar}" class="w-full h-full object-cover" />`;
+    avatarHtml = `<img src="${window.getCachedImageSrc(my.avatar)}" class="w-full h-full object-cover" />`;
   }
 
   const ap = store.appearance || {};
   const activeBg = ap.wallpaper || store.wallpaper;
   const isDark = ap.darkMode || false; 
-  const bgStyle = activeBg ? `background-image: url('${activeBg}'); background-size: cover; background-position: center;` : `background-color: #dbeafe;`;
+  const bgStyle = activeBg ? `background-image: url('${window.getCachedImageSrc(activeBg)}'); background-size: cover; background-position: center;` : `background-color: #dbeafe;`;
 
   const txtMain = isDark ? 'text-white drop-shadow-md' : 'text-gray-800';
   const inputBg = isDark ? 'bg-black/30 border-black/20 text-white placeholder-white/40' : 'bg-white/20 border-white/20 text-gray-800 placeholder-gray-800/40';
@@ -596,7 +618,7 @@ export function renderHomeApp(store) {
               </div>
               <div class="absolute top-0 right-4 w-full h-full bg-[#fdfdfd] rounded-sm shadow-xl border border-white/60 transform rotate-3 flex flex-col p-1.5 z-10 transition-transform group-hover:rotate-6 duration-300">
                   <div class="w-full flex-1 bg-gray-100 rounded-sm overflow-hidden flex items-center justify-center relative">
-                      ${polaroidImg ? `<img src="${polaroidImg}" class="w-full h-full object-cover" />` : `<i data-lucide="image-plus" class="w-6 h-6 text-gray-300"></i>`}
+                      ${polaroidImg ? `<img src="${window.getCachedImageSrc(polaroidImg)}" class="w-full h-full object-cover" />` : `<i data-lucide="image-plus" class="w-6 h-6 text-gray-300"></i>`}
                       <div class="absolute inset-0 shadow-[inset_0_2px_10px_rgba(0,0,0,0.1)] pointer-events-none"></div>
                   </div>
                   <div class="h-7 flex items-center justify-center"><span class="text-[9px] font-cursive text-gray-500 opacity-70 tracking-widest uppercase">Memories</span></div>
@@ -805,7 +827,7 @@ export function renderHomeApp(store) {
                               </div>
                               <div class="flex items-center w-full space-x-2 px-1">
                                   <div class="w-8 h-8 rounded-full overflow-hidden border ${isDark?'border-white/20 bg-black/40':'border-gray-200 bg-white'} flex items-center justify-center cursor-pointer shadow-sm shrink-0 active:scale-95 transition-transform" onclick="window.homeActions.openCompanionSelect()">
-                                      ${compChar ? `<img src="${compChar.avatar}" class="w-full h-full object-cover grayscale-[20%]">` : `<i data-lucide="plus" class="w-4 h-4 ${isDark?'text-white/40':'text-gray-400'}"></i>`}
+                                      ${compChar ? `<img src="${window.getCachedImageSrc(compChar.avatar)}" class="w-full h-full object-cover grayscale-[20%]">` : `<i data-lucide="plus" class="w-4 h-4 ${isDark?'text-white/40':'text-gray-400'}"></i>`}
                                   </div>
                                   <div class="flex-1 ${isDark?'bg-[#262628] text-white':'bg-[#E9E9EB] text-gray-800'} rounded-2xl rounded-tl-[4px] px-3 py-1.5 relative shadow-sm flex items-center justify-start min-w-0">
                                       <span class="text-[10px] leading-snug font-medium ${window.homeState.isGeneratingReaction ? 'animate-pulse' : ''} line-clamp-1 sm:line-clamp-2 w-full">${store.musicReaction || (compChar ? '正在陪你听歌...' : '点击选人')}</span>
@@ -905,7 +927,7 @@ export function renderHomeApp(store) {
 
                     ${(store.contacts || []).map(c => `
                         <div class="flex items-center p-3 bg-white rounded-xl shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-transform" onclick="window.homeActions.selectCompanion('${c.id}')">
-                            <img src="${c.avatar}" class="w-10 h-10 rounded-full object-cover mr-4">
+                            <img src="${window.getCachedImageSrc(c.avatar)}" class="w-10 h-10 rounded-full object-cover mr-4">
                             <span class="font-bold text-[14px] text-gray-800">${c.name}</span>
                         </div>
                     `).join('')}

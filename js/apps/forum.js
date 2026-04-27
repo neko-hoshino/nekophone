@@ -97,9 +97,9 @@ export const renderForumApp = (store) => {
 
     // 🌟 修复1：判定如果是当前用户（displayName），就渲染用户的真实头像
     const getCommentAvatar = (author) => {
-        if (author === displayName) return displayAvatar.length > 10 ? `<img src="${displayAvatar}" class="w-full h-full object-cover">` : displayAvatar;
+        if (author === displayName) return displayAvatar.length > 10 ? `<img src="${window.getCachedImageSrc(displayAvatar)}" class="w-full h-full object-cover">` : displayAvatar;
         const char = store.contacts?.find(c => c.name === author);
-        if (char && char.avatar) return char.avatar.length > 10 ? `<img src="${char.avatar}" class="w-full h-full object-cover">` : char.avatar; 
+        if (char && char.avatar) return char.avatar.length > 10 ? `<img src="${window.getCachedImageSrc(char.avatar)}" class="w-full h-full object-cover">` : char.avatar;
         return `<img src="https://api.dicebear.com/7.x/notionists-neutral/svg?seed=${encodeURIComponent(author)}&backgroundColor=ffffff" class="w-full h-full object-cover border border-gray-100">`;
     };
 
@@ -610,10 +610,11 @@ ${combos}
         
         deletePost: (postId) => {
             if (confirm("确定要删除这条帖子吗？")) {
-                // 🌟 云端 GC：清理帖子真实图片
+                // 🌟 云端 GC + 本地缓存清理：帖子真实图片
                 const target = store.forumPosts.find(p => p.id === postId);
                 (target?.mediaList || []).forEach(item => {
                     if (item?.type === 'real_image' && item.url) window.deleteMediaFromCloud(item.url);
+                    if (item?.id) window.imageCache?.delete(item.id);
                 });
                 store.forumPosts = store.forumPosts.filter(p => p.id !== postId);
                 const bIdx = store.forumBookmarks.indexOf(postId);
@@ -635,10 +636,11 @@ ${combos}
         deleteForum: (forumId) => {
             if (forumId === 'default') return window.actions?.showToast('默认频道不可删除');
             if (confirm("确定要删除这个频道吗？所有数据都将被永久清空！")) {
-                // 🌟 云端 GC：批量清理频道下所有帖子的真实图片
+                // 🌟 云端 GC + 本地缓存清理：频道下所有帖子的真实图片
                 store.forumPosts.filter(p => p.forumId === forumId).forEach(p => {
                     (p.mediaList || []).forEach(item => {
                         if (item?.type === 'real_image' && item.url) window.deleteMediaFromCloud(item.url);
+                        if (item?.id) window.imageCache?.delete(item.id);
                     });
                 });
                 store.forums = store.forums.filter(f => f.id !== forumId);
@@ -847,7 +849,10 @@ ${combos}
                         try {
                             window.actions?.showToast('上传中…');
                             const url = await window.uploadMediaToCloud(base64, 'webp');
-                            window.forumState.draft.mediaList.push({ type: 'real_image', url });
+                            // 🌟 媒体项分配独立 id 用作 cache 键，未来渲染无 flicker
+                            const mediaId = `forum_media_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+                            window.forumState.draft.mediaList.push({ id: mediaId, type: 'real_image', url });
+                            if (base64) window.imageCache?.set(mediaId, base64).catch(() => {});
                             window.render();
                         } catch (err) {
                             console.error('[uploadMediaToCloud] forum image', err);
@@ -909,7 +914,7 @@ ${combos}
             const gridClass = covers.length === 2 ? 'grid grid-cols-2 gap-2' : 'w-[65%] max-w-[200px]';
             const items = covers.map(m => {
                 let inner = '';
-                if (m.type === 'real_image') inner = `<img src="${m.url}" class="w-full h-full object-cover" />`;
+                if (m.type === 'real_image') inner = `<img src="${(m.id && window.imageCache?.getSync?.(m.id)) || m.url}" class="w-full h-full object-cover" />`;
                 else if (m.type === 'virtual_image') inner = `<div class="absolute inset-0 bg-gray-100 flex flex-col items-center justify-center text-gray-400 p-2 text-center"><i data-lucide="camera" class="w-6 h-6 mb-1"></i><span class="text-[10px] leading-tight line-clamp-2">${m.desc||'照片'}</span></div>`;
                 else if (m.type === 'virtual_video') inner = `<div class="absolute inset-0 bg-gray-100 flex flex-col items-center justify-center text-gray-400 p-2 text-center"><i data-lucide="video" class="w-6 h-6 mb-1 text-blue-400"></i><span class="text-[10px] leading-tight line-clamp-2">${m.desc||'视频'}</span></div>`;
                 return `<div class="relative w-full aspect-square rounded-[8px] overflow-hidden border border-gray-100 shadow-sm">${inner}</div>`;
@@ -917,7 +922,7 @@ ${combos}
             mediaHtml = `<div class="${gridClass} mt-2 mb-3">${items}</div>`;
         }
 
-        const avatarHtml = post.avatar.length > 10 ? `<img src="${post.avatar}" class="w-full h-full object-cover">` : post.avatar;
+        const avatarHtml = post.avatar.length > 10 ? `<img src="${window.getCachedImageSrc(post.avatar)}" class="w-full h-full object-cover">` : post.avatar;
         const displayTitle = post.title || post.content; 
 
         return `
@@ -999,10 +1004,10 @@ ${combos}
             contentHtml = `
                 <div class="absolute top-8 left-4 z-30 cursor-pointer active:scale-90 p-1 text-white drop-shadow-md" onclick="window.forumActions.goBack()"><i data-lucide="chevron-left" class="w-8 h-8"></i></div>
                 <div id="forum-me-scroll" class="flex-1 overflow-y-auto bg-[#f4f5f7] pb-24 hide-scrollbar relative">
-                    <div class="w-full h-44 bg-gradient-to-br from-blue-50 to-indigo-100 relative cursor-pointer group" onclick="document.getElementById('forum-bg-upload').click()">${profile.bgUrl ? `<img src="${profile.bgUrl}" class="w-full h-full object-cover" />` : ''}</div>
+                    <div class="w-full h-44 bg-gradient-to-br from-blue-50 to-indigo-100 relative cursor-pointer group" onclick="document.getElementById('forum-bg-upload').click()">${profile.bgUrl ? `<img src="${window.getCachedImageSrc(profile.bgUrl)}" class="w-full h-full object-cover" />` : ''}</div>
                     <div class="bg-white px-5 pb-6 border-b border-gray-100 shadow-sm relative -mt-4 rounded-t-[20px]">
                         <div class="relative flex items-end mb-4">
-                            <div class="w-20 h-20 bg-white rounded-full cursor-pointer relative z-10 -mt-10 shrink-0 shadow-sm border-2 border-white" onclick="document.getElementById('forum-avatar-upload').click()"><img src="${displayAvatar}" class="w-full h-full rounded-full object-cover bg-gray-50" /></div>
+                            <div class="w-20 h-20 bg-white rounded-full cursor-pointer relative z-10 -mt-10 shrink-0 shadow-sm border-2 border-white" onclick="document.getElementById('forum-avatar-upload').click()"><img src="${window.getCachedImageSrc(displayAvatar)}" class="w-full h-full rounded-full object-cover bg-gray-50" /></div>
                             <div class="flex flex-col flex-1 ml-4 z-10 pb-1">
                                 <input type="text" value="${displayName}" onchange="window.forumActions.saveName(this.value)" class="bg-transparent text-[20px] font-black text-gray-900 outline-none w-full placeholder-gray-400 -ml-1 transition-all focus:bg-gray-50 focus:px-2 rounded-lg" placeholder="你的昵称">
                                 <input type="text" value="${profile.signature}" onchange="window.forumActions.saveSignature(this.value)" class="bg-transparent text-[12px] text-gray-500 mt-0.5 outline-none w-full placeholder-gray-400 -ml-1 transition-all focus:bg-gray-50 focus:px-2 rounded-lg" placeholder="写一句有个性的签名吧...">
@@ -1047,7 +1052,7 @@ ${combos}
             let fullMediaHtml = '';
             if (post.mediaList && post.mediaList.length > 0) {
                 const items = post.mediaList.map(m => {
-                    if (m.type === 'real_image') return `<img src="${m.url}" class="w-full mt-3 object-cover rounded-xl shadow-sm border border-gray-100" />`;
+                    if (m.type === 'real_image') return `<img src="${(m.id && window.imageCache?.getSync?.(m.id)) || m.url}" class="w-full mt-3 object-cover rounded-xl shadow-sm border border-gray-100" />`;
                     const isImg = m.type === 'virtual_image';
                     return `
                     <div class="relative w-full min-h-[12rem] bg-white cursor-pointer select-none rounded-xl border border-gray-200 overflow-hidden shadow-sm mt-3" onclick="const overlay = this.querySelector('.img-overlay'); overlay.classList.toggle('opacity-0'); overlay.classList.toggle('pointer-events-none');">
@@ -1125,7 +1130,7 @@ ${combos}
                 `}).join('');
             }
 
-            const avatarHtml = post.avatar.length > 10 ? `<img src="${post.avatar}" class="w-full h-full object-cover">` : post.avatar;
+            const avatarHtml = post.avatar.length > 10 ? `<img src="${window.getCachedImageSrc(post.avatar)}" class="w-full h-full object-cover">` : post.avatar;
             const isBookmarked = store.forumBookmarks.includes(post.id);
 
             detailViewHtml = `
@@ -1234,7 +1239,7 @@ ${combos}
                 const lastMsg = fChat && fChat.messages.length > 0 ? fChat.messages[fChat.messages.length - 1] : null;
                 return `
                     <div class="flex items-center space-x-3 p-4 active:bg-gray-50 cursor-pointer border-b border-gray-50 transition-colors" onclick="window.forumActions.openForumChat('${char.id}')">
-                        <img src="${char.avatar}" class="w-12 h-12 rounded-full object-cover shrink-0 border border-gray-100 shadow-sm">
+                        <img src="${window.getCachedImageSrc(char.avatar)}" class="w-12 h-12 rounded-full object-cover shrink-0 border border-gray-100 shadow-sm">
                         <div class="flex flex-col flex-1 overflow-hidden">
                            <div class="flex justify-between items-center"><span class="text-[15px] font-black text-gray-800 truncate">${char.name}</span></div>
                            <span class="text-[13px] text-gray-500 mt-1 truncate">${lastMsg ? lastMsg.text : '暂无反应'}</span>
@@ -1277,7 +1282,7 @@ ${combos}
                     return `
                         <div class="bg-white rounded-[20px] p-5 shadow-sm border border-gray-100 mb-4 cursor-pointer active:scale-[0.98] transition-transform" onclick="window.forumActions.openStrangerDetail('${s.id}')">
                             <div class="flex items-start space-x-4">
-                                <img src="${s.avatar}" class="w-14 h-14 rounded-full object-cover shrink-0 border border-gray-100 shadow-sm bg-gray-50">
+                                <img src="${window.getCachedImageSrc(s.avatar)}" class="w-14 h-14 rounded-full object-cover shrink-0 border border-gray-100 shadow-sm bg-gray-50">
                                 <div class="flex flex-col flex-1">
                                     <div class="text-[16px] font-black text-gray-900 mb-1 select-none">${s.name}</div>
                                     <div class="flex flex-wrap mb-3">${tagsHtml}</div>
@@ -1352,7 +1357,7 @@ ${combos}
                     </div>
                     <div class="flex-1 overflow-y-auto hide-scrollbar px-5 pb-32 -mt-10 z-10">
                         <div class="flex flex-col items-center mb-6">
-                            <img src="${s.avatar}" class="w-24 h-24 rounded-full object-cover border-4 border-white shadow-md bg-white">
+                            <img src="${window.getCachedImageSrc(s.avatar)}" class="w-24 h-24 rounded-full object-cover border-4 border-white shadow-md bg-white">
                             <span class="text-[22px] font-black text-gray-900 mt-3">${s.name}</span>
                             <div class="flex flex-wrap justify-center mt-3 gap-1.5 max-w-[80%]">${[...s.baseTags, ...s.mutatedTags].map(t => `<span class="bg-indigo-100/50 text-indigo-600 text-[11px] font-extrabold px-2.5 py-1 rounded-full border border-indigo-100">#${t}</span>`).join('')}</div>
                         </div>
@@ -1381,7 +1386,7 @@ ${combos}
                 const avatar = isMe ? displayAvatar : char.avatar;
                 return `
                     <div class="flex items-start mb-4 ${isMe ? 'flex-row-reverse' : ''}">
-                        <img src="${avatar}" class="w-9 h-9 rounded-full object-cover shrink-0 border border-gray-100 shadow-sm ${isMe ? 'ml-3' : 'mr-3'}">
+                        <img src="${window.getCachedImageSrc(avatar)}" class="w-9 h-9 rounded-full object-cover shrink-0 border border-gray-100 shadow-sm ${isMe ? 'ml-3' : 'mr-3'}">
                         <div class="flex flex-col ${isMe ? 'items-end' : 'items-start'} max-w-[70%]">
                             <div class="text-[11px] text-gray-400 mb-1 mx-1">${m.sender}</div>
                             <div class="px-4 py-2.5 rounded-2xl text-[14px] leading-relaxed shadow-sm ${isMe ? 'bg-indigo-500 text-white rounded-tr-sm' : 'bg-white border border-gray-100 text-gray-800 rounded-tl-sm'}">
@@ -1477,7 +1482,7 @@ ${combos}
             let name = chat.isGroup ? chat.groupName : (char ? char.name : '未知');
             let avatarHtml = chat.isGroup 
                 ? `<div class="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center shrink-0 border border-gray-100"><i data-lucide="users" class="w-5 h-5 text-gray-500"></i></div>` 
-                : `<img src="${char?.avatar || 'https://api.dicebear.com/7.x/notionists-neutral/svg?seed=user'}" class="w-10 h-10 rounded-full object-cover shrink-0 border border-gray-100">`;
+                : `<img src="${window.getCachedImageSrc(char?.avatar || 'https://api.dicebear.com/7.x/notionists-neutral/svg?seed=user')}" class="w-10 h-10 rounded-full object-cover shrink-0 border border-gray-100">`;
             return `
                 <div class="flex items-center space-x-3 p-3 active:bg-gray-50 cursor-pointer rounded-xl transition-colors" onclick="window.forumActions.shareToChat('${chat.charId}')">
                     ${avatarHtml}

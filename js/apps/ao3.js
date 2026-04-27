@@ -88,7 +88,7 @@ const buildChapterTask = (fic, chapterIdx, contextText, isReroll, requirement = 
     return `${action}
 ${tagBlock}${reqBlock}
 ${ctxLine}
-【写作要求】：人物 OOC 绝对禁止；${isReroll ? '重新撰写' : '续写'} 300-500 字的连贯正文；剧情推动必须符合上述全部 Tag。
+【写作要求】：人物 OOC 绝对禁止；${isReroll ? '重新撰写' : '续写'} 500 字以上的连贯正文；剧情推动必须符合上述全部 Tag。
 ${noThink}`;
 };
 

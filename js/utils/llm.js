@@ -1,5 +1,7 @@
 // js/utils/llm.js
 import { store } from '../store.js';
+// 🌟 共享图片缓存：发图时已写入；这里组装 prompt 时优先用 cache，命中 0ms
+import { ImageCacheDB } from './imageCacheDB.js';
 
 export async function cloudFetch(body) {
     const pwd = localStorage.getItem('neko_server_pwd');
@@ -369,6 +371,30 @@ You are now operating in a private, fictional, and explicitly immersive roleplay
   
   let messages = [{ role: 'system', content: identityPrompt.trim() }];
 
+  // 🌟 视觉预热：先按 msg.id 查 imageCache（用户发图时已存），未命中的再 fetch URL
+  // 命中 cache 的图直接 0ms 返回 Base64，给 AI 稳定识图；fetch 回来的图顺手回填到 cache
+  const toFetch = []; // { id, url }
+  for (const m of recentHistory) {
+      if (m.msgType !== 'real_image' || !m.imageUrl) continue;
+      if (ImageCacheDB.getSync(m.id)) continue; // 缓存已就位
+      if (typeof m.imageUrl === 'string' && m.imageUrl.startsWith('http')) {
+          toFetch.push({ id: m.id, url: m.imageUrl });
+      }
+  }
+  if (toFetch.length > 0) {
+      // 同一 URL 去重（理论上每条消息独立，但防御）
+      const seen = new Set();
+      const dedup = toFetch.filter(t => seen.has(t.url) ? false : (seen.add(t.url), true));
+      await Promise.all(dedup.map(async ({ id, url }) => {
+          try {
+              const b64 = await window.urlToBase64ForAI(url);
+              if (b64 && typeof b64 === 'string' && b64.startsWith('data:')) {
+                  await ImageCacheDB.set(id, b64); // 顺手持久化，下次直接命中
+              }
+          } catch (_) {}
+      }));
+  }
+
   // 🌟 3. 装填聊天记录
   const fmtTs = timeAware ? (ts, t) => `[${window.formatFullTimeForAI(ts, t)}] ` : () => '';
   recentHistory.forEach(m => {
@@ -416,9 +442,11 @@ You are now operating in a private, fictional, and explicitly immersive roleplay
             }
         }
     }
-    // 💡 处理照片
+    // 💡 处理照片：优先用 ImageCacheDB 里的 Base64（恢复识图能力），缺失时降级回原 URL
     else if (m.msgType === 'real_image' && m.imageUrl) {
-        msgContent = [{ type: "text", text: m.text }, { type: "image_url", image_url: { url: m.imageUrl } }];
+        const cached = ImageCacheDB.getSync(m.id);
+        const finalUrl = cached || m.imageUrl;
+        msgContent = [{ type: "text", text: m.text }, { type: "image_url", image_url: { url: finalUrl } }];
     }
     // 🌟 💡 论坛帖子卡片透视引擎：自动抓取完整原帖喂给 AI
     else if (m.msgType === 'forum_post_card' && m.cardData && m.cardData.postId) {

@@ -510,17 +510,27 @@ You are now operating in a private, fictional, and explicitly immersive roleplay
         handleDrBgUpload: (e) => {
             const file = e.target.files[0]; if (!file) return;
             window.actions.compressImage(file, async (base64) => {
+                const charId = window.drState.selectedCharId;
+                const fixedKey = `darkroom_bg_${charId}`;
+                const predicted = window.predictCloudUrl(fixedKey, 'webp');
+                await window.imageCache?.set(predicted, base64);
+                const char = store.contacts.find(c => c.id === charId);
+                const old = char.drBg;
+                char.drBg = predicted;
+                window.render();
                 try {
-                    window.actions.showToast('上传中…');
-                    const charId = window.drState.selectedCharId;
-                    const url = await window.uploadMediaToCloud(base64, 'webp', `darkroom_bg_${charId}`);
-                    const char = store.contacts.find(c => c.id === charId);
-                    char.drBg = url;
-                    if (window.actions?.saveStore) window.actions.saveStore();
-                    window.render();
+                    const url = await window.uploadMediaToCloud(base64, 'webp', fixedKey);
+                    if (url && typeof url === 'string' && url.startsWith('http')) {
+                        char.drBg = url;
+                        if (window.actions?.saveStore) window.actions.saveStore();
+                    } else {
+                        char.drBg = old; window.render();
+                        window.actions.showToast('云端上传失败');
+                    }
                 } catch (err) {
                     console.error('[uploadMediaToCloud] darkroom bg', err);
-                    window.actions.showToast('上传失败，请重试');
+                    char.drBg = old; window.render();
+                    window.actions.showToast('云端上传失败');
                 }
             }, false);
             e.target.value = '';
@@ -574,7 +584,7 @@ export function renderDarkroomApp(store) {
                 <div class="grid grid-cols-2 gap-4">
                     ${store.contacts.map(c => `
                         <div class="rounded-2xl p-4 flex flex-col items-center justify-center cursor-pointer active:scale-95 transition-transform" style="background-color: rgba(30,30,30,0.85) !important; border: 1px solid rgba(255,255,255,0.1) !important;" onclick="window.drActions.selectChar('${c.id}')">
-                            <img src="${c.avatar}" class="w-16 h-16 rounded-full object-cover mb-3 shadow-lg border border-white/20 grayscale-[20%]">
+                            <img src="${window.getCachedImageSrc(c.avatar)}" class="w-16 h-16 rounded-full object-cover mb-3 shadow-lg border border-white/20 grayscale-[20%]">
                             <span class="text-white font-bold text-[14px] tracking-wider font-serif drop-shadow-md">${c.name}</span>
                         </div>
                     `).join('')}
@@ -599,7 +609,7 @@ export function renderDarkroomApp(store) {
 
             <div id="dr-setup-scroll" class="flex-1 overflow-y-auto p-6 hide-scrollbar flex flex-col">
                 <div class="flex items-center space-x-4 mb-8">
-                    <img src="${char.avatar}" class="w-14 h-14 rounded-xl object-cover border border-white/20 grayscale-[20%]">
+                    <img src="${window.getCachedImageSrc(char.avatar)}" class="w-14 h-14 rounded-xl object-cover border border-white/20 grayscale-[20%]">
                     <div>
                         <div class="text-white font-bold text-[16px] font-serif tracking-wider mb-1 drop-shadow-md">${char.name}</div>
                         <div class="text-white/60 text-[11px] uppercase tracking-widest drop-shadow-md">Lead Actor</div>
@@ -682,7 +692,7 @@ export function renderDarkroomApp(store) {
         ` : '';
 
         return `
-          <div class="dr-container absolute inset-0 w-full h-full flex flex-col font-serif z-[60] ${state.noAnimate ? '' : 'animate-in slide-in-from-bottom-4 duration-300'}" style="background: ${bgUrl ? `url('${bgUrl}') center/cover no-repeat` : '#111111'} !important;">
+          <div class="dr-container absolute inset-0 w-full h-full flex flex-col font-serif z-[60] ${state.noAnimate ? '' : 'animate-in slide-in-from-bottom-4 duration-300'}" style="background: ${bgUrl ? `url('${window.getCachedImageSrc(bgUrl)}') center/cover no-repeat` : '#111111'} !important;">
             
             <style>
               .dr-dialogue { color: ${char.drDialogueColor || '#d4b856'} !important; font-family: inherit; }
@@ -787,7 +797,7 @@ export function renderDarkroomApp(store) {
                           <div class="flex items-center justify-between border border-white/10 p-3 rounded-xl shadow-sm" style="background-color: #222222 !important;">
                              <div class="flex items-center space-x-3">
                                 <div class="w-10 h-10 rounded-lg bg-white/5 border border-white/10 overflow-hidden flex items-center justify-center relative cursor-pointer" onclick="document.getElementById('dr-bg-upload').click()">
-                                   ${char.drBg ? `<img src="${char.drBg}" class="w-full h-full object-cover">` : `<i data-lucide="plus" class="text-white/40"></i>`}
+                                   ${char.drBg ? `<img src="${window.getCachedImageSrc(char.drBg)}" class="w-full h-full object-cover">` : `<i data-lucide="plus" class="text-white/40"></i>`}
                                 </div>
                                 <span class="text-[12px] font-bold text-white/60">${char.drBg ? '已设置专属背景' : '默认纯黑背景'}</span>
                              </div>

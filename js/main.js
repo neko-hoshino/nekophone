@@ -14,6 +14,7 @@ import { renderBloggerApp } from './apps/blogger.js';
 import { renderAo3App } from './apps/ao3.js';
 import { renderDarkroomApp } from './apps/darkroom.js';
 import { renderTransmigrationApp } from './apps/transmigration.js';
+import { ImageCacheDB } from './utils/imageCacheDB.js';
 
 // ================= 🌟 召唤 Supabase 数据库接线员 =================
 // 直接通过 ESM 引入官方客户端
@@ -232,7 +233,7 @@ window.actions.notify = (title, text, avatarUrl) => {
   
   const isImageAvatar = (avatarUrl && (avatarUrl.startsWith('http') || avatarUrl.startsWith('data:')));
   const avatarImgHtml = isImageAvatar 
-    ? `<img src="${avatarUrl}" class="w-11 h-11 rounded-[14px] mr-3 object-cover shadow-sm border border-gray-100" />`
+    ? `<img src="${window.getCachedImageSrc(avatarUrl)}" class="w-11 h-11 rounded-[14px] mr-3 object-cover shadow-sm border border-gray-100" />`
     : `<div class="w-11 h-11 rounded-[14px] mr-3 bg-gray-100 flex items-center justify-center text-gray-400 font-bold border border-gray-200 shadow-sm text-[12px]">消息</div>`;
 
   banner.innerHTML = `
@@ -407,15 +408,40 @@ window.startAutoBackup = function() {
     }, 15 * 60 * 1000);
 };
 // ===============================================================
-// ================= 🌟 AI 专属的视觉恢复魔法 =================
+// ================= 🌟 缓存助手：fixedKey 上传 / 渲染优先 =================
+// 预测 fixedKey 上传到 R2 的 URL（不带 ?t= 防缓存戳）
+// 必须与 uploadMediaToCloud 内部 fileName 拼装规则保持一致
+window.predictCloudUrl = function(fixedKey, fileExt = 'webp') {
+    const deviceId = localStorage.getItem('neko_device_id') || 'unknown';
+    return `https://pub-0e37c842dc044e1ba26eb187300cb843.r2.dev/media/trv_${deviceId}_${fixedKey}.${fileExt}`;
+};
+
+// 渲染优先：cache 命中→Base64（无 flicker），缺失→原 URL
+// 适用于 fixedKey 槽位（壁纸/头像等）。聊天图片用 msg.id 键，仍用 imageCache.getSync(msg.id)
+window.getCachedImageSrc = function(url) {
+    if (!url || typeof url !== 'string') return url || '';
+    const key = url.split('?')[0];
+    return window.imageCache?.getSync?.(key) || url;
+};
+// ===============================================================
+
+// ================= 🌟 AI 专属的视觉恢复魔法 (CORS 破壁版) =================
 window.urlToBase64ForAI = async function(url) {
-    if (!url || !url.startsWith('http')) return url; // 如果本来就不是链接，直接返回
+    if (!url || !url.startsWith('http')) return url; 
     try {
-        const response = await fetch(url);
+        // 🌟 核心魔法：加上 mode 和 cache 参数，强行破除浏览器本地缓存的幽灵！
+        // 如果 url 里没有带时间戳，再手动给它挂一个随机数骗过缓存
+        const fetchUrl = url.includes('?t=') ? url : `${url}?bypass=${Date.now()}`;
+        
+        const response = await fetch(fetchUrl, {
+            mode: 'cors',       // 明确声明我要跨域
+            cache: 'no-cache'   // 警告浏览器：不许用缓存，必须去服务器问！
+        });
+        
         const blob = await response.blob();
         return new Promise((resolve) => {
             const reader = new FileReader();
-            reader.onloadend = () => resolve(reader.result); // 瞬间变成 Base64 给 AI 吃
+            reader.onloadend = () => resolve(reader.result); 
             reader.readAsDataURL(blob);
         });
     } catch (e) {
@@ -690,7 +716,7 @@ function render() {
   if (ap.interfaceBg && store.currentApp !== null) {
     fontCss += `
       #phone-container {
-         background: url('${ap.interfaceBg}') center/cover no-repeat !important;
+         background: url('${window.getCachedImageSrc(ap.interfaceBg)}') center/cover no-repeat !important;
       }
       #trans-app-screen, #trans-app-screen * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
       #trans-app-screen { background: #0d1117 !important; background-image: none !important; }
@@ -722,7 +748,7 @@ function render() {
       #phone-container > div > div.pt-12.pb-3, 
       #phone-container > div > div.pt-8.pb-3,
       .mc-topbar {
-         background: url('${ap.topBarBg}') center/cover no-repeat !important;
+         background: url('${window.getCachedImageSrc(ap.topBarBg)}') center/cover no-repeat !important;
          background-color: transparent !important;
          border-bottom: none !important;
          box-shadow: none !important;
@@ -735,7 +761,7 @@ function render() {
       #phone-container > div > div.pb-6.pt-2,
       #phone-container > div > div.absolute.bottom-0.pb-6,
       .mc-bottombar {
-         background: url('${ap.bottomBarBg}') center/cover no-repeat !important;
+         background: url('${window.getCachedImageSrc(ap.bottomBarBg)}') center/cover no-repeat !important;
          background-color: transparent !important;
          border-top: none !important;
          box-shadow: none !important;
@@ -749,8 +775,8 @@ function render() {
       if (!dict[k]) return;
       fontCss += `
         .${k} svg, .${k} i { display: none !important; }
-        .${k} { 
-           background-image: url('${dict[k]}') !important; 
+        .${k} {
+           background-image: url('${window.getCachedImageSrc(dict[k])}') !important;
            background-position: center !important;
            background-size: contain !important;
            background-repeat: no-repeat !important;
@@ -771,7 +797,7 @@ function render() {
            stroke: transparent !important;
            fill: transparent !important;
            color: transparent !important;
-           background-image: url('${dict[k]}') !important; 
+           background-image: url('${window.getCachedImageSrc(dict[k])}') !important;
            background-position: center !important;
            background-size: contain !important;
            background-repeat: no-repeat !important;
@@ -854,7 +880,7 @@ function render() {
       const alert = store.globalCallAlert;
       let avatarHtml = '';
       if (alert.avatar && (alert.avatar.includes('http') || alert.avatar.startsWith('data:'))) {
-          avatarHtml = `<img src="${alert.avatar}" class="w-full h-full object-cover" />`;
+          avatarHtml = `<img src="${window.getCachedImageSrc(alert.avatar)}" class="w-full h-full object-cover" />`;
       } else {
           avatarHtml = `<div class="w-full h-full flex items-center justify-center text-2xl">${alert.avatar || ''}</div>`;
       }
@@ -1024,7 +1050,10 @@ window.DB = DB;
 
 async function initApp() {
   updateTime();
-  setInterval(updateTime, 1000); 
+  setInterval(updateTime, 1000);
+
+  // 🌟 图片缓存预热：把独立 IndexedDB 里的图片加载进内存，让首屏渲染就能用 Base64
+  await ImageCacheDB.init();
 
   try {
     const savedDB = await DB.get();
@@ -1033,9 +1062,9 @@ async function initApp() {
        store.currentApp = null;
     }
     window.render();
-    
+
     // 🌟 引擎点火：在系统初始化完成后，启动全自动备份！
-    window.startAutoBackup(); 
+    window.startAutoBackup();
 
   } catch (e) {
     console.log('数据加载失败', e);

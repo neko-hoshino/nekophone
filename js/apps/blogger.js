@@ -1448,8 +1448,8 @@ export function renderBloggerApp(store) {
                             <div class="flex-1 bg-[#1a1a1a] text-white pt-2 pb-3 pl-6 pr-4 flex flex-col justify-between min-h-[110px] shadow-lg rounded-r-[4px]">
                                 <div class="flex justify-between items-start">
                                     <div class="flex -space-x-4 relative -mt-8">
-                                        <img src="${myAvatar}" class="w-16 h-16 rounded-full border-[3px] border-[#1a1a1a] object-cover filter grayscale-[10%] shadow-md" />
-                                        <img src="${partnerAvatar}" class="w-16 h-16 rounded-full border-[3px] border-[#1a1a1a] object-cover filter grayscale-[10%] shadow-md" />
+                                        <img src="${window.getCachedImageSrc(myAvatar)}" class="w-16 h-16 rounded-full border-[3px] border-[#1a1a1a] object-cover filter grayscale-[10%] shadow-md" />
+                                        <img src="${window.getCachedImageSrc(partnerAvatar)}" class="w-16 h-16 rounded-full border-[3px] border-[#1a1a1a] object-cover filter grayscale-[10%] shadow-md" />
                                     </div>
                                     <div class="flex space-x-4 text-right pt-2">
                                         <div class="flex flex-col items-center">
@@ -1813,7 +1813,7 @@ export function renderBloggerApp(store) {
                             const pAvatar = tChar ? tChar.avatar : acc.avatar;
                             return `
                             <div class="w-full flex items-center cursor-pointer active:scale-[0.98] transition-all pb-4 border-b border-gray-100" onclick="window.bloggerActions.enterAccount('${acc.id}')">
-                                <div class="w-14 h-14 overflow-hidden mr-5 shrink-0 border border-gray-100 shadow-sm rounded-full"><img src="${pAvatar}" class="w-full h-full object-cover grayscale-[10%]"></div>
+                                <div class="w-14 h-14 overflow-hidden mr-5 shrink-0 border border-gray-100 shadow-sm rounded-full"><img src="${window.getCachedImageSrc(pAvatar)}" class="w-full h-full object-cover grayscale-[10%]"></div>
                                 <div class="flex-1 flex flex-col justify-center min-w-0 pr-2">
                                     <span class="text-[16px] font-bold text-gray-900 truncate mb-1 font-serif tracking-widest uppercase">${acc.name}</span>
                                     <span class="text-[10px] text-gray-500 tracking-[0.2em] uppercase font-serif">${acc.followers.toLocaleString()} FLWR</span>

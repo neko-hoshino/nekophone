@@ -297,17 +297,23 @@ if (chat.isGroup) {
         }
     }
     if (lastUserMsgIndex !== -1) {
-        // 🌟 云端 GC：被丢弃消息中的真实照片 / 语音
+        // 🌟 云端 GC + 本地缓存清理：被丢弃的消息
         chat.messages.slice(lastUserMsgIndex + 1).forEach(m => {
-          if (m?.msgType === 'real_image' && m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+          if (m?.msgType === 'real_image') {
+            if (m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+            if (m.id) window.imageCache?.delete(m.id);
+          }
           if (m?.msgType === 'voice' && m.audioUrl) window.deleteMediaFromCloud(m.audioUrl);
         });
         // 删除该用户消息之后的所有消息（即AI导演本轮生成的所有消息）
         chat.messages = chat.messages.slice(0, lastUserMsgIndex + 1);
     } else {
-        // 🌟 云端 GC：清空前先把多媒体清掉
+        // 🌟 云端 GC + 本地缓存清理：清空前
         chat.messages.forEach(m => {
-          if (m?.msgType === 'real_image' && m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+          if (m?.msgType === 'real_image') {
+            if (m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+            if (m.id) window.imageCache?.delete(m.id);
+          }
           if (m?.msgType === 'voice' && m.audioUrl) window.deleteMediaFromCloud(m.audioUrl);
         });
         // 如果连用户消息都没有（极端情况），则清空所有消息
@@ -346,9 +352,12 @@ if (chat.isGroup) {
             window.actions.showToast('无法重roll历史消息');
             return;
         }
-        // 🌟 云端 GC：被丢弃的线下消息中的多媒体
+        // 🌟 云端 GC + 本地缓存清理：被丢弃的线下消息
         chat.messages.slice(targetIndex).forEach(m => {
-          if (m?.msgType === 'real_image' && m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+          if (m?.msgType === 'real_image') {
+            if (m.imageUrl) window.deleteMediaFromCloud(m.imageUrl);
+            if (m.id) window.imageCache?.delete(m.id);
+          }
           if (m?.msgType === 'voice' && m.audioUrl) window.deleteMediaFromCloud(m.audioUrl);
         });
         // 删除该消息及其之后的所有消息（都是线下消息）
@@ -360,9 +369,12 @@ if (chat.isGroup) {
             return window.actions.showToast('只能重roll对方的回复哦');
         }
         while (chat.messages.length > 0 && !chat.messages[chat.messages.length - 1].isMe) {
-            // 🌟 云端 GC：弹出的 AI 消息若含多媒体，先清云端
+            // 🌟 云端 GC + 本地缓存清理：弹出的 AI 消息
             const popped = chat.messages.pop();
-            if (popped?.msgType === 'real_image' && popped.imageUrl) window.deleteMediaFromCloud(popped.imageUrl);
+            if (popped?.msgType === 'real_image') {
+              if (popped.imageUrl) window.deleteMediaFromCloud(popped.imageUrl);
+              if (popped.id) window.imageCache?.delete(popped.id);
+            }
             if (popped?.msgType === 'voice' && popped.audioUrl) window.deleteMediaFromCloud(popped.audioUrl);
         }
     }

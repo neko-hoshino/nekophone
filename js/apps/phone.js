@@ -1566,7 +1566,7 @@ ${realMomentsContext || '暂无真实朋友圈。'}
     if (state.view === 'select_char') {
         const contactsList = (store.contacts || []).map(c => `
             <div class="flex items-center p-4 bg-gray-900/60 hover:bg-gray-800/80 border border-gray-700/50 rounded-[20px] cursor-pointer transition-colors backdrop-blur-md mb-4 shadow-lg shadow-black/20 active:scale-95" onclick="window.phoneActions.selectTarget('${c.id}')">
-                <img src="${c.avatar}" class="w-14 h-14 rounded-full object-cover border-2 border-gray-600 shrink-0 bg-[#fff]">
+                <img src="${window.getCachedImageSrc(c.avatar)}" class="w-14 h-14 rounded-full object-cover border-2 border-gray-600 shrink-0 bg-[#fff]">
                 <div class="flex-col ml-4">
                     <div class="text-white text-[17px] font-black tracking-wider">${c.name}</div>
                     <div class="text-green-400/80 text-[11px] font-mono mt-1">> Status: Online | Tap to intercept</div>
@@ -1996,7 +1996,7 @@ ${realMomentsContext || '暂无真实朋友圈。'}
                         <div class="flex-1 overflow-y-auto bg-[#fff] hide-scrollbar">
                             <div class="px-5 pt-6 pb-4">
                                 <div class="flex items-center space-x-5 mb-5">
-                                    <img src="${char.avatar}" class="w-20 h-20 rounded-full border border-gray-200 object-cover p-0.5">
+                                    <img src="${window.getCachedImageSrc(char.avatar)}" class="w-20 h-20 rounded-full border border-gray-200 object-cover p-0.5">
                                     <div class="flex-1 flex justify-around text-center">
                                         <div><div class="font-bold text-[16px] text-gray-900">${Math.floor(Math.random()*500)}</div><div class="text-[11px] text-gray-500">获赞</div></div>
                                         <div><div class="font-bold text-[16px] text-gray-900">${Math.floor(Math.random()*200)}</div><div class="text-[11px] text-gray-500">朋友</div></div>
@@ -2642,7 +2642,7 @@ ${realMomentsContext || '暂无真实朋友圈。'}
                             <div class="ml-5 flex-1">
                                 <div class="text-[18px] font-bold leading-tight mb-2">我最喜欢的音乐</div>
                                 <div class="flex items-center space-x-2 opacity-80 mb-4">
-                                    <img src="${char.avatar}" class="w-6 h-6 rounded-full border border-white/20">
+                                    <img src="${window.getCachedImageSrc(char.avatar)}" class="w-6 h-6 rounded-full border border-white/20">
                                     <span class="text-[12px] font-medium">${char.name}</span>
                                     <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
                                 </div>
@@ -2906,11 +2906,11 @@ const messagesHtml = displayMsgs.map((msg) => {
                         } else if (msg.msgType === 'real_image') {
                             maxWidthClass = 'max-w-[40%]';
                             bubbleClass = 'mc-bubble-img bg-white p-1 rounded-xl shadow-sm border border-gray-100'; 
-                            contentHtml = `<img src="${msg.imageUrl || msg.text}" class="w-full h-auto rounded-lg object-cover max-h-[200px]" alt="照片" />`;
+                            contentHtml = `<img src="${window.getCachedImageSrc(msg.imageUrl || msg.text)}" class="w-full h-auto rounded-lg object-cover max-h-[200px]" alt="照片" />`;
                         } else if (msg.msgType === 'emoji') {
                             maxWidthClass = 'max-w-[25%]';
                             bubbleClass = 'bg-transparent shadow-none'; 
-                            contentHtml = `<img src="${msg.imageUrl || msg.text}" class="w-full h-auto object-contain drop-shadow-md" />`;
+                            contentHtml = `<img src="${window.getCachedImageSrc(msg.imageUrl || msg.text)}" class="w-full h-auto object-contain drop-shadow-md" />`;
                         } else {
                             bubbleClass = `mc-bubble-text px-4 py-2.5 rounded-xl shadow-sm leading-relaxed overflow-wrap break-words whitespace-pre-wrap text-[15px] ${isFromChar ? 'bg-[#95ec69] text-black rounded-tr-sm' : 'bg-white text-black rounded-tl-sm'}`;
                             contentHtml = msg.text || '[空白消息]';
@@ -2918,7 +2918,7 @@ const messagesHtml = displayMsgs.map((msg) => {
 
                         return `
                         <div class="flex ${isFromChar ? 'flex-row-reverse' : 'flex-row'} items-start w-full mb-4">
-                            <img src="${avatar}" class="w-10 h-10 rounded-[8px] shrink-0 border border-black/5 ${isFromChar ? 'ml-3' : 'mr-3'}" />
+                            <img src="${window.getCachedImageSrc(avatar)}" class="w-10 h-10 rounded-[8px] shrink-0 border border-black/5 ${isFromChar ? 'ml-3' : 'mr-3'}" />
                             <div class="relative inline-flex flex-col ${isFromChar ? 'items-end' : 'items-start'} ${maxWidthClass}">
                                 ${senderNameHtml}
                                 <div class="${bubbleClass}" style="${bubbleStyle}">${contentHtml}</div>
@@ -2974,7 +2974,7 @@ const messagesHtml = displayMsgs.map((msg) => {
                             <div onclick="window.phoneActions.openWechatChat('user')" class="flex items-center px-4 py-3 border-b border-gray-100 bg-white cursor-pointer hover:bg-gray-50 active:bg-gray-100">
                                 <div class="relative mr-3">
                                     <div class="w-12 h-12 bg-gray-100 rounded-[14px] flex-shrink-0 overflow-hidden flex items-center justify-center text-2xl shadow-sm border border-gray-200/50">
-                                        <img src="${myChat?.myAvatar || boundP.avatar}" class="w-full h-full object-cover">
+                                        <img src="${window.getCachedImageSrc(myChat?.myAvatar || boundP.avatar)}" class="w-full h-full object-cover">
                                     </div>
                                 </div>
                                 <div class="flex-1 overflow-hidden">
@@ -3094,7 +3094,7 @@ const messagesHtml = displayMsgs.map((msg) => {
                             const ts = Number(m.timestamp || m.id) || 0;
                             const html = `
                             <div class="flex items-start p-4 border-b border-gray-100/60 bg-white">
-                                <div class="w-10 h-10 rounded-[8px] overflow-hidden bg-gray-100 flex-shrink-0 mr-3 shadow-sm border border-gray-100"><img src="${char.avatar}" class="w-full h-full object-cover"></div>
+                                <div class="w-10 h-10 rounded-[8px] overflow-hidden bg-gray-100 flex-shrink-0 mr-3 shadow-sm border border-gray-100"><img src="${window.getCachedImageSrc(char.avatar)}" class="w-full h-full object-cover"></div>
                                 <div class="flex-1 min-w-0">
                                     <span class="text-[#576b95] font-medium text-[15px] mb-1 block">${char.name}</span>
                                     <span class="text-gray-800 text-[15px] leading-relaxed break-words whitespace-pre-wrap">${m.text || m.virtualImageText || '[分享了图片]'}</span>
@@ -3145,10 +3145,10 @@ const messagesHtml = displayMsgs.map((msg) => {
                         pageContent = `
                             <div class="flex-1 overflow-y-auto bg-white hide-scrollbar pb-10">
                                 <div class="relative h-60 bg-gray-200 flex items-center justify-center overflow-visible">
-                                    <img src="${char.momentBg || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&q=80'}" class="w-full h-full object-cover" />
+                                    <img src="${window.getCachedImageSrc(char.momentBg || 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&q=80')}" class="w-full h-full object-cover" />
                                     <div class="absolute inset-x-0 bottom-[-20px] flex justify-end items-end px-4">
                                         <span class="text-white font-bold text-[20px] mr-4 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] pb-6">${char.name}</span>
-                                        <div class="w-16 h-16 rounded-[12px] overflow-hidden border-2 border-white shadow-md bg-white flex items-center justify-center z-10"><img src="${char.avatar}" class="w-full h-full object-cover" /></div>
+                                        <div class="w-16 h-16 rounded-[12px] overflow-hidden border-2 border-white shadow-md bg-white flex items-center justify-center z-10"><img src="${window.getCachedImageSrc(char.avatar)}" class="w-full h-full object-cover" /></div>
                                     </div>
                                 </div>
                                 <div class="h-10 bg-white"></div>
@@ -3182,7 +3182,7 @@ const messagesHtml = displayMsgs.map((msg) => {
                                 </div>
                                 <div onclick="window.phoneActions.switchWechatTab('moments')" class="flex flex-col items-center space-y-1 cursor-pointer w-16 ${state.wechatTab === 'moments' ? 'text-[#07c160]' : 'text-gray-500'}">
                                     <i data-lucide="aperture" style="width: 24px; height: 24px;"></i>
-                                    <span class="text-[10px] font-bold">发现</span>
+                                    <span class="text-[10px] font-bold">朋友圈</span>
                                 </div>
                             </div>
                         </div>

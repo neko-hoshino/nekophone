@@ -1227,7 +1227,7 @@ export function renderShoppingApp(store) {
             <div class="pt-12 pb-3 px-4 bg-[#fff] z-40 relative shadow-sm border-b border-gray-100 flex items-center shrink-0">
                 <div class="w-10 flex items-center cursor-pointer active:opacity-50 text-gray-800" onclick="window.actions.setCurrentApp(null)"><i data-lucide="chevron-left" class="w-7 h-7 -ml-2"></i></div>
                 <div class="flex items-center space-x-4">
-                    <div class="w-14 h-14 rounded-full border border-gray-200 overflow-hidden shrink-0"><img src="${activePersona.avatar}" class="w-full h-full object-cover"></div>
+                    <div class="w-14 h-14 rounded-full border border-gray-200 overflow-hidden shrink-0"><img src="${window.getCachedImageSrc(activePersona.avatar)}" class="w-full h-full object-cover"></div>
                     <div class="flex flex-col"><span class="text-[18px] font-black text-gray-900">${activePersona.name}</span></div>
                 </div>
             </div>
@@ -1287,7 +1287,7 @@ export function renderShoppingApp(store) {
                     <div class="flex-1 overflow-y-auto p-4 space-y-3 max-h-[50vh] bg-[#f9fafb]">
                         ${store.contacts.map(c => `
                             <div class="flex items-center p-3 bg-[#fff] rounded-[14px] shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-transform" onclick="window.shoppingActions.executeShareCart('${c.id}')">
-                                <img src="${c.avatar}" class="w-10 h-10 rounded-[10px] object-cover border border-gray-100 mr-3 shrink-0" />
+                                <img src="${window.getCachedImageSrc(c.avatar)}" class="w-10 h-10 rounded-[10px] object-cover border border-gray-100 mr-3 shrink-0" />
                                 <span class="flex-1 font-bold text-gray-800 text-[15px] truncate">${c.name}</span>
                                 <div class="w-7 h-7 bg-rose-50 text-rose-500 rounded-full flex items-center justify-center shrink-0">
                                     <i data-lucide="send" class="w-3.5 h-3.5 -ml-0.5"></i>
@@ -1346,7 +1346,7 @@ export function renderShoppingApp(store) {
                                 <div class="space-y-3">
                                     ${store.contacts.map(c => `
                                         <div class="flex items-center p-3 bg-[#fff] rounded-[14px] shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-transform" onclick="window.shoppingActions.setCheckoutBuyForChar('${c.id}')">
-                                            <img src="${c.avatar}" class="w-10 h-10 rounded-[10px] object-cover border border-gray-100 mr-3 shrink-0" />
+                                            <img src="${window.getCachedImageSrc(c.avatar)}" class="w-10 h-10 rounded-[10px] object-cover border border-gray-100 mr-3 shrink-0" />
                                             <span class="flex-1 font-bold text-gray-800 text-[15px] truncate">${c.name}</span>
                                         </div>
                                     `).join('')}
@@ -1370,7 +1370,7 @@ export function renderShoppingApp(store) {
                                 <div class="space-y-3">
                                     ${store.contacts.map(c => `
                                         <div class="flex items-center p-3 bg-[#fff] rounded-[14px] shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-transform" onclick="window.shoppingActions.setCheckoutPayChar('${c.id}')">
-                                            <img src="${c.avatar}" class="w-10 h-10 rounded-[10px] object-cover border border-gray-100 mr-3 shrink-0" />
+                                            <img src="${window.getCachedImageSrc(c.avatar)}" class="w-10 h-10 rounded-[10px] object-cover border border-gray-100 mr-3 shrink-0" />
                                             <span class="flex-1 font-bold text-gray-800 text-[15px] truncate">${c.name}</span>
                                         </div>
                                     `).join('')}
@@ -1382,7 +1382,7 @@ export function renderShoppingApp(store) {
                             <div class="space-y-3">
                                 ${store.contacts.map(c => `
                                     <div class="flex items-center p-3 bg-[#fff] rounded-[14px] shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-transform" onclick="window.shoppingActions.setCheckoutShareChar('${c.id}')">
-                                        <img src="${c.avatar}" class="w-10 h-10 rounded-[10px] object-cover border border-gray-100 mr-3 shrink-0" />
+                                        <img src="${window.getCachedImageSrc(c.avatar)}" class="w-10 h-10 rounded-[10px] object-cover border border-gray-100 mr-3 shrink-0" />
                                         <span class="flex-1 font-bold text-gray-800 text-[15px] truncate">${c.name}</span>
                                     </div>
                                 `).join('')}

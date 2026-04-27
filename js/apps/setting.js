@@ -34,28 +34,179 @@ window.settingsActions = {
     a.click();
     window.actions.showToast('备份已导出！请妥善保存在手机文件里');
   },
-  factoryReset: () => {
-    if (confirm('⚠️ 严重警告：这将彻底清空您的所有聊天记录、角色、身份、世界书以及设定！\n\n您确定要【恢复出厂设置】吗？')) {
-       if (confirm('🚨 【最终确认】此操作绝对不可逆！\n请确保您已经导出了备份！真的要全部删除吗？')) {
-          localStorage.removeItem('neko_store');
-          if (window.DB) {
-             const req = indexedDB.deleteDatabase('NekoPhoneDB');
-             req.onsuccess = () => {
-                window.actions.showToast('数据已彻底清空，正在重启宇宙...');
-                setTimeout(() => location.reload(), 1500);
-             };
-             req.onerror = () => location.reload();
-          } else {
-             location.reload();
-          }
-       }
+  // 本地清理 + 重启（两个清除按钮共用收尾）
+  _clearLocalAndReload: async () => {
+    localStorage.removeItem('neko_store');
+    // 🌟 同步清空图片缓存的独立 IndexedDB
+    try { if (window.imageCache) await window.imageCache.clear(); } catch (_) {}
+    if (window.DB) {
+        const req = indexedDB.deleteDatabase('NekoPhoneDB');
+        req.onsuccess = () => {
+            window.actions.showToast('数据已彻底清空，正在重启宇宙...');
+            setTimeout(() => location.reload(), 1500);
+        };
+        req.onerror = () => location.reload();
+    } else {
+        location.reload();
     }
+  },
+
+  // 彻底销毁：连云端文件 + Supabase 备份记录一起删
+  factoryReset: async () => {
+    if (!confirm('⚠️ 严重警告：这将彻底清空所有聊天记录、角色、身份、世界书以及设定！\n并且会一并删除云端储存的所有媒体文件 + JSON 备份！\n\n⚠️ 删除后已导出的备份文件里的图片/语音 URL 都会失效（404）！\n\n您确定要【彻底销毁全部数据】吗？')) return;
+    if (!confirm('🚨 【最终确认】此操作绝对不可逆！本地数据 + 云端文件 + 云端备份全部销毁！\n\n真的要全部删除吗？')) return;
+
+    const R2_HOST = 'pub-0e37c842dc044e1ba26eb187300cb843.r2.dev';
+    const DELETE_ENDPOINT = 'https://neko-hoshino.duckdns.org/api/delete-r2';
+
+    // 1. 递归收集 store 里所有 R2 云端 URL
+    window.actions.showToast('正在扫描云端文件清单...');
+    const urls = new Set();
+    const seenNodes = new WeakSet();
+    const collect = (node) => {
+        if (!node || typeof node !== 'object' || seenNodes.has(node)) return;
+        seenNodes.add(node);
+        const values = Array.isArray(node) ? node : Object.values(node);
+        for (const v of values) {
+            if (typeof v === 'string') {
+                if (v.includes(R2_HOST)) urls.add(v.split('?')[0]);
+            } else if (v && typeof v === 'object') {
+                collect(v);
+            }
+        }
+    };
+    collect(store);
+
+    // 2. 把云端备份 JSON 也加入清单（备份链接只在 Supabase 里）
+    const deviceId = localStorage.getItem('neko_device_id');
+    if (deviceId && window.supabase) {
+        try {
+            const { data } = await window.supabase
+                .from('user_backups')
+                .select('backup_url')
+                .eq('device_id', deviceId)
+                .maybeSingle();
+            if (data?.backup_url) urls.add(data.backup_url.split('?')[0]);
+        } catch (e) { console.warn('[factoryReset] 查询备份链接失败', e); }
+    }
+
+    // 3. 并发删除（限并发 6，避免压垮 VPS）
+    const list = [...urls];
+    const total = list.length;
+    let done = 0;
+    const deleteOne = async (fileUrl) => {
+        try {
+            await fetch(DELETE_ENDPOINT, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ fileUrl })
+            });
+        } catch (_) { /* 单个失败不阻断整体 */ }
+        done++;
+        if (done === total || done % 5 === 0) {
+            window.actions.showToast(`正在销毁云端文件… ${done}/${total}`);
+        }
+    };
+    const workers = Array.from({ length: Math.min(6, total) }, async () => {
+        while (list.length) {
+            const u = list.shift();
+            if (u) await deleteOne(u);
+        }
+    });
+    await Promise.all(workers);
+
+    // 4. 删 Supabase 里的备份记录
+    if (deviceId && window.supabase) {
+        try {
+            await window.supabase.from('user_backups').delete().eq('device_id', deviceId);
+        } catch (e) { console.warn('[factoryReset] 清理备份记录失败', e); }
+    }
+
+    // 5. 清本地
+    window.actions.showToast(`☁️ 云端已清空 (${total} 个文件)，正在清空本地...`);
+    await window.settingsActions._clearLocalAndReload();
   },
   updateStorageDisplay: () => {
     const dbSize = JSON.stringify(store).length;
     const mb = (dbSize / 1024 / 1024).toFixed(2);
     const el = document.getElementById('storage-size-display');
     if (el) el.innerText = `${mb} MB`;
+  },
+
+  // 复制当前设备 ID 到剪贴板（兼容 iOS Safari 的旧浏览器走 textarea fallback）
+  copyDeviceId: async () => {
+    const id = localStorage.getItem('neko_device_id') || '';
+    if (!id) return window.actions.showToast('设备 ID 为空，请刷新页面重试');
+    let ok = false;
+    if (navigator.clipboard?.writeText) {
+        try { await navigator.clipboard.writeText(id); ok = true; } catch (_) {}
+    }
+    if (!ok) {
+        const ta = document.createElement('textarea');
+        ta.value = id;
+        ta.style.position = 'fixed'; ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        try { ok = document.execCommand('copy'); } catch (_) {}
+        document.body.removeChild(ta);
+    }
+    window.actions.showToast(ok ? '✅ 设备 ID 已复制' : '复制失败，请手动长按选中');
+  },
+
+  // 导入旧设备 ID：换缓存/换设备/被 ITP 清理后用来找回旧云端备份
+  // 流程：输入 → 先校验云端是否有备份 → 二次确认 → 写入 ID + 立刻 restoreFromCloud
+  importDeviceId: async () => {
+    const oldId = (localStorage.getItem('neko_device_id') || '').trim();
+    const input = prompt(
+        '请粘贴你之前保存的设备 ID 来找回云端备份：\n\n' +
+        '⚠️ 确认后会立刻拉取该 ID 对应的云端备份并覆盖本机数据。\n' +
+        '仅在【刚清缓存或换新设备】时使用。\n\n' +
+        '当前设备 ID：' + (oldId || '(未生成)'),
+        ''
+    );
+    if (input === null) return; // 用户取消
+    const newId = input.trim();
+    if (!newId) return window.actions.showToast('设备 ID 不能为空');
+    if (newId === oldId) return window.actions.showToast('与当前 ID 相同，未变更');
+
+    if (!window.supabase) return window.actions.showToast('云端模块未加载，请刷新页面重试');
+
+    // 1. 先校验云端是否真的有这个 ID 的备份（任何破坏性修改前）
+    window.actions.showToast('正在校验云端备份…');
+    let backupUrl = null;
+    try {
+        const { data, error } = await window.supabase
+            .from('user_backups')
+            .select('backup_url')
+            .eq('device_id', newId)
+            .maybeSingle();
+        if (error) throw error;
+        if (!data?.backup_url) {
+            return window.actions.showToast(`❌ 云端没有 ID "${newId}" 的备份记录，未做任何改动`);
+        }
+        backupUrl = data.backup_url;
+    } catch (e) {
+        console.error('[importDeviceId] 校验失败', e);
+        return window.actions.showToast('❌ 校验失败：' + (e.message || '未知错误'));
+    }
+
+    // 2. 二次确认（明示破坏性后果）
+    if (!confirm(
+        `✅ 已在云端找到该 ID 的备份。\n\n` +
+        `点击"确定"后会：\n` +
+        `1. 设备 ID 写为：${newId}\n` +
+        `2. 立刻下载该备份并完全替换本机当前所有数据\n\n` +
+        `⚠️ 本机当前内容（聊天记录、角色、设定等）会被全部覆盖且不可撤销。\n\n` +
+        `继续吗？`
+    )) return;
+
+    // 3. 写 ID + 立刻拉取（restoreFromCloud 内部读取 localStorage 的新 ID）
+    localStorage.setItem('neko_device_id', newId);
+    if (typeof window.restoreFromCloud === 'function') {
+        window.restoreFromCloud();
+    } else {
+        window.actions.showToast('❌ 恢复函数未加载，请手动刷新页面后重试');
+    }
   },
   optimizeStorage: async () => {
       window.actions.showToast('正在执行深层瘦身，请勿退出页面...');
@@ -126,226 +277,6 @@ window.settingsActions = {
       window.render();
   },
 
-  // 🌟 临时一次性工具：把历史 Base64 图片/音频迁移到云端 URL
-  migrateBase64ToCloud: async () => {
-      if (!confirm('⚠️ 这将把历史 Base64 图片/音频上传到云端，并把本地数据替换为云端 URL。\n\n• 进行中请勿关闭页面\n• 需要保持网络稳定\n• 可中断后再次运行（已迁移项会自动跳过）\n\n开始吗？')) return;
-
-      // ============ 1. 收集所有需要迁移的字段 ============
-      const tasks = [];
-      const enqueue = (obj, key, fixedKey = null) => {
-          const v = obj?.[key];
-          if (typeof v === 'string' && v.startsWith('data:')) {
-              tasks.push({ obj, key, fixedKey });
-          }
-      };
-
-      // 全局单槽
-      enqueue(store, 'momentBg', 'wechat_moment_bg');
-      enqueue(store, 'homePolaroidImg', 'home_polaroid');
-
-      // 主身份与马甲（avatar + videoAvatar）
-      if (store.personas?.[0]) {
-          enqueue(store.personas[0], 'avatar', 'user_avatar');
-          enqueue(store.personas[0], 'videoAvatar', 'user_videoAvatar');
-      }
-      for (let i = 1; i < (store.personas?.length || 0); i++) {
-          const p = store.personas[i];
-          if (!p) continue;
-          enqueue(p, 'avatar', `persona_avatar_${p.id}`);
-          enqueue(p, 'videoAvatar', `persona_videoAvatar_${p.id}`);
-      }
-
-      // 角色（含单聊背景挂在 char 上的字段）
-      (store.contacts || []).forEach(c => {
-          if (!c) return;
-          enqueue(c, 'avatar', `char_avatar_${c.id}`);
-          enqueue(c, 'videoAvatar', `char_videoAvatar_${c.id}`);
-          enqueue(c, 'drBg', `darkroom_bg_${c.id}`);
-          enqueue(c, 'bgImage', `chat_bg_${c.id}`);
-          enqueue(c, 'offlineBg', `chat_offline_bg_${c.id}`);
-      });
-
-      // 聊天室
-      (store.chats || []).forEach(chat => {
-          if (!chat) return;
-          if (chat.isGroup) {
-              enqueue(chat, 'bgImage', `chat_bg_${chat.charId}`);
-              enqueue(chat, 'offlineBg', `chat_offline_bg_${chat.charId}`);
-          }
-          enqueue(chat, 'myAvatar', `chat_my_avatar_${chat.charId}`);
-          enqueue(chat, 'groupAvatar', `group_avatar_${chat.charId}`);
-          enqueue(chat, 'myVideoAvatar', `chat_my_video_${chat.charId}`);
-          enqueue(chat, 'charVideoAvatar', `char_video_${chat.charId}`);
-          (chat.messages || []).forEach(m => {
-              if (!m) return;
-              if (m.msgType === 'real_image') enqueue(m, 'imageUrl');
-              if (m.msgType === 'voice') enqueue(m, 'audioUrl');
-              if (m.msgType === 'emoji') enqueue(m, 'imageUrl'); // 表情包消息：data: 时也要迁移
-          });
-      });
-
-      // 情侣百日
-      Object.keys(store.coupleSpacesData || {}).forEach(cid => {
-          enqueue(store.coupleSpacesData[cid], 'hundredBg', `couple_hundred_bg_${cid}`);
-      });
-
-      // 朋友圈
-      (store.moments || []).forEach(m => enqueue(m, 'imageUrl'));
-
-      // 论坛帖子（含 mediaList 真实图片 + 帖子作者头像）
-      (store.forumPosts || []).forEach(post => {
-          if (!post) return;
-          enqueue(post, 'avatar'); // AI 帖子作者头像（每帖独立，无 fixedKey）
-          (post.mediaList || []).forEach(item => {
-              if (item?.type === 'real_image') enqueue(item, 'url');
-          });
-      });
-
-      // 论坛个人资料
-      if (store.forumProfile) {
-          enqueue(store.forumProfile, 'avatar', 'forum_profile_avatar');
-          enqueue(store.forumProfile, 'bgUrl', 'forum_profile_bg');
-      }
-
-      // 表情包库（每个 emoji 可能是字符串或 {url, name}）
-      (store.emojiLibs || []).forEach(lib => {
-          if (!lib?.emojis) return;
-          lib.emojis.forEach((emoji, idx) => {
-              if (typeof emoji === 'string') {
-                  enqueue(lib.emojis, idx); // 数组下标当 key
-              } else if (emoji && typeof emoji === 'object') {
-                  enqueue(emoji, 'url');
-              }
-          });
-      });
-
-      // 同步账户头像
-      (store.syncAccounts || []).forEach(sync => {
-          if (sync) enqueue(sync, 'avatar', `sync_avatar_${sync.id}`);
-      });
-
-      // 外观
-      if (store.appearance) {
-          ['wallpaper', 'topBarBg', 'bottomBarBg', 'interfaceBg', 'newMsgSound', 'callSound'].forEach(k => {
-              enqueue(store.appearance, k, `appearance_${k}`);
-          });
-          ['customIcons', 'customButtons'].forEach(dictKey => {
-              const dict = store.appearance[dictKey];
-              if (dict && typeof dict === 'object') {
-                  Object.keys(dict).forEach(itemId => {
-                      enqueue(dict, itemId, `appearance_${dictKey}_${itemId}`);
-                  });
-              }
-          });
-      }
-
-      // 自定义 BGM
-      (store.customAudio || []).forEach(track => enqueue(track, 'src'));
-
-      // 穿越玩家
-      if (store.transData?.player) enqueue(store.transData.player, 'avatar', 'trans_player_avatar');
-
-      if (tasks.length === 0) {
-          return window.actions.showToast('已经全部是云端 URL，没什么要迁移的~');
-      }
-
-      if (!confirm(`扫描到 ${tasks.length} 个 Base64 字段需要迁移。预计耗时约 ${Math.ceil(tasks.length * 2 / 60)} 分钟。\n\n确定要开始吗？`)) return;
-
-      // ============ 2. 顺序上传 + 进度反馈 + 定期 checkpoint ============
-      let done = 0, failed = 0;
-      const checkpoint = async () => {
-          if (window.DB) {
-              try { await window.DB.set(JSON.parse(JSON.stringify(store))); } catch(e) {}
-          }
-      };
-
-      for (let i = 0; i < tasks.length; i++) {
-          const { obj, key, fixedKey } = tasks[i];
-          const data = obj[key];
-          if (!data || !data.startsWith('data:')) { done++; continue; } // 防御：可能在循环中已被同一 fixedKey 写过
-
-          // 从 data URL 提取扩展名
-          const m = data.match(/^data:(image|audio)\/([\w-]+)/);
-          let ext = m?.[2]?.toLowerCase() || 'webp';
-          if (ext === 'jpeg') ext = 'jpg';
-
-          try {
-              const url = await window.uploadMediaToCloud(data, ext, fixedKey);
-              if (url && typeof url === 'string' && url.startsWith('http')) {
-                  obj[key] = url;
-                  done++;
-              } else {
-                  failed++;
-              }
-          } catch (e) {
-              console.error('[migrate] upload failed', key, e);
-              failed++;
-          }
-          window.actions.showToast(`迁移中… ✓${done} ✗${failed} / 共${tasks.length}`);
-
-          // 每 10 个 checkpoint 一次，避免中途意外丢进度
-          if ((i + 1) % 10 === 0) await checkpoint();
-      }
-
-      await checkpoint();
-
-      // ============ 3. 全 store 深扫兜底：清除任何遗漏的 data: 字符串 ============
-      // 长度阈值 500 防止误伤角色提示词里 "data:image/png;base64,xxx" 的字面引用
-      let sweepDone = 0, sweepWiped = 0, sweepCount = 0;
-      const isHeavyDataUrl = (v) =>
-          typeof v === 'string' && v.length > 500 && /^data:[\w/+.\-]+;base64,/.test(v);
-      const extFromDataUrl = (v) => {
-          const m = v.match(/^data:([\w/+.\-]+);base64,/);
-          if (!m) return 'bin';
-          let ext = (m[1].split('/')[1] || '').split('+')[0].split(';')[0].toLowerCase();
-          if (ext === 'jpeg') ext = 'jpg';
-          if (ext === 'mpeg') ext = 'mp3';
-          return ext || 'bin';
-      };
-      const sweepValue = async (parent, key, v) => {
-          sweepCount++;
-          try {
-              const url = await window.uploadMediaToCloud(v, extFromDataUrl(v));
-              if (url && typeof url === 'string' && url.startsWith('http')) {
-                  parent[key] = url; sweepDone++;
-              } else {
-                  parent[key] = ''; sweepWiped++;
-              }
-          } catch (e) {
-              console.error('[migrate-sweep] upload failed', e);
-              parent[key] = ''; sweepWiped++;
-          }
-          window.actions.showToast(`深扫中… ✓${sweepDone} 清${sweepWiped} / ${sweepCount}`);
-          if (sweepCount % 10 === 0) await checkpoint();
-      };
-      const seenNodes = new WeakSet();
-      const sweep = async (node) => {
-          if (!node || typeof node !== 'object' || seenNodes.has(node)) return;
-          seenNodes.add(node);
-          if (Array.isArray(node)) {
-              for (let i = 0; i < node.length; i++) {
-                  const v = node[i];
-                  if (isHeavyDataUrl(v)) await sweepValue(node, i, v);
-                  else if (v && typeof v === 'object') await sweep(v);
-              }
-          } else {
-              for (const k of Object.keys(node)) {
-                  const v = node[k];
-                  if (isHeavyDataUrl(v)) await sweepValue(node, k, v);
-                  else if (v && typeof v === 'object') await sweep(v);
-              }
-          }
-      };
-      await sweep(store);
-      await checkpoint();
-
-      window.render();
-      const sweepMsg = sweepCount > 0 ? `\n深扫兜底：补传 ${sweepDone} / 清空 ${sweepWiped}` : '';
-      window.actions.showToast(
-          `✅ 迁移完成！成功 ${done} / 失败 ${failed}${sweepMsg}` +
-          (failed > 0 ? '\n可再次点击重试失败项' : '')
-      );
-  },
   importData: (event) => {
     const file = event.target.files[0]; if(!file) return;
     const r = new FileReader();
@@ -605,7 +536,7 @@ export function renderSettingsApp(store) {
             
             <div class="flex justify-between items-center">
                 <div class="flex flex-col">
-                    <span class="font-bold text-gray-800 text-[14px] flex items-center"><i data-lucide="map-pin" class="w-4 h-4 mr-2 text-rose-500"></i>开启高精定位 (外卖雷达)</span>
+                    <span class="font-bold text-gray-800 text-[14px] flex items-center"><i data-lucide="map-pin" class="w-4 h-4 mr-2 text-rose-500"></i>开启高精定位</span>
                     <span class="text-[10px] text-gray-400 mt-0.5 ml-6">关闭后，AI 将自由发挥外卖店铺与菜品</span>
                 </div>
                 <input type="checkbox" ${store.enableLocation ? 'checked' : ''} onchange="window.settingsActions.toggleLocation(event)" class="ios-switch shrink-0" />
@@ -655,7 +586,7 @@ export function renderSettingsApp(store) {
           
           <div class="pt-2">
             <div class="flex justify-between items-center mb-2">
-              <span class="text-xs font-bold text-gray-600">创造力 (Temperature): <span id="temp-display" class="text-blue-500">${c.temperature}</span></span>
+              <span class="text-xs font-bold text-gray-600">温度 (Temperature): <span id="temp-display" class="text-blue-500">${c.temperature}</span></span>
             </div>
             <input type="range" id="api-temp" min="0" max="2" step="0.1" value="${c.temperature}" oninput="window.settingsActions.updateTempDisplay(this.value)" class="w-full accent-blue-500" />
           </div>
@@ -698,7 +629,7 @@ export function renderSettingsApp(store) {
 
         <div class="bg-white p-4 rounded-[16px] shadow-sm border border-gray-100 mt-4">
           <h3 class="font-bold text-gray-800 text-[15px] flex items-center mb-3">
-            <i data-lucide="cloud-lightning" class="w-4 h-4 mr-2 text-purple-500"></i>云端跨国通道
+            <i data-lucide="cloud-lightning" class="w-4 h-4 mr-2 text-purple-500"></i>连接云端服务器
           </h3>
     
           <div class="mb-4">
@@ -724,22 +655,45 @@ export function renderSettingsApp(store) {
            </div>
            <p class="text-[11px] text-gray-400 font-bold leading-relaxed">已接入底层海量数据库，支持 1000MB+ 存储。若读取变慢可点击瘦身。</p>
            <button onclick="window.settingsActions.optimizeStorage()" class="w-full bg-blue-50 text-blue-500 font-bold py-2.5 rounded-xl active:bg-blue-100 transition-colors text-[13px] flex items-center justify-center border border-blue-100"><i data-lucide="zap" class="w-4 h-4 mr-1"></i>深度压缩并清理无用数据</button>
-           <button onclick="window.settingsActions.migrateBase64ToCloud()" class="w-full bg-amber-50 text-amber-600 font-bold py-2.5 rounded-xl active:bg-amber-100 transition-colors text-[13px] flex items-center justify-center border border-amber-200"><i data-lucide="cloud-upload" class="w-4 h-4 mr-1"></i>一键迁移历史 Base64 至云端 (临时)</button>
            <div class="mt-8 mb-6 flex flex-col space-y-3 px-1 animate-in slide-in-from-bottom-2 duration-500">
           <button onclick="window.settingsActions.factoryReset()" class="w-full bg-red-50 text-red-500 font-bold py-2.5 rounded-xl active:bg-red-100 transition-colors text-[13px] flex items-center justify-center border border-red-100">
-             <i data-lucide="alert-triangle" class="w-4 h-4 mr-2"></i>清除所有数据 (恢复出厂设置)
+             <i data-lucide="alert-triangle" class="w-4 h-4 mr-2"></i>清除所有数据 (含云端文件 + 备份)
           </button>
         </div>
         </div>
 
+        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mt-4 space-y-3">
+            <h3 class="font-bold text-gray-800 text-sm flex items-center mb-1"><i data-lucide="fingerprint" class="w-4 h-4 mr-1 text-emerald-500"></i>设备身份标识</h3>
+            <p class="text-[11px] text-gray-400 leading-relaxed">云端备份按此 ID 检索。<b class="text-gray-500">建议复制并妥善保存</b>——若清浏览器缓存、换设备、或被 iOS Safari 长期不活跃机制（约 7 天）自动清理，可凭此 ID 在新环境找回旧备份。</p>
+            <div class="bg-gray-50 border border-gray-100 rounded-[10px] p-2.5 text-[12px] font-mono text-gray-700 break-all select-all">${localStorage.getItem('neko_device_id') || '(未生成)'}</div>
+            <div class="grid grid-cols-2 gap-2">
+              <button onclick="window.settingsActions.copyDeviceId()" class="bg-emerald-50 text-emerald-600 font-bold py-2.5 rounded-xl active:bg-emerald-100 transition-colors text-[13px] flex items-center justify-center border border-emerald-100">
+                <i data-lucide="copy" class="w-4 h-4 mr-1"></i>复制
+              </button>
+              <button onclick="window.settingsActions.importDeviceId()" class="bg-purple-50 text-purple-600 font-bold py-2.5 rounded-xl active:bg-purple-100 transition-colors text-[13px] flex items-center justify-center border border-purple-100">
+                <i data-lucide="key-round" class="w-4 h-4 mr-1"></i>导入旧 ID
+              </button>
+            </div>
+        </div>
+
         <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 mt-4 space-y-0">
             <h3 class="font-bold text-gray-800 text-sm flex items-center mb-2"><i data-lucide="database" class="w-4 h-4 mr-1 text-blue-500"></i>系统数据备份</h3>
-            
+
+            <div class="flex justify-between items-center py-3.5 border-b border-gray-50 cursor-pointer active:bg-gray-50 transition-colors" onclick="window.backupToCloud && window.backupToCloud()">
+              <span class="text-[13px] font-bold text-gray-700">同步存档至云端</span>
+              <i data-lucide="cloud-upload" class="w-4.5 h-4.5 text-indigo-400"></i>
+            </div>
+
+            <div class="flex justify-between items-center py-3.5 border-b border-gray-50 cursor-pointer active:bg-gray-50 transition-colors" onclick="window.restoreFromCloud && window.restoreFromCloud()">
+              <span class="text-[13px] font-bold text-gray-700">从云端恢复存档</span>
+              <i data-lucide="cloud-download" class="w-4.5 h-4.5 text-indigo-400"></i>
+            </div>
+
             <div class="flex justify-between items-center py-3.5 border-b border-gray-50 cursor-pointer active:bg-gray-50 transition-colors" onclick="window.settingsActions.exportData()">
               <span class="text-[13px] font-bold text-gray-700">导出备份文件</span>
               <i data-lucide="download-cloud" class="w-4.5 h-4.5 text-gray-400"></i>
             </div>
-            
+
             <input type="file" id="import-data-input" accept=".json" class="hidden" onchange="window.settingsActions.importData(event)" />
             <div class="flex justify-between items-center py-3.5 cursor-pointer active:bg-gray-50 transition-colors" onclick="document.getElementById('import-data-input').click()">
               <span class="text-[13px] font-bold text-gray-700">恢复本地数据</span>

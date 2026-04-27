@@ -1132,15 +1132,27 @@ if (!window.cpActions) {
       const file = event.target.files[0]; if (!file) return;
       const reader = new FileReader();
       reader.onload = async (e) => {
+        const ext = (file.name.split('.').pop() || 'png').toLowerCase();
+        const fixedKey = `couple_hundred_bg_${charId}`;
+        const predicted = window.predictCloudUrl(fixedKey, ext);
+        await window.imageCache?.set(predicted, e.target.result);
+        const space = store.coupleSpacesData[charId];
+        const old = space.hundredBg;
+        space.hundredBg = predicted;
+        window.render();
         try {
-          window.actions.showToast('上传中…');
-          const ext = (file.name.split('.').pop() || 'png').toLowerCase();
-          const url = await window.uploadMediaToCloud(e.target.result, ext, `couple_hundred_bg_${charId}`);
-          store.coupleSpacesData[charId].hundredBg = url;
-          window.render();
+          const url = await window.uploadMediaToCloud(e.target.result, ext, fixedKey);
+          if (url && typeof url === 'string' && url.startsWith('http')) {
+            space.hundredBg = url;
+            if (window.DB) window.DB.set(JSON.parse(JSON.stringify(store))).catch(() => {});
+          } else {
+            space.hundredBg = old; window.render();
+            window.actions.showToast('云端上传失败');
+          }
         } catch (err) {
           console.error('[uploadMediaToCloud] couple hundred bg', err);
-          window.actions.showToast('上传失败，请重试');
+          space.hundredBg = old; window.render();
+          window.actions.showToast('云端上传失败');
         }
       };
       reader.readAsDataURL(file);
@@ -2244,7 +2256,8 @@ export function renderCoupleApp(store) {
   const getVidHtml = (v) => {
     if (!v) return `<div class="w-full h-full bg-gray-200"></div>`;
     if (v.includes('.mp4') || v.includes('.webm')) return `<video src="${v}" autoplay loop muted playsinline class="w-full h-full object-cover"></video>`;
-    return `<img src="${v}" class="w-full h-full object-cover" />`;
+    const src = window.getCachedImageSrc ? window.getCachedImageSrc(v) : v;
+    return `<img src="${src}" class="w-full h-full object-cover" />`;
   };
 
   if (cpState.view === 'select') {
@@ -2274,9 +2287,9 @@ export function renderCoupleApp(store) {
                     return `
                       <div class="bg-white rounded-[24px] p-4 shadow-[0_4px_20px_rgba(0,0,0,0.03)] border border-gray-50 flex items-center cursor-pointer active:scale-[0.98] transition-all" onclick="window.cpActions.openDashboard('${c.id}')">
                          <div class="flex items-center space-x-1 mr-4 relative">
-                             <img src="${myAvatar}" class="w-12 h-12 rounded-full border border-gray-100 object-cover z-10" />
+                             <img src="${window.getCachedImageSrc(myAvatar)}" class="w-12 h-12 rounded-full border border-gray-100 object-cover z-10" />
                              <div class="bg-white rounded-full p-0.5 absolute left-1/2 -translate-x-1/2 z-20 shadow-sm"><i data-lucide="heart" class="w-3 h-3 text-pink-400 fill-pink-400 animate-pulse"></i></div>
-                             <img src="${c.avatar}" class="w-12 h-12 rounded-full border border-gray-100 object-cover z-10" />
+                             <img src="${window.getCachedImageSrc(c.avatar)}" class="w-12 h-12 rounded-full border border-gray-100 object-cover z-10" />
                          </div>
                          <div class="flex-1 flex flex-col overflow-hidden">
                             <span class="text-[15px] font-extrabold text-gray-800 mb-0.5 tracking-wide truncate">${boundPersona.name} & ${c.name}</span>
@@ -2302,7 +2315,7 @@ export function renderCoupleApp(store) {
                          const boundPersona = store.personas.find(p => String(p.id) === String(char?.boundPersonaId)) || store.personas[0];
                          return `
                          <div class="bg-gray-50/50 rounded-2xl p-4 flex items-center shadow-sm border border-gray-100 cursor-pointer active:scale-95 transition-all hover:bg-pink-50" onclick="window.cpActions.createSpace('${char.id}')">
-                             <img src="${char.avatar}" class="w-12 h-12 rounded-full object-cover mr-4 border-2 border-white shadow-sm">
+                             <img src="${window.getCachedImageSrc(char.avatar)}" class="w-12 h-12 rounded-full object-cover mr-4 border-2 border-white shadow-sm">
                              <div class="flex-1 flex flex-col overflow-hidden">
                                  <span class="font-bold text-gray-800 text-[16px] truncate mb-1">${boundPersona.name} <span class="text-pink-300 mx-1">x</span> ${char.name}</span>
                              </div>
@@ -2906,7 +2919,7 @@ export function renderCoupleApp(store) {
                         <i data-lucide="trash-2" class="w-4 h-4 text-rose-300 hover:text-rose-500 cursor-pointer active:scale-90" onclick="window.cpActions.deleteQuestion('${char.id}', '${q.id}')"></i>
                     </div>
                     <div class="flex items-center space-x-2.5 mb-3">
-                        <img src="${myAvatar}" class="w-7 h-7 rounded-full object-cover border-2 border-white shadow-sm">
+                        <img src="${window.getCachedImageSrc(myAvatar)}" class="w-7 h-7 rounded-full object-cover border-2 border-white shadow-sm">
                         <span class="text-[13px] font-black text-rose-400">我的提问</span>
                         <span class="text-[11px] font-bold text-gray-400 ml-auto mr-5">${new Date(q.timestamp).toLocaleDateString()}</span>
                     </div>
@@ -2915,7 +2928,7 @@ export function renderCoupleApp(store) {
                     <div class="mt-4 pt-4 border-t border-rose-100/60 relative">
                         ${q.answer ? `
                             <div class="flex items-start space-x-2.5">
-                                <img src="${char.avatar}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-white shadow-sm">
+                                <img src="${window.getCachedImageSrc(char.avatar)}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-white shadow-sm">
                                 <span class="text-[14px] text-gray-700 leading-relaxed font-medium">${window.formatTextWithEmoticons ? window.formatTextWithEmoticons(q.answer) : q.answer}</span>
                             </div>
                             <div class="mt-3 flex justify-end space-x-2.5 opacity-80 transition-opacity">
@@ -2932,7 +2945,7 @@ export function renderCoupleApp(store) {
                         <i data-lucide="trash-2" class="w-4 h-4 text-blue-300 hover:text-blue-500 cursor-pointer active:scale-90" onclick="window.cpActions.deleteQuestion('${char.id}', '${q.id}')"></i>
                     </div>
                     <div class="flex items-center space-x-2.5 mb-3">
-                        <img src="${char.avatar}" class="w-7 h-7 rounded-full object-cover border-2 border-white shadow-sm">
+                        <img src="${window.getCachedImageSrc(char.avatar)}" class="w-7 h-7 rounded-full object-cover border-2 border-white shadow-sm">
                         <span class="text-[13px] font-black text-blue-500">${char.name}的提问</span>
                         <span class="text-[11px] font-bold text-gray-400 ml-auto mr-5">${new Date(q.timestamp).toLocaleDateString()}</span>
                     </div>
@@ -2941,7 +2954,7 @@ export function renderCoupleApp(store) {
                     ${q.answer ? `
                         <div class="mt-4 pt-4 border-t border-blue-100/60 relative">
                             <div class="flex items-start space-x-2.5">
-                                <img src="${myAvatar}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-white shadow-sm">
+                                <img src="${window.getCachedImageSrc(myAvatar)}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-white shadow-sm">
                                 <span class="text-[14px] text-gray-700 leading-relaxed font-medium">${q.answer}</span>
                             </div>
                             <div class="mt-2 flex justify-end space-x-2.5 opacity-80 transition-opacity">
@@ -2952,7 +2965,7 @@ export function renderCoupleApp(store) {
                         <div class="mt-3 pt-3 border-t border-blue-100/60 relative">
                             ${q.reaction ? `
                                 <div class="flex items-start space-x-2.5">
-                                    <img src="${char.avatar}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-white shadow-sm">
+                                    <img src="${window.getCachedImageSrc(char.avatar)}" class="w-6 h-6 rounded-full object-cover shrink-0 mt-0.5 border border-white shadow-sm">
                                     <span class="text-[14px] text-gray-700 leading-relaxed font-medium">${q.reaction}</span>
                                 </div>
                                 <div class="mt-2 flex justify-end space-x-2.5 opacity-80 transition-opacity">
@@ -3436,14 +3449,14 @@ export function renderCoupleApp(store) {
                 ` : `
                     <div class="w-full flex items-center justify-between space-x-4">
                         <div class="flex-1 flex flex-col items-center bg-rose-50/50 border border-rose-100 rounded-[16px] p-4 relative shadow-sm">
-                            <img src="${myAvatar}" class="w-8 h-8 rounded-full border-2 border-white absolute -top-4 shadow-sm">
+                            <img src="${window.getCachedImageSrc(myAvatar)}" class="w-8 h-8 rounded-full border-2 border-white absolute -top-4 shadow-sm">
                             <span class="text-[14px] font-bold text-gray-800 mt-2 text-center">${tData.userAns}</span>
                         </div>
                         <div class="flex flex-col items-center justify-center shrink-0">
                             <i data-lucide="heart" class="w-6 h-6 text-pink-400 fill-pink-100 animate-pulse"></i>
                         </div>
                         <div class="flex-1 flex flex-col items-center bg-blue-50/50 border border-blue-100 rounded-[16px] p-4 relative shadow-sm">
-                            <img src="${char.avatar}" class="w-8 h-8 rounded-full border-2 border-white absolute -top-4 shadow-sm">
+                            <img src="${window.getCachedImageSrc(char.avatar)}" class="w-8 h-8 rounded-full border-2 border-white absolute -top-4 shadow-sm">
                             <span class="text-[14px] font-bold text-gray-800 mt-2 text-center">${tData.aiAns}</span>
                         </div>
                     </div>
@@ -3602,7 +3615,7 @@ let preProcessedText = cleanText
         }).join('');
 
         return `
-        <div class="cp-story-container w-full h-full flex flex-col relative font-serif z-[60] animate-in slide-in-from-bottom-4 duration-300" style="background: ${bgUrl ? `url('${bgUrl}') center/cover no-repeat` : '#fcfcfc'} !important;">
+        <div class="cp-story-container w-full h-full flex flex-col relative font-serif z-[60] animate-in slide-in-from-bottom-4 duration-300" style="background: ${bgUrl ? `url('${window.getCachedImageSrc(bgUrl)}') center/cover no-repeat` : '#fcfcfc'} !important;">
             <style>.cp-story-dialogue { color: ${dialogueColor}; } .cp-story-thought { color: ${thoughtColor}; } .cp-story-desc { color: ${descColor}; } ${spaceData.hundredCSS || ''}</style>
             
             ${bgUrl ? `<div class="absolute inset-0 bg-white/50 backdrop-blur-[3px] z-0 pointer-events-none"></div>` : ''}
@@ -3732,9 +3745,9 @@ let preProcessedText = cleanText
             if (m.msgType === 'loading') {
                 return `<div class="flex justify-start my-3 pr-12 w-full"><div class="bg-blue-100/60 text-blue-500 px-4 py-2.5 rounded-[18px] rounded-tl-sm shadow-sm flex items-center space-x-1.5"><i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i><span class="text-[12px] font-bold">TA 正在输入...</span></div></div>`;
             } else if (m.sender === 'me') {
-                return `<div class="flex justify-end my-3 pl-12 w-full"><div class="bg-rose-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tr-sm shadow-sm break-words relative"><img src="${myAvatar}" class="w-6 h-6 rounded-full absolute -right-8 top-0 border border-rose-200">${m.text}</div></div>`;
+                return `<div class="flex justify-end my-3 pl-12 w-full"><div class="bg-rose-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tr-sm shadow-sm break-words relative"><img src="${window.getCachedImageSrc(myAvatar)}" class="w-6 h-6 rounded-full absolute -right-8 top-0 border border-rose-200">${m.text}</div></div>`;
             } else {
-                return `<div class="flex justify-start my-3 pr-12 w-full"><div class="bg-blue-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tl-sm shadow-sm break-words relative"><img src="${char.avatar}" class="w-6 h-6 rounded-full absolute -left-8 top-0 border border-blue-200">${m.text}</div></div>`;
+                return `<div class="flex justify-start my-3 pr-12 w-full"><div class="bg-blue-100 text-gray-800 text-[14px] font-medium px-4 py-2.5 rounded-[18px] rounded-tl-sm shadow-sm break-words relative"><img src="${window.getCachedImageSrc(char.avatar)}" class="w-6 h-6 rounded-full absolute -left-8 top-0 border border-blue-200">${m.text}</div></div>`;
             }
         }).join('');
 
@@ -3811,7 +3824,7 @@ let preProcessedText = cleanText
         }).join('');
 
         return `
-        <div class="cp-story-container w-full h-full flex flex-col relative font-serif z-[60] animate-in slide-in-from-bottom-4 duration-300" style="background: ${bgUrl ? `url('${bgUrl}') center/cover no-repeat` : '#fcfcfc'} !important;">
+        <div class="cp-story-container w-full h-full flex flex-col relative font-serif z-[60] animate-in slide-in-from-bottom-4 duration-300" style="background: ${bgUrl ? `url('${window.getCachedImageSrc(bgUrl)}') center/cover no-repeat` : '#fcfcfc'} !important;">
             ${bgUrl ? `<div class="absolute inset-0 bg-white/50 backdrop-blur-[3px] z-0 pointer-events-none"></div>` : ''}
             <div class="cp-story-topbar bg-white/80 backdrop-blur-md pt-8 pb-3 px-4 flex items-center justify-between z-10 sticky top-0 border-b border-gray-100 shadow-sm">
                  <div class="flex items-center cursor-pointer text-gray-800 active:opacity-50" onclick="window.cpActions.openToD('${char.id}')"><i data-lucide="chevron-down" class="w-7 h-7"></i></div>

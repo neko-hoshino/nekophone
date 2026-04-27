@@ -89,15 +89,25 @@ if (!window.apActions) {
     handleImageUpload: (key, event) => {
       const file = event.target.files[0]; if (!file) return;
       window.actions.compressImage(file, async (base64) => {
+         const fixedKey = `appearance_${key}`;
+         const predicted = window.predictCloudUrl(fixedKey, 'webp');
+         await window.imageCache?.set(predicted, base64);
+         const old = store.appearance[key];
+         store.appearance[key] = predicted;
+         window.render();
          try {
-           window.actions.showToast('上传中…');
-           const url = await window.uploadMediaToCloud(base64, 'webp', `appearance_${key}`);
-           store.appearance[key] = url;
-           window.actions.showToast('图片已极速加载！');
-           window.render();
+           const url = await window.uploadMediaToCloud(base64, 'webp', fixedKey);
+           if (url && typeof url === 'string' && url.startsWith('http')) {
+             store.appearance[key] = url;
+             if (window.DB) window.DB.set(JSON.parse(JSON.stringify(store))).catch(() => {});
+           } else {
+             store.appearance[key] = old; window.render();
+             window.actions.showToast('云端上传失败');
+           }
          } catch (err) {
            console.error('[uploadMediaToCloud] appearance image', err);
-           window.actions.showToast('上传失败，请重试');
+           store.appearance[key] = old; window.render();
+           window.actions.showToast('云端上传失败');
          }
       });
       event.target.value = '';
@@ -116,15 +126,27 @@ if (!window.apActions) {
           canvas.width = w; canvas.height = h;
           canvas.getContext('2d').drawImage(img, 0, 0, w, h);
           const dataUrl = canvas.toDataURL('image/png');
+          const fixedKey = `appearance_${dictKey}_${itemId}`;
+          const predicted = window.predictCloudUrl(fixedKey, 'png');
+          await window.imageCache?.set(predicted, dataUrl);
+          store.appearance[dictKey] = store.appearance[dictKey] || {};
+          const old = store.appearance[dictKey][itemId];
+          store.appearance[dictKey][itemId] = predicted;
+          window.render();
           try {
-            window.actions.showToast('上传中…');
-            const url = await window.uploadMediaToCloud(dataUrl, 'png', `appearance_${dictKey}_${itemId}`);
-            store.appearance[dictKey] = store.appearance[dictKey] || {};
-            store.appearance[dictKey][itemId] = url;
-            window.actions.showToast('组件已极速替换！'); window.render();
+            const url = await window.uploadMediaToCloud(dataUrl, 'png', fixedKey);
+            if (url && typeof url === 'string' && url.startsWith('http')) {
+              store.appearance[dictKey][itemId] = url;
+              if (window.DB) window.DB.set(JSON.parse(JSON.stringify(store))).catch(() => {});
+              window.actions.showToast('组件已极速替换！');
+            } else {
+              store.appearance[dictKey][itemId] = old; window.render();
+              window.actions.showToast('云端上传失败');
+            }
           } catch (err) {
             console.error('[uploadMediaToCloud] appearance item', err);
-            window.actions.showToast('上传失败，请重试');
+            store.appearance[dictKey][itemId] = old; window.render();
+            window.actions.showToast('云端上传失败');
           }
         };
         img.src = e.target.result;
@@ -209,7 +231,7 @@ function renderGallery(dictKey, list) {
       <div class="bg-white rounded-[16px] p-4 flex items-center justify-between shadow-sm border border-gray-100 mb-3">
          <div class="flex items-center flex-1">
             <div class="w-12 h-12 rounded-[12px] bg-gray-50 flex items-center justify-center mr-4 shadow-inner overflow-hidden relative cursor-pointer active:scale-95 transition-transform" onclick="document.getElementById('up-${item.id}').click()">
-               ${imgData ? `<img src="${imgData}" class="w-full h-full object-contain p-1 drop-shadow-sm" />` : `<i data-lucide="${item.icon}" class="w-6 h-6 text-gray-400"></i>`}
+               ${imgData ? `<img src="${window.getCachedImageSrc(imgData)}" class="w-full h-full object-contain p-1 drop-shadow-sm" />` : `<i data-lucide="${item.icon}" class="w-6 h-6 text-gray-400"></i>`}
             </div>
             <div class="flex flex-col">
                <span class="text-[14px] font-bold text-gray-800">${item.name}</span>
